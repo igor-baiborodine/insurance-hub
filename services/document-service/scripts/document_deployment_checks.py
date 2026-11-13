@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import socket
+import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -124,6 +128,57 @@ def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     target = target_record(ROOT, record, environment)
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
+
+
+def image_revision(image: str) -> str:
+    details = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
+    require(len(details) == 1, "local image inspect differs")
+    revision = (
+        details[0].get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
+    )
+    require(
+        bool(re.fullmatch(r"[0-9a-f]{40}", revision)) and revision[:12] == image.rsplit(".", 1)[1],
+        "image source revision differs",
+    )
+    return revision
+
+
+def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str], dict[str, Any]]:
+    revision = image_revision(image)
+    result = subprocess.run(
+        ["git", "archive", "--format=tar", revision, "k8s"],
+        cwd=ROOT,
+        env=safe_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    )
+    require(
+        result.returncode == 0 and 0 < len(result.stdout) <= 32 * 1024 * 1024,
+        "previous source deployment archive differs",
+    )
+    with tempfile.TemporaryDirectory(prefix="document-previous-render-") as directory:
+        with tarfile.open(fileobj=io.BytesIO(result.stdout), mode="r:") as archive:
+            archive.extractall(directory, filter="data")
+        overlay = Path(directory) / f"k8s/overlays/{environment}/svc/document"
+        text = run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
+    require(
+        not any(value in text.lower() for value in FORBIDDEN_TEXT),
+        "previous deployment contains forbidden resources",
+    )
+    items = documents(text)
+    prefix = f"{environment}-document-"
+    require(
+        items
+        and all(
+            item.get("kind") in EXPECTED_KINDS
+            and str(item.get("metadata", {}).get("name", "")).startswith(prefix)
+            for item in items
+        ),
+        "previous deployment inventory differs",
+    )
+    return {(str(item["kind"]), str(item["metadata"]["name"])): item for item in items}
 
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
@@ -579,6 +634,11 @@ class Target:
                 ),
                 "DEPLOY_PREVIOUS_IMAGE_REF is valid only for a direct local rollout",
             )
+        previous = (
+            predecessor_resources(self.environment, previous_image)
+            if previous_image and not require_deployment
+            else {}
+        )
         allowed_images = {desired_image}
         allowed_versions = {
             desired_deployment.get("metadata", {})
@@ -595,6 +655,7 @@ class Target:
             kind = str(desired.get("kind", ""))
             metadata = desired.get("metadata", {})
             name = metadata.get("name", "")
+            reference = previous.get((kind, str(name)), desired)
             actual = self.json("get", kind.lower(), name, "--ignore-not-found")
             if not actual:
                 require(not require_deployment, f"{kind}/{name} is absent")
@@ -608,7 +669,7 @@ class Target:
                 f"live {kind}/{name} identity differs",
             )
             if kind == "ConfigMap":
-                desired_data = desired.get("data", {})
+                desired_data = reference.get("data", {})
                 actual_data = actual.get("data", {})
                 require(
                     {key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"}
@@ -622,7 +683,7 @@ class Target:
                 )
             elif kind == "Service":
                 actual_spec = actual.get("spec", {})
-                desired_spec = desired.get("spec", {})
+                desired_spec = reference.get("spec", {})
                 require(
                     actual_spec.get("type") == "ClusterIP"
                     and actual_spec.get("selector") == desired_spec.get("selector")
@@ -636,12 +697,12 @@ class Target:
             elif kind == "NetworkPolicy":
                 require(
                     normalized_policy_spec(actual.get("spec"))
-                    == normalized_policy_spec(desired.get("spec")),
+                    == normalized_policy_spec(reference.get("spec")),
                     f"live NetworkPolicy/{name} differs",
                 )
             else:
                 require(kind == "Deployment", f"unsupported live resource kind: {kind}")
-                desired_spec = desired.get("spec", {})
+                desired_spec = reference.get("spec", {})
                 actual_spec = actual.get("spec", {})
                 desired_template = desired_spec.get("template", {})
                 actual_template = actual_spec.get("template", {})
@@ -790,15 +851,7 @@ def secret_and_image(target: Target, image: str) -> None:
         ),
         "local image tag differs",
     )
-    details = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
-    require(len(details) == 1, "local image inspect differs")
-    revision = (
-        details[0].get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
-    )
-    require(
-        bool(re.fullmatch(r"[0-9a-f]{40}", revision)) and revision[:12] == image.rsplit(".", 1)[1],
-        "image source revision differs",
-    )
+    image_revision(image)
 
 
 def record_snapshot(stage: str, value: dict[str, Any]) -> None:

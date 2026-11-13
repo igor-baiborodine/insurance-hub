@@ -17,7 +17,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -65,6 +65,7 @@ POLICY = {
 }
 POLICY_NAME = "document-reader"
 USER = "document-reader"
+MIGRATOR_CA_MOUNT = "/etc/document-admin/migrator/ca.crt"
 
 
 class ResourceError(Exception):
@@ -83,6 +84,104 @@ def protected_file(path: Path) -> bytes:
     )
     require(path.stat().st_size <= 65536, "protected input is too large")
     return path.read_bytes()
+
+
+@contextmanager
+def local_migration_url(source: Path, ca: Path, port: int):
+    """Rebase only the protected operator copy's CA and loopback tunnel."""
+    try:
+        value = protected_file(source).decode().strip()
+        parsed = urlsplit(value)
+        query = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ResourceError("invalid protected migrator credential") from error
+    require(
+        query == [("sslmode", "verify-full"), ("sslrootcert", MIGRATOR_CA_MOUNT)],
+        "migrator credential trust path differs from the canonical Secret mount",
+    )
+    rebased = urlunsplit(
+        parsed._replace(
+            query=urlencode(
+                [
+                    ("sslmode", "verify-full"),
+                    ("sslrootcert", str(ca)),
+                    ("hostaddr", "127.0.0.1"),
+                    ("port", str(port)),
+                ],
+            )
+        )
+    )
+    with tempfile.TemporaryDirectory(prefix="document-migration-") as directory:
+        path = Path(directory) / "database-url"
+        path.write_text(rebased)
+        path.chmod(0o600)
+        yield path
+
+
+@contextmanager
+def migration_database_forward(commands: Commands, target_path: Path):
+    target = json.loads(protected_file(target_path))
+    require(
+        target.get("environment") in ENVIRONMENTS
+        and target.get("context") == ENVIRONMENTS[target["environment"]][0]
+        and target.get("dataNamespace") == ENVIRONMENTS[target["environment"]][1]
+        and target.get("cluster") == f"{target['environment']}-postgres-document",
+        "migration target differs from the enrolled platform coordinates",
+    )
+    cluster = json.loads(
+        commands.run(
+            [
+                os.environ.get("KUBECTL", "kubectl"),
+                f"--context={target['context']}",
+                "--request-timeout=15s",
+                "-n",
+                target["dataNamespace"],
+                "get",
+                "cluster.postgresql.cnpg.io",
+                target["cluster"],
+                "-o",
+                "json",
+            ]
+        )
+    )
+    primary = cluster.get("status", {}).get("currentPrimary", "")
+    require(
+        cluster.get("metadata", {}).get("uid") == target.get("clusterUID")
+        and primary
+        and cluster.get("status", {}).get("readyInstances", 0) > 0,
+        "migration database identity/readiness mismatch",
+    )
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    process = subprocess.Popen(
+        [
+            os.environ.get("KUBECTL", "kubectl"),
+            f"--context={target['context']}",
+            "-n",
+            target["dataNamespace"],
+            "port-forward",
+            f"pod/{primary}",
+            f"{port}:5432",
+            "--address=127.0.0.1",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        for _ in range(40):
+            require(process.poll() is None, "migration database forward ended early")
+            with socket.socket() as check:
+                check.settimeout(0.1)
+                if check.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            time.sleep(0.1)
+        else:
+            raise ResourceError("migration database forward did not become ready")
+        yield port
+    finally:
+        require(terminate_process_group(process, 5), "migration database forward cleanup failed")
 
 
 class Commands:
@@ -915,18 +1014,23 @@ def migration(commands: Commands) -> None:
     }
     for path in paths.values():
         protected_file(path)
-    args = [
-        str(binary),
-        "--operation",
-        operation,
-        "--environment",
-        env,
-        "--context",
-        os.environ.get("DOCUMENT_RESOURCE_CONTEXT", ""),
-    ]
-    for flag, path in paths.items():
-        args += [f"--{flag}", str(path)]
-    print(commands.run(args, timeout_cap=180))
+    with (
+        migration_database_forward(commands, paths["target-file"]) as port,
+        local_migration_url(paths["database-url-file"], paths["ca-file"], port) as url,
+    ):
+        args = [
+            str(binary),
+            "--operation",
+            operation,
+            "--environment",
+            env,
+            "--context",
+            os.environ.get("DOCUMENT_RESOURCE_CONTEXT", ""),
+        ]
+        effective_paths = {**paths, "database-url-file": url}
+        for flag, path in effective_paths.items():
+            args += [f"--{flag}", str(path)]
+        print(commands.run(args, timeout_cap=180))
 
 
 def main(argv: list[str] | None = None) -> int:

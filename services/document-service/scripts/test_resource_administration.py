@@ -58,6 +58,49 @@ def test_protected_file_rejects_public_secret(tmp_path):
         resources.protected_file(path)
 
 
+def test_local_migration_url_rebases_only_canonical_ca_mount(tmp_path):
+    # given
+    source = tmp_path / "database-url"
+    ca = tmp_path / "ca.crt"
+    source.write_text(
+        "postgresql://go_document_migrator:synthetic@document/document"
+        "?sslmode=verify-full&sslrootcert=/etc/document-admin/migrator/ca.crt"
+    )
+    ca.write_text("synthetic-ca")
+    source.chmod(0o600)
+    ca.chmod(0o600)
+    # when
+    with resources.local_migration_url(source, ca, 15432) as rebased:
+        value = rebased.read_text()
+        mode = rebased.stat().st_mode & 0o777
+        temporary = rebased
+    # then
+    assert value.startswith("postgresql://go_document_migrator:synthetic@document/document?")
+    assert "sslmode=verify-full" in value
+    assert f"sslrootcert={str(ca).replace('/', '%2F')}" in value
+    assert "hostaddr=127.0.0.1" in value
+    assert "port=15432" in value
+    assert mode == 0o600
+    assert not temporary.exists()
+
+
+def test_local_migration_url_rejects_noncanonical_secret_ca_mount(tmp_path):
+    # given
+    source = tmp_path / "database-url"
+    ca = tmp_path / "ca.crt"
+    source.write_text(
+        "postgresql://go_document_migrator:synthetic@document/document"
+        "?sslmode=verify-full&sslrootcert=/unexpected/ca.crt"
+    )
+    source.chmod(0o600)
+    ca.write_text("synthetic-ca")
+    ca.chmod(0o600)
+    # when / then
+    with pytest.raises(resources.ResourceError, match="canonical Secret mount"):
+        with resources.local_migration_url(source, ca, 15432):
+            raise AssertionError("noncanonical credential was accepted")
+
+
 def test_minio_foreign_policy_rejected_before_writes(tmp_path):
     # given
     tmp_path.chmod(0o700)

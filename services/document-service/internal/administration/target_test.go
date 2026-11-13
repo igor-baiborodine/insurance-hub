@@ -31,12 +31,23 @@ func TestTarget_RejectsUnprotectedConnections(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	tunnelURL := url + "&hostaddr=127.0.0.1&port=15432"
+	if err := target.ValidateMigrationConnection(
+		"qa",
+		target.Context,
+		tunnelURL,
+		"/test/ca.crt",
+	); err != nil {
+		t.Fatalf("operator tunnel rejected: %v", err)
+	}
 	for name, value := range map[string]string{
 		"wrong owner login": strings.Replace(url, "go_document_migrator", "document", 1),
 		"no verification":   strings.Replace(url, "verify-full", "require", 1),
 		"foreign database":  strings.Replace(url, "/document?", "/product?", 1),
 		"unexpected option": url + "&options=-crole=postgres",
 		"foreign host":      strings.Replace(url, target.Host, "other", 1),
+		"foreign tunnel":    url + "&hostaddr=192.0.2.1&port=15432",
+		"privileged tunnel": url + "&hostaddr=127.0.0.1&port=543",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := target.ValidateMigrationConnection(
