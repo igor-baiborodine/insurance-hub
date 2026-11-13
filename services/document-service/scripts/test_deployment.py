@@ -244,7 +244,8 @@ def test_live_state_rejects_invalid_predecessor(previous_image: str) -> None:
         target.live(items, require_deployment=False)
 
 
-def test_untrusted_access_probe_requires_network_timeout_and_cleans_up() -> None:
+@pytest.mark.parametrize("exit_code", [7, 28])
+def test_untrusted_access_probe_accepts_network_denial_and_cleans_up(exit_code: int) -> None:
     target = Mock()
     target.management = "local-dev-document-api-management"
     target.json.side_effect = [
@@ -252,7 +253,7 @@ def test_untrusted_access_probe_requires_network_timeout_and_cleans_up() -> None
         {
             "status": {
                 "containerStatuses": [
-                    {"state": {"terminated": {"exitCode": 28}}},
+                    {"state": {"terminated": {"exitCode": exit_code}}},
                 ]
             }
         },
@@ -270,6 +271,24 @@ def test_untrusted_access_probe_requires_network_timeout_and_cleans_up() -> None
         "--timeout=30s",
     )
     assert target.kubectl.call_args_list[-1].kwargs == {"timeout": 40}
+
+
+def test_untrusted_access_probe_rejects_unrelated_failure_and_cleans_up() -> None:
+    target = Mock()
+    target.management = "local-dev-document-api-management"
+    target.json.side_effect = [
+        {},
+        {"status": {"containerStatuses": [{"state": {"terminated": {"exitCode": 6}}}]}},
+    ]
+
+    with pytest.raises(checks.DeploymentError, match="other than denied network access"):
+        checks.verify_untrusted_access_denied(target)
+
+    assert target.kubectl.call_args_list[-1].args[:3] == (
+        "delete",
+        "pod",
+        "document-untrusted-probe",
+    )
 
 
 def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
