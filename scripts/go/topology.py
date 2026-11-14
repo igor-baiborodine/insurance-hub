@@ -628,6 +628,10 @@ def main_coverage_check(root: Path) -> None:
         require_literal(text, workflow, literal, description)
     require("  pull_request:" not in text, f"workflow {workflow} must not run on pull_request")
     require(
+        not re.search(r"^\s+-\s+if:\s+matrix\.module\s*==", text, re.MULTILINE),
+        f"workflow {workflow} must delegate module-specific setup to each module owner",
+    )
+    require(
         event_paths(text, "push") == set(MAIN_COVERAGE_PATHS),
         f"workflow {workflow} must use exact Go coverage path filters",
     )
@@ -794,6 +798,12 @@ def ci_check(root: Path, inventory: dict[str, Any]) -> None:
             text.index("scripts/go/patch_coverage.py")
             < text.index("uses: codecov/codecov-action@v7"),
             f"workflow {workflow} must enforce patch coverage before asynchronous upload",
+        )
+        require(
+            not re.search(
+                r"^\s+-\s+if:\s+steps\.select\.outputs\.module_dir\s*==", text, re.MULTILINE
+            ),
+            f"workflow {workflow} must delegate module-specific setup to the selected module owner",
         )
         triggers = pull_request_paths(text)
         for module in (item for item in inventory["modules"] if item["ciWorkflow"] == workflow):
