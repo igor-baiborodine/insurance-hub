@@ -38,11 +38,15 @@ JSREPORT_IMAGE = os.environ.get(
     "JSREPORT_IMAGE",
     "jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6",
 )
+KAFKA_IMAGE = os.environ.get(
+    "KAFKA_IMAGE",
+    "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f",
+)
 
 
-def run(args, text=None, *, failure=False, environment=None):
+def run(args, text=None, *, failure=False, environment=None, timeout=30):
     result = subprocess.run(
-        args, input=text, capture_output=True, text=True, timeout=30, env=environment
+        args, input=text, capture_output=True, text=True, timeout=timeout, env=environment
     )
     if failure:
         assert result.returncode != 0, "forbidden action succeeded"
@@ -83,8 +87,8 @@ def container(image, args, mounts=(), environment=None, *, auto_remove=True):
         )
 
 
-def wait_for(probe):
-    deadline = time.monotonic() + 20
+def wait_for(probe, timeout=20):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             if probe():
@@ -105,6 +109,218 @@ def loopback_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return listener.getsockname()[1]
+
+
+def create_kafka_certificates(root):
+    password = private(root / "openssl-password", "changeit\n")
+    private(root / "key-password", "changeit\n")
+    private(root / "keystore-password", "changeit\n")
+    extensions = root / "server.ext"
+    extensions.write_text(
+        "subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n"
+    )
+    commands = (
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=document-disposable-ca",
+            "-keyout",
+            str(root / "ca.key"),
+            "-out",
+            str(root / "ca.crt"),
+        ],
+        [
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-keyout",
+            str(root / "server.key"),
+            "-out",
+            str(root / "server.csr"),
+        ],
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(root / "server.csr"),
+            "-CA",
+            str(root / "ca.crt"),
+            "-CAkey",
+            str(root / "ca.key"),
+            "-CAcreateserial",
+            "-extfile",
+            str(extensions),
+            "-out",
+            str(root / "server.crt"),
+        ],
+        [
+            "openssl",
+            "pkcs12",
+            "-export",
+            "-name",
+            "kafka",
+            "-in",
+            str(root / "server.crt"),
+            "-inkey",
+            str(root / "server.key"),
+            "-certfile",
+            str(root / "ca.crt"),
+            "-passout",
+            f"file:{password}",
+            "-out",
+            str(root / "server.p12"),
+        ],
+    )
+    for command in commands:
+        run(command)
+    for name in ("ca.key", "server.key", "server.p12"):
+        (root / name).chmod(0o600)
+    return root / "ca.crt"
+
+
+@contextmanager
+def kafka_server(root):
+    ca = create_kafka_certificates(root)
+    port = loopback_port()
+    suffix = uuid.uuid4().hex[:12]
+    volume = f"document-event-kafka-secrets-{suffix}"
+    initializer = f"document-event-kafka-init-{suffix}"
+    run(
+        [
+            DOCKER,
+            "volume",
+            "create",
+            "--label",
+            "insurance-hub.fixture=document-event",
+            volume,
+        ]
+    )
+    try:
+        run(
+            [
+                DOCKER,
+                "create",
+                "--name",
+                initializer,
+                "--user",
+                "root",
+                "--network",
+                "none",
+                "--read-only",
+                "--volume",
+                f"{root}:/source:ro",
+                "--volume",
+                f"{volume}:/target",
+                "--entrypoint",
+                "/bin/sh",
+                KAFKA_IMAGE,
+                "-ec",
+                "cp /source/server.p12 /source/key-password /source/keystore-password /target/; "
+                "chown -R appuser:appuser /target; chmod 0700 /target; chmod 0600 /target/*",
+            ],
+            timeout=180,
+        )
+        run([DOCKER, "start", "--attach", initializer], timeout=60)
+        mounts = [
+            "-p",
+            f"127.0.0.1:{port}:9092",
+            "--volume",
+            f"{volume}:/etc/kafka/secrets:ro",
+        ]
+        kafka_environment = {
+            "CLUSTER_ID": "MkU3OEVBNTcwNTJENDM2Qk",
+            "KAFKA_NODE_ID": "1",
+            "KAFKA_PROCESS_ROLES": "broker,controller",
+            "KAFKA_LISTENERS": "SSL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094",
+            "KAFKA_ADVERTISED_LISTENERS": f"SSL://127.0.0.1:{port},INTERNAL://127.0.0.1:9094",
+            "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": "SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT",
+            "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER",
+            "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@127.0.0.1:9093",
+            "KAFKA_INTER_BROKER_LISTENER_NAME": "INTERNAL",
+            "KAFKA_SSL_KEYSTORE_FILENAME": "server.p12",
+            "KAFKA_SSL_KEYSTORE_TYPE": "PKCS12",
+            "KAFKA_SSL_KEYSTORE_CREDENTIALS": "keystore-password",
+            "KAFKA_SSL_KEY_CREDENTIALS": "key-password",
+            "KAFKA_SSL_CLIENT_AUTH": "none",
+            "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+            "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+            "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+            "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+        }
+        for name, value in kafka_environment.items():
+            mounts.extend(("--env", f"{name}={value}"))
+        with container(KAFKA_IMAGE, [], mounts) as name:
+            wait_for(
+                lambda: (
+                    subprocess.run(
+                        [
+                            DOCKER,
+                            "exec",
+                            name,
+                            "/opt/kafka/bin/kafka-topics.sh",
+                            "--bootstrap-server",
+                            "127.0.0.1:9094",
+                            "--list",
+                        ],
+                        capture_output=True,
+                        timeout=10,
+                    ).returncode
+                    == 0
+                ),
+                timeout=120,
+            )
+            yield port, ca
+    finally:
+        subprocess.run(
+            [DOCKER, "rm", "-f", initializer], capture_output=True, text=True, timeout=30
+        )
+        removed = subprocess.run(
+            [DOCKER, "volume", "rm", "-f", volume],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert removed.returncode == 0, "Kafka fixture volume cleanup failed"
+
+
+def test_event_worker_traverses_owned_kafka(tmp_path):
+    binary = Path(os.environ["EVENT_TEST_OUTPUT"])
+    assert binary.is_file(), "build the event integration test before integration"
+    with kafka_server(tmp_path) as (port, ca):
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_TEST_KAFKA_BROKERS": f"127.0.0.1:{port}",
+                "DOCUMENT_TEST_KAFKA_TOPIC": "policy-registered",
+                "DOCUMENT_TEST_KAFKA_GROUP": "document-c03-disposable-issue-363",
+                "DOCUMENT_TEST_KAFKA_CA_FILE": str(ca),
+            }
+        )
+        output = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestEventWorkerIntegration_",
+            ],
+            environment=environment,
+            timeout=120,
+        )
+        assert "--- PASS: TestEventWorkerIntegration_" in output
 
 
 class ContainerizedMinioCommands(resources.Commands):

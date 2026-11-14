@@ -59,6 +59,8 @@ GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 MINIO_GO_VERSION := v7.4.1
+FRANZ_GO_VERSION := v1.22.2
+KMSG_VERSION := v1.15.0
 BUILD_EXECUTABLES := server migrate
 MIGRATOR_OUTPUT ?= $(CURDIR)/.tools/document-migrate
 SERVER_OUTPUT ?= $(CURDIR)/.tools/document-server
@@ -67,7 +69,9 @@ POSTGRES_IMAGE ?= postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d1274529
 MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
 MINIO_CLIENT_IMAGE ?= cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4
 JSREPORT_IMAGE ?= jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6
+KAFKA_IMAGE ?= apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
 GENERATION_TEST_OUTPUT ?= $(CURDIR)/.tools/document-generation-integration.test
+EVENT_TEST_OUTPUT ?= $(CURDIR)/.tools/document-event-integration.test
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen
 INTEGRATION_COVERAGE_FILE ?=
@@ -192,6 +196,8 @@ update-deps:
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
 		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
 		github.com/minio/minio-go/v7@$(MINIO_GO_VERSION) \
+		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
+		github.com/twmb/franz-go/pkg/kmsg@$(KMSG_VERSION) \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
@@ -233,7 +239,7 @@ check-candidate-servicekit:
 
 check: check-go-pr
 
-test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test ## Exercise real lookup and generation with disposable dependencies
+test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test build-event-integration-test ## Exercise real lookup, generation and event handling with disposable dependencies
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
@@ -242,10 +248,11 @@ test-integration: python-toolchain-check build-migrator build-integration-server
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
 		MINIO_CLIENT_IMAGE="$(MINIO_CLIENT_IMAGE)" \
-		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" \
+		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
+		GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" EVENT_TEST_OUTPUT="$(EVENT_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py \
-		-k 'lookup_traverses_real_rpc_postgres_and_minio or generation_traverses_real_dependencies'
+		-k 'lookup_traverses_real_rpc_postgres_and_minio or generation_traverses_real_dependencies or event_worker_traverses_owned_kafka'
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
@@ -306,12 +313,13 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make run              Start the service with environment configuration' \
 		'  make build-migrator   Build the separate schema administrator' \
 		'  make build-generation-integration-test Build the disposable generation smoke' \
+		'  make build-event-integration-test Build the disposable Kafka worker smoke' \
 		'  make migration        Run explicit migrate/status/version with protected inputs' \
 		'  make resource-inspect Inspect the explicitly selected Document dependencies' \
 		'  make resource-ensure  Guarded role/credential/read-resource setup' \
 		'  make resource-verify  Verify schema, workload reads and denied permissions'
 
-.PHONY: build-migrator build-integration-server build-generation-integration-test migration resource-inspect resource-ensure resource-verify \
+.PHONY: build-migrator build-integration-server build-generation-integration-test build-event-integration-test migration resource-inspect resource-ensure resource-verify \
 	resource-test-fast resource-test-integration check-migration-schema
 
 build-migrator: ## Build explicit administrative executable outside the API image
@@ -327,6 +335,11 @@ build-generation-integration-test: ## Build the owned generation smoke outside t
 	GOWORK=off $(GO) test -mod=readonly -tags=integration -c \
 		-o "$(GENERATION_TEST_OUTPUT)" ./internal/application
 
+build-event-integration-test: ## Build the owned Kafka worker smoke outside the API image
+	@test -n "$(strip $(EVENT_TEST_OUTPUT))" || { echo 'EVENT_TEST_OUTPUT is required' >&2; exit 1; }
+	GOWORK=off $(GO) test -mod=readonly -tags=integration -c \
+		-o "$(EVENT_TEST_OUTPUT)" ./internal/kafka
+
 migration: python-runtime-check ## Run migrate/status/version with explicit protected inputs
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" scripts/resource_administration.py migration
@@ -339,10 +352,11 @@ resource-test-fast: python-toolchain-check ## Exercise Document administration g
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q -m 'not integration and not acceptance' scripts/test_resource_administration.py
 
-resource-test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test ## Disposable dependency administration, lookup and generation smoke
+resource-test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test build-event-integration-test ## Disposable dependency administration, lookup, generation and event smoke
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
-		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" \
+		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
+		GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" EVENT_TEST_OUTPUT="$(EVENT_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py $(RESOURCE_TEST_ARGS)
 

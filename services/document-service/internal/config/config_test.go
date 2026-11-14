@@ -497,6 +497,111 @@ func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 	}
 }
 
+func TestLoad_EventWorkersDisabledRejectsGenerationSettings(t *testing.T) {
+	for _, setting := range []string{
+		EnvKafkaBrokers,
+		EnvKafkaGroup,
+		EnvKafkaRegisteredTopic,
+		EnvKafkaCAFile,
+		EnvJSReportURL,
+		EnvWriterDatabaseURL,
+		EnvWriterObjectAccessKey,
+		EnvWriterObjectSecretKey,
+	} {
+		t.Run(setting, func(t *testing.T) {
+			// given
+			lookup := mapLookup(map[string]string{setting: "private-marker"})
+
+			// when
+			_, err := load(lookup)
+
+			// then
+			name, reason := kitconfig.ErrorDetails(err)
+			if name != setting ||
+				reason != "must be unset when event processing is disabled" {
+				t.Fatalf("disabled event setting error = (%q, %q)", name, reason)
+			}
+			if strings.Contains(err.Error(), "private-marker") {
+				t.Fatalf("disabled event error exposed value: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_EventWorkersUseDocumentOwnedCoordinatesAndWriterCredentials(t *testing.T) {
+	// given
+	values := validEventSettings()
+
+	// when
+	got, err := load(mapLookup(values))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
+		got.Events.Brokers[0] != "kafka-a.example:9093" ||
+		got.Events.Brokers[1] != "kafka-b.example:9093" ||
+		got.Events.Group != "document-service" ||
+		got.Events.RegisteredTopic != "policy-registered" ||
+		got.Events.JSReportOrigin.String() !=
+			"http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488" {
+		t.Fatalf("event coordinates = %+v", got.Events)
+	}
+	if got.Events.WriterDatabase.URL.Value() != values[EnvWriterDatabaseURL] ||
+		got.Events.WriterObjectStore.AccessKey.Value() != values[EnvWriterObjectAccessKey] ||
+		got.Events.WriterObjectStore.SecretKey.Value() != values[EnvWriterObjectSecretKey] ||
+		got.Events.RendererConnectTimeout != 2*time.Second ||
+		got.Events.RendererRequestTimeout != 8*time.Second ||
+		got.Events.UploadTimeout != 8*time.Second {
+		t.Fatalf("event writer settings = %+v", got.Events)
+	}
+}
+
+func TestLoad_EventWorkersRejectInvalidCoordinatesWithoutEchoingValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		setting string
+		value   string
+	}{
+		{"invalid brokers", EnvKafkaBrokers, "private-marker"},
+		{"foreign group", EnvKafkaGroup, "private-marker"},
+		{"foreign topic", EnvKafkaRegisteredTopic, "private-marker"},
+		{"renderer HTTPS", EnvJSReportURL, "https://private-marker:5488"},
+		{"renderer path", EnvJSReportURL, "http://private-marker:5488/private"},
+		{"renderer port", EnvJSReportURL, "http://private-marker:5489"},
+		{"writer database", EnvWriterDatabaseURL, "private-marker"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			values := validEventSettings()
+			values[test.setting] = test.value
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting ||
+				strings.Contains(err.Error(), "private-marker") {
+				t.Fatalf("unsafe event setting rejection = (%q, %v)", setting, err)
+			}
+		})
+	}
+}
+
+func validEventSettings() map[string]string {
+	return map[string]string{
+		EnvEventWorkersEnabled:   "true",
+		EnvKafkaBrokers:          "kafka-a.example:9093, kafka-b.example:9093",
+		EnvKafkaCAFile:           "/var/run/document/kafka/ca.crt",
+		EnvJSReportURL:           "http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488",
+		EnvWriterDatabaseURL:     "postgres://writer:synthetic@127.0.0.1:5432/document?sslmode=disable",
+		EnvWriterObjectAccessKey: "synthetic-writer",
+		EnvWriterObjectSecretKey: "synthetic-writer-secret",
+	}
+}
+
 func mapLookup(values map[string]string) lookupEnv {
 	merged := map[string]string{
 		databaseURLSetting:     "postgres://reader:synthetic@127.0.0.1:5432/document?sslmode=disable",
