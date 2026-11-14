@@ -317,12 +317,15 @@ def test_event_worker_traverses_owned_kafka(tmp_path):
                 str(binary),
                 "-test.v",
                 "-test.run",
-                "^TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord$",
+                "^TestEventWorkerIntegration_ResumesAfterMalformedRecordWithoutReplay$",
             ],
             environment=environment,
             timeout=120,
         )
-        assert "--- PASS: TestEventWorkerIntegration_" in output
+        assert (
+            "--- PASS: TestEventWorkerIntegration_ResumesAfterMalformedRecordWithoutReplay"
+            in output
+        )
 
 
 class ContainerizedMinioCommands(resources.Commands):
