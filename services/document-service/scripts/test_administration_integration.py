@@ -42,6 +42,7 @@ KAFKA_IMAGE = os.environ.get(
     "KAFKA_IMAGE",
     "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f",
 )
+CONTAINER_START_TIMEOUT = 180
 
 
 def run(args, text=None, *, failure=False, environment=None, timeout=30):
@@ -75,6 +76,7 @@ def container(image, args, mounts=(), environment=None, *, auto_remove=True):
                 *args,
             ],
             environment=environment,
+            timeout=CONTAINER_START_TIMEOUT,
         )
         yield name
     finally:
