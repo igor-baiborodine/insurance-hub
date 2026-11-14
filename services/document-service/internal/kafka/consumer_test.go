@@ -221,6 +221,32 @@ func TestWorker_HandlerFailureWithdrawsReadinessUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestWorker_HandlerFailureStopsFetchedBatch(t *testing.T) {
+	// A real poll is capped at one record; this defensive case preserves the established
+	// Policy Search and Dashboard rule if a client ever returns a larger batch.
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &fakeClient{polls: []pollResult{{records: []*kgo.Record{
+		{Key: []byte("SYN-363"), Value: []byte(validRegistration)},
+		{Key: []byte("SYN-363"), Value: []byte(validRegistration)},
+	}}}}
+	calls := 0
+	worker := newWorker(client, &fakeGenerator{execute: func(
+		context.Context,
+		domain.PolicyRegistration,
+	) (application.GenerationResult, error) {
+		calls++
+		cancel()
+		return application.GenerationResult{}, errors.New("private dependency failure")
+	}}, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+
+	if err := worker.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("failed fetched batch handler calls = %d, want 1", calls)
+	}
+}
+
 func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
 	t.Run("Kafka unavailable", func(t *testing.T) {
 		client := &fakeClient{pingErr: errors.New("private broker failure")}

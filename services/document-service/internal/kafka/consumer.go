@@ -329,7 +329,7 @@ func (worker *Worker) Run(ctx context.Context) error {
 					recordCtx,
 					"policy document generation failed",
 				)
-				continue
+				break
 			}
 			worker.failed.Store(false)
 			finish(recordCtx, "success", nil)
