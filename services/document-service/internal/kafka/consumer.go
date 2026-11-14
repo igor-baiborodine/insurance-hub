@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -392,9 +393,10 @@ type policy struct {
 }
 
 func decode(key, value []byte) (domain.PolicyRegistration, error) {
-	if len(key) == 0 || len(key)+len(value) > maximumRecordBytes {
+	if len(key) == 0 || len(key)+len(value) > maximumRecordBytes ||
+		!utf8.Valid(key) || !utf8.Valid(value) {
 		return domain.PolicyRegistration{}, errors.New(
-			"decode policy registration: invalid size",
+			"decode policy registration: invalid size or encoding",
 		)
 	}
 	var input envelope

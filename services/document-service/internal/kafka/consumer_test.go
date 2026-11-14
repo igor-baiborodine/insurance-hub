@@ -69,6 +69,16 @@ func TestDecode_RejectsInvalidRecords(t *testing.T) {
 		{"missing key", nil, []byte(validRegistration)},
 		{"mismatched key", []byte("OTHER"), []byte(validRegistration)},
 		{"malformed envelope", []byte("SYN-363"), []byte(`{"policy":`)},
+		{
+			"invalid UTF-8 text",
+			[]byte("SYN-363"),
+			bytes.Replace(
+				[]byte(validRegistration),
+				[]byte("Synthetic Holder"),
+				[]byte{'S', 0xff},
+				1,
+			),
+		},
 		{"missing policy", []byte("SYN-363"), []byte(`{}`)},
 		{
 			"missing holder",
