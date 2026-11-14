@@ -537,6 +537,23 @@ def test_ci_coverage_rejects_contract_drift(
         topology.ci_check(tmp_path, loaded)
 
 
+def test_ci_coverage_rejects_module_specific_setup(tmp_path: Path) -> None:
+    # given
+    value = selector_inventory()
+    setup = """      - if: steps.select.outputs.module_dir == 'services/example-service'
+        run: sudo apt-get install example-tool
+"""
+    text = workflow_text().replace(
+        "      - uses: actions/cache@v5\n", setup + "      - uses: actions/cache@v5\n"
+    )
+    write_workflow(tmp_path, text)
+    loaded = topology.load_inventory(write_inventory(tmp_path, value))
+
+    # when / then
+    with pytest.raises(topology.TopologyError, match="delegate module-specific setup"):
+        topology.ci_check(tmp_path, loaded)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "mismatched_output"),
     [
@@ -669,6 +686,23 @@ def test_main_coverage_contract_rejects_workflow_drift(
     write_main_coverage_contract(tmp_path, workflow=workflow.replace(old, new, 1))
 
     with pytest.raises(topology.TopologyError, match=message):
+        topology.main_coverage_check(tmp_path)
+
+
+def test_main_coverage_contract_rejects_module_specific_setup(tmp_path: Path) -> None:
+    # given
+    workflow = (REPOSITORY_ROOT / topology.MAIN_COVERAGE_WORKFLOW).read_text(encoding="utf-8")
+    setup = """      - if: matrix.module == 'services/example-service'
+        run: sudo apt-get install example-tool
+"""
+    workflow = workflow.replace(
+        "      - name: Bootstrap shared coverage tools\n",
+        setup + "      - name: Bootstrap shared coverage tools\n",
+    )
+    write_main_coverage_contract(tmp_path, workflow=workflow)
+
+    # when / then
+    with pytest.raises(topology.TopologyError, match="delegate module-specific setup"):
         topology.main_coverage_check(tmp_path)
 
 

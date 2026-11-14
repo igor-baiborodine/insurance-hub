@@ -12,9 +12,11 @@ PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/document_deployment_checks.py scripts/deployment.py \
 	scripts/disposable_deployment.py scripts/test_deployment.py \
 	scripts/test_disposable_deployment.py scripts/test_tooling.py scripts/resource_administration.py \
-	scripts/test_resource_administration.py scripts/test_administration_integration.py)
+	scripts/test_resource_administration.py scripts/test_administration_integration.py \
+	scripts/test_pdf_extraction.py)
 PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py \
-	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_resource_administration.py)
+	scripts/test_deployment.py scripts/test_disposable_deployment.py scripts/test_resource_administration.py \
+	scripts/test_pdf_extraction.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -70,6 +72,7 @@ MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3f
 MINIO_CLIENT_IMAGE ?= cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4
 JSREPORT_IMAGE ?= jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6
 KAFKA_IMAGE ?= apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
+PDF_TEXT_IMAGE ?= ghcr.io/randomcontainers/poppler:26.11.0-alpine3.24@sha256:e1c8434466222f6ace15f91b892bc41a0d4ac102e9147eb38e44ff76f1a6ea5a
 GENERATION_TEST_OUTPUT ?= $(CURDIR)/.tools/document-generation-integration.test
 EVENT_TEST_OUTPUT ?= $(CURDIR)/.tools/document-event-integration.test
 TEST_PACKAGES ?= ./...
@@ -249,6 +252,7 @@ test-integration: python-toolchain-check build-migrator build-integration-server
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
 		MINIO_CLIENT_IMAGE="$(MINIO_CLIENT_IMAGE)" \
 		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
+		PDF_TEXT_IMAGE="$(PDF_TEXT_IMAGE)" \
 		GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" EVENT_TEST_OUTPUT="$(EVENT_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py \
@@ -356,6 +360,7 @@ resource-test-integration: python-toolchain-check build-migrator build-integrati
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
 		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" KAFKA_IMAGE="$(KAFKA_IMAGE)" \
+		PDF_TEXT_IMAGE="$(PDF_TEXT_IMAGE)" \
 		GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" EVENT_TEST_OUTPUT="$(EVENT_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py $(RESOURCE_TEST_ARGS)

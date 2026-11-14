@@ -131,7 +131,8 @@
         "managed CPython 3.14.8",
         "pinned Document Go tools installed by make -C services/document-service bootstrap-go-tools",
         "GCC for race-enabled tests",
-        "Docker Engine with Buildx access for runtime image checks",
+        "Docker Engine with daemon and Buildx access for disposable integration and runtime image checks",
+        "pinned Poppler PDF-text image digest available locally or from GHCR",
         "public module, schema, tool, vulnerability and container services unless cached"
       ],
       "consumers": [
