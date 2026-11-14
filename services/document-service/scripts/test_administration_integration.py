@@ -1240,14 +1240,12 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
                 ("rm", "document/policies/2026/02/SYN-363.pdf"),
                 ("admin", "user", "list", "document"),
             ):
-                result = subprocess.run(
-                    ["mc", "--json", "--config-dir", str(writer.config.parent), *args],
-                    text=True,
-                    capture_output=True,
-                    timeout=10,
-                )
-                assert result.returncode != 0
-                assert resources.authorization_denied(result.stdout), result.stdout
+                try:
+                    writer.mc(*args)
+                except resources.ResourceError as error:
+                    assert resources.authorization_denied(error.__cause__.stdout)
+                else:
+                    raise AssertionError("MinIO writer received forbidden access")
         minio.mc("rm", "--force", "document/policies/2026/02/SYN-363-writer.pdf")
 
 
