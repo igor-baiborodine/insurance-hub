@@ -212,6 +212,7 @@ func TestWorker_HandlerFailureDoesNotLatchReadiness(t *testing.T) {
 }
 
 func TestWorker_HandlerFailureStopsFetchedBatch(t *testing.T) {
+	// given
 	// A real poll is capped at one record; this defensive case preserves the established
 	// Policy Search and Dashboard rule if a client ever returns a larger batch.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -229,7 +230,10 @@ func TestWorker_HandlerFailureStopsFetchedBatch(t *testing.T) {
 		return application.GenerationResult{}, errors.New("private dependency failure")
 	}}, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 
-	if err := worker.Run(ctx); err != nil {
+	// when
+	err := worker.Run(ctx)
+	// then
+	if err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -239,19 +243,24 @@ func TestWorker_HandlerFailureStopsFetchedBatch(t *testing.T) {
 
 func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
 	t.Run("Kafka unavailable", func(t *testing.T) {
+		// given
 		client := &fakeClient{pingErr: errors.New("private broker failure")}
 		worker := newWorker(
 			client,
 			&fakeGenerator{},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		)
+		// when
 		err := worker.Check(context.Background())
+
+		// then
 		if err == nil || !strings.Contains(err.Error(), "Kafka unavailable") {
 			t.Fatalf("readiness error = %v", err)
 		}
 	})
 
 	t.Run("stable assignment", func(t *testing.T) {
+		// given
 		worker := newWorker(&fakeClient{}, &fakeGenerator{}, slog.Default())
 		worker.assigned.Store(false)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -265,7 +274,10 @@ func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 			worker.assigned.Store(true)
 		}()
-		if err := worker.Check(ctx); err != nil {
+		// when
+		err := worker.Check(ctx)
+		// then
+		if err != nil {
 			t.Fatal(err)
 		}
 		if elapsed := time.Since(started); elapsed < 300*time.Millisecond {
@@ -274,6 +286,7 @@ func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
 	})
 
 	t.Run("assignment unavailable", func(t *testing.T) {
+		// given
 		worker := newWorker(
 			&fakeClient{},
 			&fakeGenerator{},
@@ -282,7 +295,10 @@ func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
 		worker.assigned.Store(false)
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
+		// when
 		err := worker.Check(ctx)
+
+		// then
 		if err == nil || !strings.Contains(err.Error(), "group assignment unavailable") {
 			t.Fatalf("readiness error = %v", err)
 		}
@@ -485,13 +501,18 @@ func TestVerifyCommittedProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := test.client
+
+			// when
 			err := verifyCommittedProgress(
 				context.Background(),
 				&client,
 				"policy-registered",
 				"document-service",
 			)
+
+			// then
 			if test.wantError == "" && err != nil {
 				t.Fatal(err)
 			}
@@ -508,24 +529,31 @@ func TestVerifyCommittedProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 }
 
 func TestWorker_PreflightConstructsConsumerOnlyAfterGuard(t *testing.T) {
+	// given
 	consumer := &fakeClient{}
 	calls := 0
 	worker := &Worker{preflight: func(context.Context) (consumerClient, error) {
 		calls++
 		return consumer, nil
 	}}
-	if err := worker.Preflight(context.Background()); err != nil {
+	// when
+	err := worker.Preflight(context.Background())
+	repeatedErr := worker.Preflight(context.Background())
+
+	// then
+	if err != nil {
 		t.Fatal(err)
 	}
 	if worker.client != consumer || calls != 1 {
 		t.Fatalf("preflight client = %v, calls = %d", worker.client, calls)
 	}
-	if err := worker.Preflight(context.Background()); err != nil || calls != 1 {
-		t.Fatalf("repeated preflight = %v, calls = %d", err, calls)
+	if repeatedErr != nil || calls != 1 {
+		t.Fatalf("repeated preflight = %v, calls = %d", repeatedErr, calls)
 	}
 }
 
 func TestWorker_PreflightFailsClosedWithoutUsableConsumer(t *testing.T) {
+	// given
 	guardFailure := errors.New("guard failed")
 	tests := []struct {
 		name      string
@@ -550,7 +578,10 @@ func TestWorker_PreflightFailsClosedWithoutUsableConsumer(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// when
 			err := test.worker.Preflight(context.Background())
+
+			// then
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("Preflight() error = %v, want %q", err, test.wantError)
 			}
@@ -558,9 +589,10 @@ func TestWorker_PreflightFailsClosedWithoutUsableConsumer(t *testing.T) {
 	}
 }
 
-func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
+func TestCommittedProgressReaders_ValidateBrokerResponseShape(t *testing.T) {
 	topic := "policy-registered"
 	t.Run("legacy committed offsets", func(t *testing.T) {
+		// given
 		client := staticRequestClient{response: &kmsg.OffsetFetchResponse{
 			Topics: []kmsg.OffsetFetchResponseTopic{
 				{
@@ -571,14 +603,18 @@ func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 				},
 			},
 		}}
+		// when
 		got, err := readCommittedOffsets(
 			context.Background(), client, topic, "document-service", []int32{0},
 		)
+
+		// then
 		if err != nil || got[0] != 4 {
 			t.Fatalf("readCommittedOffsets() = (%v, %v)", got, err)
 		}
 	})
 	t.Run("duplicate topic partition", func(t *testing.T) {
+		// given
 		client := staticRequestClient{response: &kmsg.MetadataResponse{
 			Topics: []kmsg.MetadataResponseTopic{{
 				Topic: &topic,
@@ -587,12 +623,17 @@ func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 				},
 			}},
 		}}
-		if _, err := readTopicPartitions(context.Background(), client, topic); err == nil ||
+		// when
+		_, err := readTopicPartitions(context.Background(), client, topic)
+
+		// then
+		if err == nil ||
 			!strings.Contains(err.Error(), "duplicate partition") {
 			t.Fatalf("readTopicPartitions() error = %v", err)
 		}
 	})
 	t.Run("unavailable topic partition", func(t *testing.T) {
+		// given
 		client := staticRequestClient{response: &kmsg.MetadataResponse{
 			Topics: []kmsg.MetadataResponseTopic{
 				{
@@ -603,12 +644,17 @@ func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 				},
 			},
 		}}
-		if _, err := readTopicPartitions(context.Background(), client, topic); err == nil ||
+		// when
+		_, err := readTopicPartitions(context.Background(), client, topic)
+
+		// then
+		if err == nil ||
 			!strings.Contains(err.Error(), "partition unavailable") {
 			t.Fatalf("readTopicPartitions() error = %v", err)
 		}
 	})
 	t.Run("duplicate partition bound", func(t *testing.T) {
+		// given
 		client := staticRequestClient{response: &kmsg.ListOffsetsResponse{
 			Topics: []kmsg.ListOffsetsResponseTopic{{
 				Topic: topic,
@@ -617,13 +663,18 @@ func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 				},
 			}},
 		}}
-		if _, err := readListOffsets(
+		// when
+		_, err := readListOffsets(
 			context.Background(), client, topic, []int32{0}, -1,
-		); err == nil || !strings.Contains(err.Error(), "duplicate partition bound") {
+		)
+
+		// then
+		if err == nil || !strings.Contains(err.Error(), "duplicate partition bound") {
 			t.Fatalf("readListOffsets() error = %v", err)
 		}
 	})
 	t.Run("failed partition bound", func(t *testing.T) {
+		// given
 		client := staticRequestClient{response: &kmsg.ListOffsetsResponse{
 			Topics: []kmsg.ListOffsetsResponseTopic{
 				{
@@ -634,9 +685,13 @@ func TestCommittedProgressReadersValidateBrokerResponseShape(t *testing.T) {
 				},
 			},
 		}}
-		if _, err := readListOffsets(
+		// when
+		_, err := readListOffsets(
 			context.Background(), client, topic, []int32{0}, -1,
-		); err == nil || !strings.Contains(err.Error(), "partition bound failed") {
+		)
+
+		// then
+		if err == nil || !strings.Contains(err.Error(), "partition bound failed") {
 			t.Fatalf("readListOffsets() error = %v", err)
 		}
 	})
