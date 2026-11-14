@@ -112,11 +112,11 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration` | Exercises the real HTTP-to-RPC composition with owned disposable PostgreSQL and MinIO containers, then removes them. It does not use configured live targets or retain dependency state. | Docker, OpenSSL and psql. Missing pinned PostgreSQL, MinIO and MinIO-client images are pulled by digest. |
-| `make resource-test-integration` | Runs the complete disposable PostgreSQL/MinIO migration, protection, credential-replay and lookup suite. | The `test-integration` prerequisites plus host `mc` for the administration scenarios. Missing pinned fixture images are pulled by digest. |
+| `make test-integration` | Exercises real HTTP-to-RPC lookup and the generation core with owned disposable PostgreSQL, MinIO and JSReport containers, then removes them. Generation renders the accepted template, uploads the PDF twice, inserts two metadata rows and verifies useful content through a separate fixture authority. It does not use configured live targets or retain dependency state. | Docker, OpenSSL, psql and `pdftotext`. Missing pinned PostgreSQL, MinIO, MinIO-client and JSReport images are pulled by digest. |
+| `make resource-test-integration` | Runs the complete disposable PostgreSQL/MinIO migration, protection, credential-replay and lookup suite plus the generation smoke. | The `test-integration` prerequisites plus host `mc` for the administration scenarios. Missing pinned fixture images are pulled by digest. |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, the owned disposable dependency lookup, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, uses configured live targets, or deploys. It starts and removes the `test-integration` containers and may pull their pinned digests. |
+| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, the owned disposable lookup and generation smoke, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, uses configured live targets, or deploys. It starts and removes the `test-integration` containers and may pull their pinned digests. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The shared `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -330,7 +330,7 @@ dependency; Document owns its domain, storage mapping and generated contract.
 | Gateway, request observation and limits | Dashboard `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC lookup, fixed operation, safe errors and bounded transport signals. |
 | Health and lifecycle | Dashboard `internal/service/service.go` | PostgreSQL/MinIO-aware readiness, three listener ownership, HTTP-first drain and ordered cleanup. |
 | PostgreSQL | Product `internal/postgres` and migration owners | Parameterized Document reader, explicit schema administration and Document-owned SQL files. Product's generated sqlc `:many` method buffers its complete result, so Document retains a pgx row stream to enforce its aggregate byte budget before allocation. `check-migration-schema` compares the real migrated schema with the exact Document inspector rather than a sqlc input. |
-| Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. |
+| Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. Document generation owns the explicit render, upload and metadata sequence through narrow ports; Dashboard and legacy Document remain references only. |
 
 
 Review this adaptation map when Product or Servicekit changes an operational foundation. Document
@@ -342,8 +342,9 @@ adopts compatible fixes through its own reviewed changes and behavior tests.
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
-| `internal/domain`, `internal/application` | Wire-independent Document values, lookup orchestration, concurrency and aggregate budgets. |
-| `internal/postgres`, `internal/objectstore` | Bounded metadata reads from owned SQL inputs and compatible inline/MinIO content resolution. |
+| `internal/domain`, `internal/application` | Wire-independent Document values, lookup behavior and the generation use case. Generation validates normalized policy data and owns render → upload → metadata order without compensation, deduplication or repair. |
+| `internal/jsreport` | Fixed `POLICY` request mapping, exact decimal/date/null preservation, two-second connection/eight-second request bounds and useful bounded-PDF validation. |
+| `internal/postgres`, `internal/objectstore` | Bounded metadata/object reads plus separate metadata-insert and known-size `application/pdf` upload adapters. External SQL/SDK types remain outside the application ports. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated lookup registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Document identity and cross-setting policy. |
@@ -365,9 +366,17 @@ flowchart TD
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
     composition --> config
+    composition --> application["internal/application"]
     grpc --> telemetry
     grpc --> generated["gen/document/v1"]
+    grpc --> application
     gateway --> generated
+    application --> domain["internal/domain"]
+    postgres["internal/postgres"] --> application
+    postgres --> domain
+    objectstore["internal/objectstore"] --> application
+    jsreport["internal/jsreport"] --> application
+    jsreport --> domain
     telemetry --> config
     telemetry --> logger["internal/logger"]
     telemetry --> sharedTelemetry
@@ -383,6 +392,14 @@ validation, queries metadata and resolves inline or object-backed content within
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
 accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
 the shared deadline.
+
+The generation core accepts one validated registration, maps it through `internal/jsreport`,
+uploads `yyyy/MM/<policy>.pdf` through the MinIO writer, then inserts that UTF-8 key through the
+PostgreSQL writer. Renderer/upload failure stops before metadata; database failure leaves the
+uploaded object for explicit later diagnosis. Reprocessing overwrites the same object and appends a
+metadata row. These adapters and the use case are real and disposable-tested, but `cmd/server` does
+not construct them yet: Step 3 owns the disabled-by-default Kafka worker, generation configuration,
+resource lifetime and readiness wiring.
 
 ## Deployment and operation
 

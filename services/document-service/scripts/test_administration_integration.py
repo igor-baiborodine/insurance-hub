@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -12,7 +13,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -32,6 +33,10 @@ MINIO_IMAGE = os.environ.get(
 MINIO_CLIENT_IMAGE = os.environ.get(
     "MINIO_CLIENT_IMAGE",
     "cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4",
+)
+JSREPORT_IMAGE = os.environ.get(
+    "JSREPORT_IMAGE",
+    "jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6",
 )
 
 
@@ -850,6 +855,145 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
                     for entry in entries
                 ), "runtime startup log has no exact source version"
                 assert "synthetic-minio-admin-lookup-362" not in logs
+
+
+def test_generation_traverses_real_dependencies(postgres, tmp_path):
+    # given
+    admin, migrate, _target, root, pg_name = postgres
+    assert migrate() == "version=1"
+    writer_password = "synthetic-document-writer-363"
+    admin(
+        "CREATE ROLE go_document_writer LOGIN NOINHERIT PASSWORD "
+        f"'{writer_password}'; "
+        "GRANT CONNECT ON DATABASE document TO go_document_writer; "
+        "GRANT USAGE ON SCHEMA public TO go_document_writer; "
+        "GRANT INSERT ON public.policy_document TO go_document_writer; "
+        "GRANT USAGE ON SEQUENCE public.hibernate_sequence TO go_document_writer;"
+    )
+    pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
+        "5432/tcp"
+    ][0]["HostPort"]
+
+    minio_password = "synthetic-minio-generation-363"
+    minio_mounts = [
+        "--tmpfs",
+        "/data:uid=65532,gid=65532,mode=0700",
+        "-e",
+        "MINIO_ROOT_USER=fixture-admin",
+        "-e",
+        f"MINIO_ROOT_PASSWORD={minio_password}",
+        "-p",
+        "127.0.0.1::9000",
+        "--entrypoint",
+        "minio",
+    ]
+    jsreport_mounts = ["-p", "127.0.0.1::5488"]
+    with (
+        container(MINIO_IMAGE, ["server", "/data", "--address", ":9000"], minio_mounts) as name,
+        container(JSREPORT_IMAGE, [], jsreport_mounts) as jsreport_name,
+    ):
+        minio_port = json.loads(run([DOCKER, "inspect", name]))[0]["NetworkSettings"]["Ports"][
+            "9000/tcp"
+        ][0]["HostPort"]
+        minio_endpoint = f"http://127.0.0.1:{minio_port}"
+        config_dir = tmp_path / "generation-admin"
+        config_dir.mkdir(mode=0o700)
+        config = private(
+            config_dir / "config.json",
+            json.dumps(
+                {
+                    "version": "10",
+                    "aliases": {
+                        "document": {
+                            "url": minio_endpoint,
+                            "accessKey": "fixture-admin",
+                            "secretKey": minio_password,
+                            "api": "S3v4",
+                            "path": "auto",
+                        }
+                    },
+                }
+            ),
+        )
+        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
+        wait_for(lambda: minio_ready(minio))
+        minio.mc("mb", "--ignore-existing", "document/policies")
+        minio.mc("anonymous", "set", "upload", "document/policies")
+
+        jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
+            "Ports"
+        ]["5488/tcp"][0]["HostPort"]
+        jsreport_endpoint = f"http://127.0.0.1:{jsreport_port}"
+        wait_for(lambda: urlopen(jsreport_endpoint, timeout=1).status == 200)
+        template_path = (
+            Path(os.environ["INSURANCE_HUB_ROOT"])
+            / "legacy/documents-service/src/main/resources/policy.template"
+        )
+        template_bytes = template_path.read_bytes()
+        assert len(template_bytes) == 183
+        assert (
+            hashlib.sha256(template_bytes).hexdigest()
+            == "2074d32d049fb12d4d3cbacb9f47d27cfcc133ae5ac7ac37f4f8c434ba13db4d"
+        )
+        template = template_bytes.decode()
+        template_request = Request(
+            f"{jsreport_endpoint}/odata/templates",
+            data=json.dumps(
+                {
+                    "name": "POLICY",
+                    "content": template,
+                    "engine": "handlebars",
+                    "recipe": "chrome-pdf",
+                }
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(template_request, timeout=5) as response:
+            assert response.status == 201
+
+        binary = Path(os.environ["GENERATION_TEST_OUTPUT"])
+        assert binary.is_file(), "build the owning generation test before integration"
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_GENERATION_JSREPORT_URL": jsreport_endpoint,
+                "DOCUMENT_GENERATION_MINIO_URL": minio_endpoint,
+                "DOCUMENT_GENERATION_POSTGRES_URL": (
+                    f"postgresql://go_document_writer:{writer_password}@localhost:{pg_port}/document"
+                    f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+                ),
+            }
+        )
+
+        # when
+        result = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestGenerateDocumentIntegration_RendersUploadsAndInsertsDuplicate$",
+            ],
+            environment=environment,
+        )
+
+        # then
+        assert "PASS" in result
+        assert writer_password not in result and minio_password not in result
+        assert (
+            admin(
+                "SELECT count(*)||':'||min(convert_from(bytes,'UTF8'))||':'||"
+                "max(convert_from(bytes,'UTF8')) FROM public.policy_document "
+                "WHERE policy_number='SYN-363';"
+            )
+            == "2:2026/02/SYN-363.pdf:2026/02/SYN-363.pdf"
+        )
+        pdf = tmp_path / "SYN-363.pdf"
+        minio.mc("cp", "document/policies/2026/02/SYN-363.pdf", str(pdf))
+        extracted = run(["pdftotext", str(pdf), "-"])
+        assert "This is your new POLICY with number SYN-363" in extracted
+        assert "From 2026,2,3 to 2027,2,2" in extracted
+        assert "Policy Holder: Synthetic Holder" in extracted
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):

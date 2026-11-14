@@ -66,6 +66,8 @@ RESOURCE_TEST_ARGS ?=
 POSTGRES_IMAGE ?= postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
 MINIO_IMAGE ?= cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e
 MINIO_CLIENT_IMAGE ?= cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4
+JSREPORT_IMAGE ?= jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6
+GENERATION_TEST_OUTPUT ?= $(CURDIR)/.tools/document-generation-integration.test
 TEST_PACKAGES ?= ./...
 COVERAGE_EXCLUDE_PATHS := gen
 INTEGRATION_COVERAGE_FILE ?=
@@ -231,7 +233,7 @@ check-candidate-servicekit:
 
 check: check-go-pr
 
-test-integration: python-toolchain-check build-migrator build-integration-server ## Exercise real HTTP-to-RPC composition and disposable dependencies
+test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test ## Exercise real lookup and generation with disposable dependencies
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
@@ -240,9 +242,10 @@ test-integration: python-toolchain-check build-migrator build-integration-server
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
 		MINIO_CLIENT_IMAGE="$(MINIO_CLIENT_IMAGE)" \
+		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py \
-		-k lookup_traverses_real_rpc_postgres_and_minio
+		-k 'lookup_traverses_real_rpc_postgres_and_minio or generation_traverses_real_dependencies'
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \
@@ -302,12 +305,13 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make check            Validate the module without source mutation' \
 		'  make run              Start the service with environment configuration' \
 		'  make build-migrator   Build the separate schema administrator' \
+		'  make build-generation-integration-test Build the disposable generation smoke' \
 		'  make migration        Run explicit migrate/status/version with protected inputs' \
 		'  make resource-inspect Inspect the explicitly selected Document dependencies' \
 		'  make resource-ensure  Guarded role/credential/read-resource setup' \
 		'  make resource-verify  Verify schema, workload reads and denied permissions'
 
-.PHONY: build-migrator build-integration-server migration resource-inspect resource-ensure resource-verify \
+.PHONY: build-migrator build-integration-server build-generation-integration-test migration resource-inspect resource-ensure resource-verify \
 	resource-test-fast resource-test-integration check-migration-schema
 
 build-migrator: ## Build explicit administrative executable outside the API image
@@ -317,6 +321,11 @@ build-migrator: ## Build explicit administrative executable outside the API imag
 build-integration-server: ## Build the API only for owned disposable dependency smoke
 	@test -n "$(strip $(SERVER_OUTPUT))" || { echo 'SERVER_OUTPUT is required' >&2; exit 1; }
 	GOWORK=off $(GO) build -mod=readonly -o "$(SERVER_OUTPUT)" ./cmd/server
+
+build-generation-integration-test: ## Build the owned generation smoke outside the API image
+	@test -n "$(strip $(GENERATION_TEST_OUTPUT))" || { echo 'GENERATION_TEST_OUTPUT is required' >&2; exit 1; }
+	GOWORK=off $(GO) test -mod=readonly -tags=integration -c \
+		-o "$(GENERATION_TEST_OUTPUT)" ./internal/application
 
 migration: python-runtime-check ## Run migrate/status/version with explicit protected inputs
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
@@ -330,9 +339,10 @@ resource-test-fast: python-toolchain-check ## Exercise Document administration g
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		"$(PYTHON)" -m pytest -q -m 'not integration and not acceptance' scripts/test_resource_administration.py
 
-resource-test-integration: python-toolchain-check build-migrator build-integration-server ## Disposable PostgreSQL/MinIO administration and lookup smoke
+resource-test-integration: python-toolchain-check build-migrator build-integration-server build-generation-integration-test ## Disposable dependency administration, lookup and generation smoke
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 \
 		POSTGRES_IMAGE="$(POSTGRES_IMAGE)" MINIO_IMAGE="$(MINIO_IMAGE)" \
+		JSREPORT_IMAGE="$(JSREPORT_IMAGE)" GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py $(RESOURCE_TEST_ARGS)
 
