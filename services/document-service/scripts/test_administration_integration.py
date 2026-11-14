@@ -42,6 +42,11 @@ KAFKA_IMAGE = os.environ.get(
     "KAFKA_IMAGE",
     "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f",
 )
+PDF_TEXT_IMAGE = os.environ.get(
+    "PDF_TEXT_IMAGE",
+    "ghcr.io/randomcontainers/poppler:26.11.0-alpine3.24@sha256:"
+    "e1c8434466222f6ace15f91b892bc41a0d4ac102e9147eb38e44ff76f1a6ea5a",
+)
 CONTAINER_START_TIMEOUT = 180
 
 
@@ -54,6 +59,63 @@ def run(args, text=None, *, failure=False, environment=None, timeout=30):
     else:
         assert result.returncode == 0, f"fixture command failed ({args[0]}): {result.stderr}"
     return result.stdout.strip()
+
+
+def extract_pdf_text(pdf: Path) -> str:
+    source = pdf.resolve(strict=True)
+    assert source.is_file(), "PDF extraction input must be a file"
+    assert "," not in str(source), "PDF extraction input path contains an unsupported comma"
+    name = "document-363-pdf-" + uuid.uuid4().hex[:12]
+    failed = False
+    try:
+        return run(
+            [
+                DOCKER,
+                "run",
+                "--pull=missing",
+                "--name",
+                name,
+                "--label",
+                "insurance-hub.fixture=document-pdf-extraction",
+                "--network",
+                "none",
+                "--read-only",
+                "--tmpfs",
+                "/cache:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--memory",
+                "256m",
+                "--pids-limit",
+                "64",
+                "--mount",
+                f"type=bind,src={source},dst=/work/input.pdf,readonly",
+                PDF_TEXT_IMAGE,
+                "-enc",
+                "UTF-8",
+                "input.pdf",
+                "-",
+            ],
+            timeout=60,
+        )
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        try:
+            cleanup = subprocess.run(
+                [DOCKER, "rm", "-f", name], capture_output=True, text=True, timeout=10
+            )
+            cleanup_failed = cleanup.returncode != 0 and "No such container" not in cleanup.stderr
+        except OSError, subprocess.TimeoutExpired:
+            cleanup_failed = True
+        if cleanup_failed:
+            if failed:
+                print("PDF extraction container cleanup also failed", file=sys.stderr)
+            else:
+                raise AssertionError("PDF extraction container cleanup failed")
 
 
 @contextmanager
@@ -1246,7 +1308,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         assert stored_metadata["content-type"] == "application/pdf"
         pdf = tmp_path / "SYN-363.pdf"
         minio.mc("cp", "document/policies/2026/02/SYN-363.pdf", str(pdf))
-        extracted = run(["pdftotext", str(pdf), "-"])
+        extracted = extract_pdf_text(pdf)
         assert "This is your new POLICY with number SYN-363" in extracted
         assert "From 2026,2,3 to 2027,2,2" in extracted
         assert "Policy Holder: Synthetic Holder" in extracted
