@@ -438,6 +438,12 @@ NetworkPolicy admits business traffic only from an explicitly labeled disposable
 caller, allows only DNS, PostgreSQL, MinIO and QA telemetry egress, and preserves the separate Java
 Document workload and ordinary gateway destination.
 
+As in Dashboard, Kafka generation qualification is disposable. C03 local-dev and QA sources keep
+the worker disabled and do not mount writer credentials or add Kafka/JSReport egress; their
+deployment checks do not create an isolated live consumer group. C06 owns ordinary worker
+activation and the first shared-environment generation observation during direct authority
+transfer.
+
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
 `internal/postgres/administration.go` for connections, and `internal/administration` for migration
 policy/SQL, following Product. These own explicit Document PostgreSQL setup/adoption and read-only

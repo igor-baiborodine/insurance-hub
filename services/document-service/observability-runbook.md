@@ -77,5 +77,6 @@ keys, PDF bytes, credentials or raw dependency errors.
 The image check requires a structured startup record with namespace `insurance-hub`, service
 `document-service`, implementation `go`, the exact source-derived version, configured candidate
 instance and `local-dev` environment. Telemetry is disabled for that fixture, so no exporter or
-delivery claim follows from it. Ordinary local-dev and QA delivery observations remain pending
-until the live acceptance procedure records them.
+delivery claim follows from it. C03 generation evidence comes from the disposable qualification;
+worker-disabled local-dev/QA observations make no delivery claim. C06 owns shared-environment
+worker activation, generation and the corresponding runtime signal evidence.

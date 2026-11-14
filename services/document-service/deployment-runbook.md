@@ -95,22 +95,20 @@ is the current no-authority state: Java keeps ordinary registration and writes, 
 does not initialize or join group `document-service`. Worker activation requires a separate,
 explicitly reviewed authority handover.
 
-The disposable qualification owner supplies the following accepted coordinates only to its
-isolated fixture. They are not a second serving profile and must not be copied into the ordinary
-Deployment before authority handover:
+Following the Dashboard reference, C03 Kafka generation qualification exists only inside the owned
+disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
+MinIO and PostgreSQL fixtures, verifies that an event becomes a PDF retrievable through the real
+HTTP-to-RPC lookup, and removes the whole owned namespace/resources. Companion focused cases cover
+duplicate/restart, failures, disabled lifecycle, trust and least privilege.
 
-| Boundary | local-dev | QA |
-| --- | --- | --- |
-| TLS Kafka bootstrap | `local-dev-kafka-kafka-bootstrap:9093` | `qa-kafka-kafka-bootstrap.qa-data.svc:9093` |
-| Kafka CA Secret | `local-dev-document-kafka-ca` | `qa-document-kafka-ca` |
-| JSReport origin | `http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488` | `http://qa-jsreport.qa-svc.svc.cluster.local:5488` |
-| PostgreSQL writer Secret | `local-dev-postgres-document-writer-creds` | `qa-postgres-document-writer-creds` |
-| MinIO writer Secret | `local-dev-minio-document-writer-creds` | `qa-minio-document-writer-creds` |
+C03 defines no local-dev or QA qualification group, one-shot worker binary, Job or shared-effect
+cleanup procedure. The deployment status and verification owners check only the worker-disabled
+configuration, lookup/health/access and candidate identity; they must not publish an event, create
+or initialize a consumer group, mount writer credentials or add Kafka/JSReport egress. C06 owns the
+ordinary `document-service` group activation and the first shared-environment generation
+observation as part of the explicitly authorized direct authority transfer.
 
-The source-level disposable smoke uses an owner-scoped isolated group and real TLS Kafka, JSReport,
-MinIO and PostgreSQL. It verifies an event becomes a PDF retrievable through the real HTTP-to-RPC
-lookup, while companion focused cases cover duplicate/restart, failures, disabled lifecycle, trust
-and least privilege. Start troubleshooting with the Dashboard comparison in the
+Start troubleshooting with the Dashboard comparison in the
 [observability runbook](observability-runbook.md#kafka-and-generation-troubleshooting-order); do
 not inspect or mutate Dashboard runtime state.
 
@@ -173,9 +171,11 @@ make go-svc-deploy-status SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
-Recovery must return one ready `local-dev-document-api` Pod with the accepted image/version while
-`local-dev-document-api-legacy` remains available. A different context, namespace, image or live
-inventory is a stop condition; do not scale or patch shared or Java resources.
+Recovery must return one ready `local-dev-document-api` Pod with the accepted image/version and
+`EVENT_WORKERS_ENABLED=false` while `local-dev-document-api-legacy` remains available. Do not add
+Kafka/JSReport settings, writer Secrets or a consumer group as recovery actions. A different
+context, namespace, image or live inventory is a stop condition; do not scale or patch shared or
+Java resources.
 
 ## QA release and verification
 
