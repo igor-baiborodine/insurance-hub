@@ -252,7 +252,7 @@ test-integration: python-toolchain-check build-migrator build-integration-server
 		GENERATION_TEST_OUTPUT="$(GENERATION_TEST_OUTPUT)" EVENT_TEST_OUTPUT="$(EVENT_TEST_OUTPUT)" \
 		MIGRATOR_OUTPUT="$(MIGRATOR_OUTPUT)" SERVER_OUTPUT="$(SERVER_OUTPUT)" DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m pytest -q -m integration scripts/test_administration_integration.py \
-		-k 'lookup_traverses_real_rpc_postgres_and_minio or generation_traverses_real_dependencies or event_worker_traverses_owned_kafka'
+		-k 'lookup_traverses_real_rpc_postgres_and_minio or generation_traverses_real_dependencies or event_worker_traverses_owned_kafka or event_to_http_lookup_traverses_real_dependencies'
 
 shared-fast-build:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then \

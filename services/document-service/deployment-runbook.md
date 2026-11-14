@@ -4,6 +4,7 @@
 - [Document lookup deployment runbook](#document-lookup-deployment-runbook)
   - [Source and candidate checks](#source-and-candidate-checks)
   - [Candidate identity and caller proof](#candidate-identity-and-caller-proof)
+  - [Worker qualification boundary](#worker-qualification-boundary)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
   - [Explicit database, writer and template administration](#explicit-database-writer-and-template-administration)
@@ -21,7 +22,9 @@ The Go Deployment is `<environment>-document-api`. Its private business Service 
 and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The NetworkPolicy
 admits business traffic only from a same-environment Pod carrying
 `insurance-hub.io/document-qualification-client=true`. It permits DNS, the Document PostgreSQL
-cluster, the Document MinIO namespace and, in QA, Alloy egress. The separate
+cluster, the Document MinIO namespace and, in QA, Alloy egress. The current deployment keeps
+`EVENT_WORKERS_ENABLED=false`, so the ordinary Deployment has no Kafka/JSReport egress, Kafka CA
+mount or PostgreSQL/MinIO writer credential. The separate
 `<environment>-document-api-legacy` resources remain active and authoritative for ordinary traffic.
 
 ## Source and candidate checks
@@ -83,6 +86,33 @@ as image `insurance-hub-document-api:1.0.0-local.f50eeb5bd8f6` with runtime vers
 the ID is not a registry digest. Do not identify an image as a later dirty working tree or reuse
 this identity after runtime source changes. Ordinary local-dev and Flux-owned QA observations
 remain the live acceptance boundary.
+
+## Worker qualification boundary
+
+The checked-in local-dev and QA overlays deliberately render the worker disabled. Their deployment
+owner rejects enabling it, adding any Kafka/renderer setting, or mounting writer credentials. That
+is the current no-authority state: Java keeps ordinary registration and writes, and the Go process
+does not initialize or join group `document-service`. Worker activation requires a separate,
+explicitly reviewed authority handover.
+
+The disposable qualification owner supplies the following accepted coordinates only to its
+isolated fixture. They are not a second serving profile and must not be copied into the ordinary
+Deployment before authority handover:
+
+| Boundary | local-dev | QA |
+| --- | --- | --- |
+| TLS Kafka bootstrap | `local-dev-kafka-kafka-bootstrap:9093` | `qa-kafka-kafka-bootstrap.qa-data.svc:9093` |
+| Kafka CA Secret | `local-dev-document-kafka-ca` | `qa-document-kafka-ca` |
+| JSReport origin | `http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488` | `http://qa-jsreport.qa-svc.svc.cluster.local:5488` |
+| PostgreSQL writer Secret | `local-dev-postgres-document-writer-creds` | `qa-postgres-document-writer-creds` |
+| MinIO writer Secret | `local-dev-minio-document-writer-creds` | `qa-minio-document-writer-creds` |
+
+The source-level disposable smoke uses an owner-scoped isolated group and real TLS Kafka, JSReport,
+MinIO and PostgreSQL. It verifies an event becomes a PDF retrievable through the real HTTP-to-RPC
+lookup, while companion focused cases cover duplicate/restart, failures, disabled lifecycle, trust
+and least privilege. Start troubleshooting with the Dashboard comparison in the
+[observability runbook](observability-runbook.md#kafka-and-generation-troubleshooting-order); do
+not inspect or mutate Dashboard runtime state.
 
 ## Local development
 

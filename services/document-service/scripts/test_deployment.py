@@ -164,6 +164,34 @@ def test_render_rejects_weakened_target_security() -> None:
         checks.validate_render("local-dev", weakened)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda rendered: rendered.replace(
+            'EVENT_WORKERS_ENABLED: "false"', 'EVENT_WORKERS_ENABLED: "true"'
+        ),
+        lambda rendered: rendered.replace(
+            'EVENT_WORKERS_ENABLED: "false"',
+            'EVENT_WORKERS_ENABLED: "false"\n  KAFKA_GROUP: document-service',
+        ),
+        lambda rendered: rendered.replace(
+            "name: SERVICE_INSTANCE_ID",
+            "name: DOCUMENT_WRITER_DATABASE_URL\n          valueFrom:\n"
+            "            secretKeyRef:\n"
+            "              name: local-dev-postgres-document-writer-creds\n"
+            "              key: database-url\n        - name: SERVICE_INSTANCE_ID",
+        ),
+    ],
+)
+def test_render_rejects_disabled_worker_authority(mutation) -> None:
+    # Owned fixtures qualify the worker; ordinary manifests stay disabled and cannot mount
+    # consumer or writer authority before the later handover.
+    rendered = checks.render("local-dev")
+
+    with pytest.raises(checks.DeploymentError):
+        checks.validate_render("local-dev", mutation(rendered))
+
+
 def test_qa_aggregate_preserves_java_before_and_after_release_activation() -> None:
     # when / then
     checks.validate_qa_aggregate(["./document/legacy", "./product"])

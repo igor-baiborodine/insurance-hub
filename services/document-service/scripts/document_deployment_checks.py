@@ -336,6 +336,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "DOCUMENT_MAX_CONCURRENT_LOOKUPS": "2",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
+        "EVENT_WORKERS_ENABLED": "false",
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
     }
     if environment == "qa":

@@ -3,6 +3,7 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,11 +15,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/jsreport"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/objectstore"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/postgres"
 )
 
 func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(t *testing.T) {
@@ -98,6 +104,129 @@ func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(
 			t.Fatalf("metadata write = %q", value)
 		}
 	}
+}
+
+func TestEventWorkerIntegration_GeneratesRetrievableDocument(t *testing.T) {
+	// This fixture uses an isolated group supplied only to the worker under test. Config loading
+	// still validates the ordinary serving coordinates without acquiring that ordinary group.
+	configured, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_BROKERS")
+	topic := requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_TOPIC")
+	group := requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_GROUP")
+	caCertificate, err := os.ReadFile(
+		requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_CA_FILE"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	writerPool, err := pgxpool.New(ctx, configured.Events.WriterDatabase.URL.Value())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(writerPool.Close)
+	renderer, err := jsreport.NewClient(jsreport.Settings{
+		Origin: configured.Events.JSReportOrigin, ConnectTimeout: 2 * time.Second,
+		RequestTimeout: 8 * time.Second, MaximumBytes: configured.MaximumDocumentBytes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(renderer.Close)
+	uploader, err := objectstore.NewWriter(
+		configured.Events.WriterObjectStore,
+		configured.Events.UploadTimeout,
+		configured.MaximumDocumentBytes,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(uploader.Close)
+	metadata, err := postgres.NewWriter(
+		writerPool,
+		configured.Events.WriterDatabase.AcquireTimeout,
+		configured.Events.WriterDatabase.QueryTimeout,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := application.NewGenerateDocument(renderer, uploader, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	producer, err := kgo.NewClient(integrationTLSOptions(t, broker, caCertificate)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(producer.Close)
+	waitForIntegrationKafka(t, ctx, producer)
+	createIntegrationTopic(t, ctx, producer, topic)
+	initializeIntegrationProgress(t, ctx, producer, topic, group)
+	worker := newIntegrationWorker(t, ctx, Settings{
+		Brokers: []string{broker}, Group: group, Topic: topic,
+		ClientID: "policy-registered-document-listener", CACert: caCertificate,
+		EventType: "registered",
+	}, generation)
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	workerResult := make(chan error, 1)
+	go func() { workerResult <- worker.Run(workerCtx) }()
+	checkIntegrationWorker(t, ctx, worker)
+
+	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363", validRegistration)
+	waitForGeneratedDocument(t, ctx, configured)
+	stopIntegrationWorker(t, cancelWorker, workerResult, worker)
+}
+
+func waitForGeneratedDocument(t *testing.T, ctx context.Context, configured config.Config) {
+	t.Helper()
+	readerPool, err := pgxpool.New(ctx, configured.Database.URL.Value())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(readerPool.Close)
+	metadata, err := postgres.NewReader(
+		readerPool,
+		configured.Database.AcquireTimeout,
+		configured.Database.QueryTimeout,
+		configured.MaximumDocumentBytes,
+		configured.MaximumResponseBytes,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := objectstore.NewReader(
+		configured.ObjectStore,
+		configured.MaximumDocumentBytes,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(contents.Close)
+	lookup, err := application.NewFindDocuments(
+		metadata,
+		contents,
+		configured.MaximumResponseBytes,
+		configured.MaximumConcurrentLookups,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		result, lookupErr := lookup.Execute(ctx, "SYN-363")
+		if lookupErr == nil && len(result.Documents) == 1 &&
+			bytes.HasPrefix(result.Documents[0].Content, []byte("%PDF-")) {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("generated document did not become retrievable")
 }
 
 func newIntegrationWorker(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -316,7 +317,7 @@ def test_event_worker_traverses_owned_kafka(tmp_path):
                 str(binary),
                 "-test.v",
                 "-test.run",
-                "^TestEventWorkerIntegration_",
+                "^TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord$",
             ],
             environment=environment,
             timeout=120,
@@ -1247,6 +1248,154 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
                 else:
                     raise AssertionError("MinIO writer received forbidden access")
         minio.mc("rm", "--force", "document/policies/2026/02/SYN-363-writer.pdf")
+
+
+def test_event_to_http_lookup_traverses_real_dependencies(postgres, tmp_path):
+    # The production configuration remains fixed to the ordinary Document group. Only the
+    # integration worker receives the owned qualification group through test-only inputs.
+    admin, migrate, _target, root, pg_name = postgres
+    assert migrate() == "version=2"
+    pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
+        "5432/tcp"
+    ][0]["HostPort"]
+    minio_password = "synthetic-minio-event-to-lookup-363"
+    minio_mounts = [
+        "--tmpfs",
+        "/data:uid=65532,gid=65532,mode=0700",
+        "-e",
+        "MINIO_ROOT_USER=fixture-admin",
+        "-e",
+        f"MINIO_ROOT_PASSWORD={minio_password}",
+        "-p",
+        "127.0.0.1::9000",
+        "--entrypoint",
+        "minio",
+    ]
+    kafka_root = tmp_path / "kafka"
+    kafka_root.mkdir(mode=0o700)
+    with (
+        container(MINIO_IMAGE, ["server", "/data", "--address", ":9000"], minio_mounts) as name,
+        container(JSREPORT_IMAGE, [], ["-p", "127.0.0.1:5488:5488"]) as jsreport_name,
+        kafka_server(kafka_root) as (kafka_port, kafka_ca),
+    ):
+        minio_port = json.loads(run([DOCKER, "inspect", name]))[0]["NetworkSettings"]["Ports"][
+            "9000/tcp"
+        ][0]["HostPort"]
+        minio_endpoint = f"http://127.0.0.1:{minio_port}"
+        config_dir = tmp_path / "event-to-lookup-admin"
+        config_dir.mkdir(mode=0o700)
+        config = private(
+            config_dir / "config.json",
+            json.dumps(
+                {
+                    "version": "10",
+                    "aliases": {
+                        "document": {
+                            "url": minio_endpoint,
+                            "accessKey": "fixture-admin",
+                            "secretKey": minio_password,
+                            "api": "S3v4",
+                            "path": "auto",
+                        }
+                    },
+                }
+            ),
+        )
+        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
+        wait_for(lambda: minio_ready(minio))
+        minio.ensure(minio.inspect(), "a" * 64)
+        minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
+
+        jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
+            "Ports"
+        ]["5488/tcp"][0]["HostPort"]
+        assert jsreport_port == "5488"
+        jsreport_endpoint = "http://127.0.0.1:5488"
+        wait_for(lambda: urlopen(jsreport_endpoint, timeout=1).status == 200)
+        jsreport = resources.JSReport(jsreport_endpoint)
+        jsreport.ensure(jsreport.inspect())
+
+        reader_url = (
+            f"postgresql://go_document_reader:{'a' * 64}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
+        writer_url = (
+            f"postgresql://go_document_writer:{'a' * 64}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_DATABASE_URL": reader_url,
+                "MINIO_ENDPOINT": minio_endpoint,
+                "MINIO_ACCESS_KEY": resources.USER,
+                "MINIO_SECRET_KEY": "a" * 64,
+                "MINIO_BUCKET": "policies",
+                "EVENT_WORKERS_ENABLED": "true",
+                "KAFKA_BROKERS": f"127.0.0.1:{kafka_port}",
+                "KAFKA_GROUP": "document-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": str(kafka_ca),
+                "JSREPORT_URL": jsreport_endpoint,
+                "DOCUMENT_WRITER_DATABASE_URL": writer_url,
+                "MINIO_WRITER_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_WRITER_SECRET_KEY": "a" * 64,
+                "DOCUMENT_TEST_KAFKA_BROKERS": f"127.0.0.1:{kafka_port}",
+                "DOCUMENT_TEST_KAFKA_TOPIC": "policy-registered",
+                "DOCUMENT_TEST_KAFKA_GROUP": "document-c03-disposable-issue-363",
+                "DOCUMENT_TEST_KAFKA_CA_FILE": str(kafka_ca),
+                "OTEL_ENABLED": "false",
+            }
+        )
+        binary = Path(os.environ["EVENT_TEST_OUTPUT"])
+        assert binary.is_file(), "build the event integration test before integration"
+
+        output = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestEventWorkerIntegration_GeneratesRetrievableDocument$",
+            ],
+            environment=environment,
+            timeout=150,
+        )
+        assert "--- PASS: TestEventWorkerIntegration_GeneratesRetrievableDocument" in output
+        assert (
+            admin("SELECT count(*) FROM public.policy_document WHERE policy_number='SYN-363';")
+            == "1"
+        )
+
+        disabled_environment = dict(environment)
+        disabled_environment["EVENT_WORKERS_ENABLED"] = "false"
+        for name in (
+            "KAFKA_BROKERS",
+            "KAFKA_GROUP",
+            "KAFKA_REGISTERED_TOPIC",
+            "KAFKA_CA_FILE",
+            "JSREPORT_URL",
+            "DOCUMENT_WRITER_DATABASE_URL",
+            "MINIO_WRITER_ACCESS_KEY",
+            "MINIO_WRITER_SECRET_KEY",
+        ):
+            disabled_environment.pop(name)
+        http_port, grpc_port, health_port = (loopback_port() for _ in range(3))
+        disabled_environment.update(
+            {
+                "HTTP_ADDR": f"127.0.0.1:{http_port}",
+                "GRPC_ADDR": f"127.0.0.1:{grpc_port}",
+                "HEALTH_ADDR": f"127.0.0.1:{health_port}",
+            }
+        )
+        with lookup_server(disabled_environment, root):
+            wait_for(
+                lambda: urlopen(f"http://127.0.0.1:{health_port}/readyz", timeout=1).status == 200
+            )
+            with urlopen(f"http://127.0.0.1:{http_port}/documents/SYN-363", timeout=5) as response:
+                payload = json.load(response)
+        assert len(payload["documents"]) == 1
+        assert base64.b64decode(payload["documents"][0]["content"]).startswith(b"%PDF-")
+        assert minio_password not in output
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):
