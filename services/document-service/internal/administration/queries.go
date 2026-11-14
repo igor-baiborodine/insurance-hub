@@ -29,6 +29,9 @@ var acquireAdministrationLockQuery string
 //go:embed queries/apply-reader-grants.sql
 var applyReaderGrantsQuery string
 
+//go:embed queries/apply-writer-grants.sql
+var applyWriterGrantsQuery string
+
 //go:embed queries/inspect-document-presence.sql
 var inspectDocumentPresenceQuery string
 

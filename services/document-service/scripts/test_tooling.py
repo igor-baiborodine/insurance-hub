@@ -111,6 +111,7 @@ def run_target(
     target: str,
     *variables: str,
     expect_failure: str | None = None,
+    allowed_changes: frozenset[str] = frozenset(),
 ) -> None:
     before = inventory(fixture)
     log = tooling.temporary_root / "logs" / f"{name}.log"
@@ -157,7 +158,11 @@ def run_target(
                 log_path=log,
             )
         assert expect_failure in log.read_text(encoding="utf-8")
-    assert before == inventory(fixture), f"{name} mutated its disposable checkout"
+    after = inventory(fixture)
+    for path in allowed_changes:
+        before.pop(path, None)
+        after.pop(path, None)
+    assert before == after, f"{name} mutated its disposable checkout"
 
 
 def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]:
@@ -335,14 +340,22 @@ def test_controlled_defect_is_rejected_without_mutation(tooling: Tooling, case: 
     run_target(tooling, fixture, case, target, *variables, expect_failure=diagnostic)
 
 
-def test_scaffold_pr_check_passes_without_coverage(tooling: Tooling) -> None:
+def test_scaffold_pr_check_owns_only_coverage_outputs(tooling: Tooling) -> None:
     # given
     fixture = new_fixture(tooling, "scaffold-pr-check")
 
     # when
-    run_target(tooling, fixture, "scaffold-pr-check", "check-go-pr", "FORMAT_SCOPE=all")
+    coverage_outputs = frozenset({"coverage.txt", "integration-coverage.txt"})
+    run_target(
+        tooling,
+        fixture,
+        "scaffold-pr-check",
+        "check-go-pr",
+        "FORMAT_SCOPE=all",
+        allowed_changes=coverage_outputs,
+    )
 
     # then
     log = (tooling.temporary_root / "logs" / "scaffold-pr-check.log").read_text(encoding="utf-8")
-    assert "-coverprofile=" not in log
-    assert not (fixture / "coverage.txt").exists()
+    assert log.count("-coverprofile=") == 2
+    assert all((fixture / path).stat().st_size > 0 for path in coverage_outputs)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -33,11 +34,20 @@ MINIO_CLIENT_IMAGE = os.environ.get(
     "MINIO_CLIENT_IMAGE",
     "cgr.dev/chainguard/minio-client@sha256:2e433473835685d7daf6a266dbbf44fc9d5479b24cb351b7d170492f4fe971d4",
 )
+JSREPORT_IMAGE = os.environ.get(
+    "JSREPORT_IMAGE",
+    "jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6",
+)
+KAFKA_IMAGE = os.environ.get(
+    "KAFKA_IMAGE",
+    "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f",
+)
+CONTAINER_START_TIMEOUT = 180
 
 
-def run(args, text=None, *, failure=False, environment=None):
+def run(args, text=None, *, failure=False, environment=None, timeout=30):
     result = subprocess.run(
-        args, input=text, capture_output=True, text=True, timeout=30, env=environment
+        args, input=text, capture_output=True, text=True, timeout=timeout, env=environment
     )
     if failure:
         assert result.returncode != 0, "forbidden action succeeded"
@@ -66,6 +76,7 @@ def container(image, args, mounts=(), environment=None, *, auto_remove=True):
                 *args,
             ],
             environment=environment,
+            timeout=CONTAINER_START_TIMEOUT,
         )
         yield name
     finally:
@@ -78,8 +89,8 @@ def container(image, args, mounts=(), environment=None, *, auto_remove=True):
         )
 
 
-def wait_for(probe):
-    deadline = time.monotonic() + 20
+def wait_for(probe, timeout=20):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             if probe():
@@ -100,6 +111,221 @@ def loopback_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return listener.getsockname()[1]
+
+
+def create_kafka_certificates(root):
+    password = private(root / "openssl-password", "changeit\n")
+    private(root / "key-password", "changeit\n")
+    private(root / "keystore-password", "changeit\n")
+    extensions = root / "server.ext"
+    extensions.write_text(
+        "subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n"
+    )
+    commands = (
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=document-disposable-ca",
+            "-keyout",
+            str(root / "ca.key"),
+            "-out",
+            str(root / "ca.crt"),
+        ],
+        [
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=127.0.0.1",
+            "-keyout",
+            str(root / "server.key"),
+            "-out",
+            str(root / "server.csr"),
+        ],
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-days",
+            "1",
+            "-in",
+            str(root / "server.csr"),
+            "-CA",
+            str(root / "ca.crt"),
+            "-CAkey",
+            str(root / "ca.key"),
+            "-CAcreateserial",
+            "-extfile",
+            str(extensions),
+            "-out",
+            str(root / "server.crt"),
+        ],
+        [
+            "openssl",
+            "pkcs12",
+            "-export",
+            "-name",
+            "kafka",
+            "-in",
+            str(root / "server.crt"),
+            "-inkey",
+            str(root / "server.key"),
+            "-certfile",
+            str(root / "ca.crt"),
+            "-passout",
+            f"file:{password}",
+            "-out",
+            str(root / "server.p12"),
+        ],
+    )
+    for command in commands:
+        run(command)
+    for name in ("ca.key", "server.key", "server.p12"):
+        (root / name).chmod(0o600)
+    return root / "ca.crt"
+
+
+@contextmanager
+def kafka_server(root):
+    ca = create_kafka_certificates(root)
+    port = loopback_port()
+    suffix = uuid.uuid4().hex[:12]
+    volume = f"document-event-kafka-secrets-{suffix}"
+    initializer = f"document-event-kafka-init-{suffix}"
+    run(
+        [
+            DOCKER,
+            "volume",
+            "create",
+            "--label",
+            "insurance-hub.fixture=document-event",
+            volume,
+        ]
+    )
+    try:
+        run(
+            [
+                DOCKER,
+                "create",
+                "--name",
+                initializer,
+                "--user",
+                "root",
+                "--network",
+                "none",
+                "--read-only",
+                "--volume",
+                f"{root}:/source:ro",
+                "--volume",
+                f"{volume}:/target",
+                "--entrypoint",
+                "/bin/sh",
+                KAFKA_IMAGE,
+                "-ec",
+                "cp /source/server.p12 /source/key-password /source/keystore-password /target/; "
+                "chown -R appuser:appuser /target; chmod 0700 /target; chmod 0600 /target/*",
+            ],
+            timeout=180,
+        )
+        run([DOCKER, "start", "--attach", initializer], timeout=60)
+        mounts = [
+            "-p",
+            f"127.0.0.1:{port}:9092",
+            "--volume",
+            f"{volume}:/etc/kafka/secrets:ro",
+        ]
+        kafka_environment = {
+            "CLUSTER_ID": "MkU3OEVBNTcwNTJENDM2Qk",
+            "KAFKA_NODE_ID": "1",
+            "KAFKA_PROCESS_ROLES": "broker,controller",
+            "KAFKA_LISTENERS": "SSL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094",
+            "KAFKA_ADVERTISED_LISTENERS": f"SSL://127.0.0.1:{port},INTERNAL://127.0.0.1:9094",
+            "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": "SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT",
+            "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER",
+            "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@127.0.0.1:9093",
+            "KAFKA_INTER_BROKER_LISTENER_NAME": "INTERNAL",
+            "KAFKA_SSL_KEYSTORE_FILENAME": "server.p12",
+            "KAFKA_SSL_KEYSTORE_TYPE": "PKCS12",
+            "KAFKA_SSL_KEYSTORE_CREDENTIALS": "keystore-password",
+            "KAFKA_SSL_KEY_CREDENTIALS": "key-password",
+            "KAFKA_SSL_CLIENT_AUTH": "none",
+            "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+            "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+            "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+            "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+        }
+        for name, value in kafka_environment.items():
+            mounts.extend(("--env", f"{name}={value}"))
+        with container(KAFKA_IMAGE, [], mounts) as name:
+            wait_for(
+                lambda: (
+                    subprocess.run(
+                        [
+                            DOCKER,
+                            "exec",
+                            name,
+                            "/opt/kafka/bin/kafka-topics.sh",
+                            "--bootstrap-server",
+                            "127.0.0.1:9094",
+                            "--list",
+                        ],
+                        capture_output=True,
+                        timeout=10,
+                    ).returncode
+                    == 0
+                ),
+                timeout=120,
+            )
+            yield port, ca
+    finally:
+        subprocess.run(
+            [DOCKER, "rm", "-f", initializer], capture_output=True, text=True, timeout=30
+        )
+        removed = subprocess.run(
+            [DOCKER, "volume", "rm", "-f", volume],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert removed.returncode == 0, "Kafka fixture volume cleanup failed"
+
+
+def test_event_worker_traverses_owned_kafka(tmp_path):
+    binary = Path(os.environ["EVENT_TEST_OUTPUT"])
+    assert binary.is_file(), "build the event integration test before integration"
+    with kafka_server(tmp_path) as (port, ca):
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_TEST_KAFKA_BROKERS": f"127.0.0.1:{port}",
+                "DOCUMENT_TEST_KAFKA_TOPIC": "policy-registered",
+                "DOCUMENT_TEST_KAFKA_GROUP": "document-c03-disposable-issue-363",
+                "DOCUMENT_TEST_KAFKA_CA_FILE": str(ca),
+            }
+        )
+        output = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestEventWorkerIntegration_ResumesAfterMalformedRecordWithoutReplay$",
+            ],
+            environment=environment,
+            timeout=120,
+        )
+        assert (
+            "--- PASS: TestEventWorkerIntegration_ResumesAfterMalformedRecordWithoutReplay"
+            in output
+        )
 
 
 class ContainerizedMinioCommands(resources.Commands):
@@ -442,11 +668,13 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     assert migrate("version") == "0"
     admin(
         resources.role_sql(
-            {role: "a" * 64 for role in resources.ROLES}, {"go_document_migrator"}, target
+            {role: "a" * 64 for role in resources.ROLES},
+            {"go_document_migrator", "go_document_writer"},
+            target,
         )
     )
     # when
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
     # then
     # Exact independent legacy schema; an empty table is valid and no JVM is required.
     assert (
@@ -461,9 +689,9 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
         )
         == "document"
     )
-    assert migrate() == "version=1"
-    assert migrate("status") == "version=1"
-    assert migrate("version") == "1"
+    assert migrate() == "version=2"
+    assert migrate("status") == "version=2"
+    assert migrate("version") == "2"
     admin(
         "SET ROLE document; INSERT INTO public.policy_document VALUES(nextval('public.hibernate_sequence'),'\\x25504446','SYN-362'),(nextval('public.hibernate_sequence'),NULL,'SYN-362'); SELECT setval('public.hibernate_sequence',35,true);"
     )
@@ -473,8 +701,8 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     # Turn initialized fixture into an independent Java-owned populated schema, then adopt it.
     admin("SET ROLE document; DROP TABLE public.goose_db_version;")
     assert migrate("status") == "unmanaged"
-    assert migrate() == "version=1"
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
+    assert migrate() == "version=2"
     assert (
         admin(
             "SELECT md5(string_agg(id||':'||coalesce(encode(bytes,'hex'),'null')||':'||policy_number,',' ORDER BY id)) FROM public.policy_document;"
@@ -521,6 +749,27 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     admin("SET ROLE document; REVOKE INSERT ON public.policy_document FROM go_document_reader;")
     resources.verify_reader(reader)
 
+    writer_pgpass = private(
+        root / "writer.pgpass", f"localhost:*:document:go_document_writer:{'a' * 64}\n"
+    )
+    writer_env = os.environ.copy()
+    writer_env.update(PGPASSFILE=str(writer_pgpass), PGCONNECT_TIMEOUT="3")
+    writer_dsn = dsn.replace("user=go_document_reader", "user=go_document_writer")
+
+    def writer(sql):
+        result = subprocess.run(
+            ["psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-d", writer_dsn],
+            input=sql,
+            env=writer_env,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    resources.verify_writer(writer)
+
     private(pgpass, pgpass.read_text() + f"localhost:*:postgres:go_document_reader:{'a' * 64}\n")
     other = subprocess.run(
         [
@@ -541,6 +790,30 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     assert other.returncode != 0 and 'permission denied for database "postgres"' in other.stderr, (
         "unrelated database admission was not denied"
     )
+    private(
+        writer_pgpass,
+        writer_pgpass.read_text() + f"localhost:*:postgres:go_document_writer:{'a' * 64}\n",
+    )
+    writer_other = subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-v",
+            "VERBOSITY=verbose",
+            "-d",
+            writer_dsn.replace("dbname=document", "dbname=postgres"),
+            "-c",
+            "SELECT 1",
+        ],
+        env=writer_env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert (
+        writer_other.returncode != 0
+        and 'permission denied for database "postgres"' in writer_other.stderr
+    ), "writer entered the maintenance database"
 
     assert (
         admin(
@@ -553,8 +826,8 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     bad = dict(target, instanceID="00000000-0000-4000-8000-000000000999")
     mismatch = private(root / "wrong-target.json", json.dumps(bad))
     migrate(failure=True, enrollment=mismatch)
-    assert admin("SELECT count(*) FROM public.goose_db_version;") == "2"
-    admin("SET ROLE document; UPDATE public.goose_db_version SET version_id=99 WHERE version_id=1;")
+    assert admin("SELECT count(*) FROM public.goose_db_version;") == "3"
+    admin("SET ROLE document; UPDATE public.goose_db_version SET version_id=99 WHERE version_id=2;")
     migrate(failure=True)
 
 
@@ -620,7 +893,7 @@ def test_rejects_unsafe_schema_sequence_and_bounded_contention(postgres):
             == "0"
         )
     )
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
 
 
 def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypatch):
@@ -744,7 +1017,7 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
 def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
     # given
     admin, migrate, _target, root, pg_name = postgres
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
     pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
         "5432/tcp"
     ][0]["HostPort"]
@@ -852,6 +1125,337 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
                 assert "synthetic-minio-admin-lookup-362" not in logs
 
 
+def test_generation_traverses_real_dependencies(postgres, tmp_path):
+    # given
+    admin, migrate, _target, root, pg_name = postgres
+    assert migrate() == "version=2"
+    writer_password = "a" * 64
+    pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
+        "5432/tcp"
+    ][0]["HostPort"]
+
+    minio_password = "synthetic-minio-generation-363"
+    minio_mounts = [
+        "--tmpfs",
+        "/data:uid=65532,gid=65532,mode=0700",
+        "-e",
+        "MINIO_ROOT_USER=fixture-admin",
+        "-e",
+        f"MINIO_ROOT_PASSWORD={minio_password}",
+        "-p",
+        "127.0.0.1::9000",
+        "--entrypoint",
+        "minio",
+    ]
+    jsreport_mounts = ["-p", "127.0.0.1::5488"]
+    with (
+        container(MINIO_IMAGE, ["server", "/data", "--address", ":9000"], minio_mounts) as name,
+        container(JSREPORT_IMAGE, [], jsreport_mounts) as jsreport_name,
+    ):
+        minio_port = json.loads(run([DOCKER, "inspect", name]))[0]["NetworkSettings"]["Ports"][
+            "9000/tcp"
+        ][0]["HostPort"]
+        minio_endpoint = f"http://127.0.0.1:{minio_port}"
+        config_dir = tmp_path / "generation-admin"
+        config_dir.mkdir(mode=0o700)
+        config = private(
+            config_dir / "config.json",
+            json.dumps(
+                {
+                    "version": "10",
+                    "aliases": {
+                        "document": {
+                            "url": minio_endpoint,
+                            "accessKey": "fixture-admin",
+                            "secretKey": minio_password,
+                            "api": "S3v4",
+                            "path": "auto",
+                        }
+                    },
+                }
+            ),
+        )
+        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
+        wait_for(lambda: minio_ready(minio))
+        minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
+
+        jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
+            "Ports"
+        ]["5488/tcp"][0]["HostPort"]
+        jsreport_endpoint = f"http://127.0.0.1:{jsreport_port}"
+        wait_for(lambda: urlopen(jsreport_endpoint, timeout=1).status == 200)
+        jsreport = resources.JSReport(jsreport_endpoint)
+        jsreport.ensure(jsreport.inspect())
+        assert jsreport.inspect() == {"template": True}
+
+        binary = Path(os.environ["GENERATION_TEST_OUTPUT"])
+        assert binary.is_file(), "build the owning generation test before integration"
+        writer_url = (
+            f"postgresql://go_document_writer:{writer_password}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_DATABASE_URL": writer_url,
+                "MINIO_ENDPOINT": minio_endpoint,
+                "MINIO_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_SECRET_KEY": "a" * 64,
+                "MINIO_BUCKET": "policies",
+                "DEPLOYMENT_ENVIRONMENT": "local-dev",
+                "SERVICE_VERSION": "git-000000000001",
+                "EVENT_WORKERS_ENABLED": "true",
+                "KAFKA_BROKERS": "local-dev-kafka-kafka-bootstrap:9093",
+                "KAFKA_GROUP": "document-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": str(root / "ca.crt"),
+                "JSREPORT_URL": ("http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"),
+                "DOCUMENT_WRITER_DATABASE_URL": writer_url,
+                "MINIO_WRITER_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_WRITER_SECRET_KEY": "a" * 64,
+                "DOCUMENT_GENERATION_JSREPORT_URL": jsreport_endpoint,
+                "DOCUMENT_GENERATION_POSTGRES_URL": writer_url,
+                "OTEL_ENABLED": "false",
+            }
+        )
+
+        # when
+        result = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestGenerateDocumentIntegration_RendersUploadsAndInsertsDuplicate$",
+            ],
+            environment=environment,
+        )
+
+        # then
+        assert "PASS" in result
+        assert writer_password not in result and minio_password not in result
+        assert (
+            admin(
+                "SELECT count(*)||':'||min(convert_from(bytes,'UTF8'))||':'||"
+                "max(convert_from(bytes,'UTF8')) FROM public.policy_document "
+                "WHERE policy_number='SYN-363';"
+            )
+            == "2:2026/02/SYN-363.pdf:2026/02/SYN-363.pdf"
+        )
+        stored = json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363.pdf"))
+        stored_metadata = {key.lower(): value for key, value in stored["metadata"].items()}
+        assert stored_metadata["content-type"] == "application/pdf"
+        pdf = tmp_path / "SYN-363.pdf"
+        minio.mc("cp", "document/policies/2026/02/SYN-363.pdf", str(pdf))
+        extracted = run(["pdftotext", str(pdf), "-"])
+        assert "This is your new POLICY with number SYN-363" in extracted
+        assert "From 2026,2,3 to 2027,2,2" in extracted
+        assert "Policy Holder: Synthetic Holder" in extracted
+        with minio.identity("a" * 64, "writer") as writer:
+            writer.mc("pipe", "document/policies/2026/02/SYN-363-writer.pdf", text="%PDF-363")
+            assert (
+                json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363-writer.pdf"))["size"]
+                == 8
+            )
+            for args in (
+                ("cat", "document/policies/2026/02/SYN-363.pdf"),
+                ("rm", "document/policies/2026/02/SYN-363.pdf"),
+                ("admin", "user", "list", "document"),
+            ):
+                try:
+                    writer.mc(*args)
+                except resources.ResourceError as error:
+                    assert resources.authorization_denied(error.__cause__.stdout)
+                else:
+                    raise AssertionError("MinIO writer received forbidden access")
+        minio.mc("rm", "--force", "document/policies/2026/02/SYN-363-writer.pdf")
+
+        sequence_before = int(admin("SELECT last_value FROM public.hibernate_sequence;"))
+        constraint = "document_generation_failure_probe"
+        admin(
+            "SET ROLE document; ALTER TABLE public.policy_document ADD CONSTRAINT "
+            f"{constraint} CHECK(policy_number <> 'SYN-363-ORPHAN');"
+        )
+        try:
+            failure = run(
+                [
+                    str(binary),
+                    "-test.v",
+                    "-test.run",
+                    "^TestGenerateDocumentIntegration_DatabaseFailureLeavesUploadedObject$",
+                ],
+                environment=environment,
+            )
+        finally:
+            admin(
+                "SET ROLE document; ALTER TABLE public.policy_document DROP CONSTRAINT "
+                f"{constraint};"
+            )
+        assert "PASS" in failure
+        assert (
+            admin(
+                "SELECT count(*) FROM public.policy_document WHERE policy_number='SYN-363-ORPHAN';"
+            )
+            == "0"
+        )
+        assert (
+            int(admin("SELECT last_value FROM public.hibernate_sequence;")) == sequence_before + 1
+        )
+        orphan = json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363-ORPHAN.pdf"))
+        orphan_metadata = {key.lower(): value for key, value in orphan["metadata"].items()}
+        assert orphan_metadata["content-type"] == "application/pdf"
+
+
+def test_event_to_http_lookup_traverses_real_dependencies(postgres, tmp_path):
+    # The production configuration remains fixed to the ordinary Document group. Only the
+    # integration worker receives the owned qualification group through test-only inputs.
+    admin, migrate, _target, root, pg_name = postgres
+    assert migrate() == "version=2"
+    pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
+        "5432/tcp"
+    ][0]["HostPort"]
+    minio_password = "synthetic-minio-event-to-lookup-363"
+    minio_mounts = [
+        "--tmpfs",
+        "/data:uid=65532,gid=65532,mode=0700",
+        "-e",
+        "MINIO_ROOT_USER=fixture-admin",
+        "-e",
+        f"MINIO_ROOT_PASSWORD={minio_password}",
+        "-p",
+        "127.0.0.1::9000",
+        "--entrypoint",
+        "minio",
+    ]
+    kafka_root = tmp_path / "kafka"
+    kafka_root.mkdir(mode=0o700)
+    with (
+        container(MINIO_IMAGE, ["server", "/data", "--address", ":9000"], minio_mounts) as name,
+        container(JSREPORT_IMAGE, [], ["-p", "127.0.0.1:5488:5488"]) as jsreport_name,
+        kafka_server(kafka_root) as (kafka_port, kafka_ca),
+    ):
+        minio_port = json.loads(run([DOCKER, "inspect", name]))[0]["NetworkSettings"]["Ports"][
+            "9000/tcp"
+        ][0]["HostPort"]
+        minio_endpoint = f"http://127.0.0.1:{minio_port}"
+        config_dir = tmp_path / "event-to-lookup-admin"
+        config_dir.mkdir(mode=0o700)
+        config = private(
+            config_dir / "config.json",
+            json.dumps(
+                {
+                    "version": "10",
+                    "aliases": {
+                        "document": {
+                            "url": minio_endpoint,
+                            "accessKey": "fixture-admin",
+                            "secretKey": minio_password,
+                            "api": "S3v4",
+                            "path": "auto",
+                        }
+                    },
+                }
+            ),
+        )
+        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
+        wait_for(lambda: minio_ready(minio))
+        minio.ensure(minio.inspect(), "a" * 64)
+        minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
+
+        jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
+            "Ports"
+        ]["5488/tcp"][0]["HostPort"]
+        assert jsreport_port == "5488"
+        jsreport_endpoint = "http://127.0.0.1:5488"
+        wait_for(lambda: urlopen(jsreport_endpoint, timeout=1).status == 200)
+        jsreport = resources.JSReport(jsreport_endpoint)
+        jsreport.ensure(jsreport.inspect())
+
+        reader_url = (
+            f"postgresql://go_document_reader:{'a' * 64}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
+        writer_url = (
+            f"postgresql://go_document_writer:{'a' * 64}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DOCUMENT_DATABASE_URL": reader_url,
+                "MINIO_ENDPOINT": minio_endpoint,
+                "MINIO_ACCESS_KEY": resources.USER,
+                "MINIO_SECRET_KEY": "a" * 64,
+                "MINIO_BUCKET": "policies",
+                "DEPLOYMENT_ENVIRONMENT": "local-dev",
+                "SERVICE_VERSION": "git-000000000001",
+                "EVENT_WORKERS_ENABLED": "true",
+                "KAFKA_BROKERS": "local-dev-kafka-kafka-bootstrap:9093",
+                "KAFKA_GROUP": "document-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": str(kafka_ca),
+                "JSREPORT_URL": ("http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"),
+                "DOCUMENT_WRITER_DATABASE_URL": writer_url,
+                "MINIO_WRITER_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_WRITER_SECRET_KEY": "a" * 64,
+                "DOCUMENT_TEST_KAFKA_BROKERS": f"127.0.0.1:{kafka_port}",
+                "DOCUMENT_TEST_KAFKA_TOPIC": "policy-registered",
+                "DOCUMENT_TEST_KAFKA_GROUP": "document-c03-disposable-issue-363",
+                "DOCUMENT_TEST_KAFKA_CA_FILE": str(kafka_ca),
+                "DOCUMENT_TEST_JSREPORT_URL": jsreport_endpoint,
+                "OTEL_ENABLED": "false",
+            }
+        )
+        binary = Path(os.environ["EVENT_TEST_OUTPUT"])
+        assert binary.is_file(), "build the event integration test before integration"
+
+        output = run(
+            [
+                str(binary),
+                "-test.v",
+                "-test.run",
+                "^TestEventWorkerIntegration_GeneratesRetrievableDocument$",
+            ],
+            environment=environment,
+            timeout=150,
+        )
+        assert "--- PASS: TestEventWorkerIntegration_GeneratesRetrievableDocument" in output
+        assert (
+            admin("SELECT count(*) FROM public.policy_document WHERE policy_number='SYN-363';")
+            == "1"
+        )
+
+        disabled_environment = dict(environment)
+        disabled_environment["EVENT_WORKERS_ENABLED"] = "false"
+        for name in (
+            "KAFKA_BROKERS",
+            "KAFKA_GROUP",
+            "KAFKA_REGISTERED_TOPIC",
+            "KAFKA_CA_FILE",
+            "JSREPORT_URL",
+            "DOCUMENT_WRITER_DATABASE_URL",
+            "MINIO_WRITER_ACCESS_KEY",
+            "MINIO_WRITER_SECRET_KEY",
+        ):
+            disabled_environment.pop(name)
+        http_port, grpc_port, health_port = (loopback_port() for _ in range(3))
+        disabled_environment.update(
+            {
+                "HTTP_ADDR": f"127.0.0.1:{http_port}",
+                "GRPC_ADDR": f"127.0.0.1:{grpc_port}",
+                "HEALTH_ADDR": f"127.0.0.1:{health_port}",
+            }
+        )
+        with lookup_server(disabled_environment, root):
+            wait_for(
+                lambda: urlopen(f"http://127.0.0.1:{health_port}/readyz", timeout=1).status == 200
+            )
+            with urlopen(f"http://127.0.0.1:{http_port}/documents/SYN-363", timeout=5) as response:
+                payload = json.load(response)
+        assert len(payload["documents"]) == 1
+        assert base64.b64decode(payload["documents"][0]["content"]).startswith(b"%PDF-")
+        assert minio_password not in output
+
+
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):
     # given
     # Kubernetes Secret storage is a fake boundary; databases, authentication and IAM are real.
@@ -921,7 +1525,7 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
         stored = {
             manager.target_secret: {"target.json": json.dumps(target, sort_keys=True).encode()}
         }
-        for role, component in zip(resources.ROLES, ("reader", "migrator"), strict=True):
+        for role, component in zip(resources.ROLES, resources.ROLE_COMPONENTS, strict=True):
             stored[manager.secret_name(component)] = {
                 "password": b"a" * 64,
                 "database-url": resources.database_url(role, "a" * 64, "localhost").encode(),
@@ -965,19 +1569,30 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
             yield execute
 
         manager.connection = connection
+
+        class Templates:
+            present = False
+
+            def inspect(self):
+                return {"template": self.present}
+
+            def ensure(self, _state):
+                self.present = True
+
+        templates = Templates()
         # Simulate a pending credential whose external role has not survived setup.
         admin(
             "REVOKE document FROM go_document_migrator; DROP OWNED BY go_document_migrator; DROP ROLE go_document_migrator;"
         )
 
         # when
-        resources.execute_action("ensure", manager, minio)
+        resources.execute_action("ensure", manager, minio, templates)
         snapshot = dict(stored)
-        resources.execute_action("ensure", manager, minio)
+        resources.execute_action("ensure", manager, minio, templates)
 
         # then
         assert stored == snapshot
-        assert len(writes) == 1  # only the absent MinIO credential was created
+        assert len(writes) == 2  # only the absent MinIO reader/writer credentials were created
         with manager.connection("go_document_migrator", "a" * 64, ca) as execute:
             assert execute("SET ROLE document; SELECT current_user;") == "document"
         # Unrecoverable external credentials are rejected before any new writes.
@@ -985,6 +1600,6 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
 
         # when / then
         with pytest.raises(resources.ResourceError, match="without recoverable Secret"):
-            resources.execute_action("ensure", manager, minio)
+            resources.execute_action("ensure", manager, minio, templates)
         stored[manager.secret_name("reader")] = saved
-        assert len(writes) == 1
+        assert len(writes) == 2

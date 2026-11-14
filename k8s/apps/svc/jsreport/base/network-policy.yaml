@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jsreport
+spec:
+  podSelector:
+    matchLabels:
+      app: jsreport
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: document-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: document-api-legacy
+        - podSelector:
+            matchLabels:
+              insurance-hub.io/jsreport-admin: "true"
+      ports:
+        - protocol: TCP
+          port: 5488

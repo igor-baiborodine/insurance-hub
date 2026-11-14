@@ -34,10 +34,24 @@ const (
 	maximumResponseBytesSetting    = "DOCUMENT_RESPONSE_MAX_BYTES"
 	maximumHTTPResponseSetting     = "HTTP_RESPONSE_MAX_BYTES"
 	maximumConcurrentLookupSetting = "DOCUMENT_MAX_CONCURRENT_LOOKUPS"
+	EnvEventWorkersEnabled         = "EVENT_WORKERS_ENABLED"
+	EnvKafkaBrokers                = "KAFKA_BROKERS"
+	EnvKafkaGroup                  = "KAFKA_GROUP"
+	EnvKafkaRegisteredTopic        = "KAFKA_REGISTERED_TOPIC"
+	EnvKafkaCAFile                 = "KAFKA_CA_FILE"
+	EnvJSReportURL                 = "JSREPORT_URL"
+	EnvWriterDatabaseURL           = "DOCUMENT_WRITER_DATABASE_URL"
+	EnvWriterObjectAccessKey       = "MINIO_WRITER_ACCESS_KEY"
+	EnvWriterObjectSecretKey       = "MINIO_WRITER_SECRET_KEY"
 	defaultGRPCBytes               = 24 * 1024 * 1024
 	defaultMaximumDocumentBytes    = 8 * 1024 * 1024
 	defaultMaximumResponseBytes    = 16 * 1024 * 1024
 	defaultMaximumHTTPResponse     = 24 * 1024 * 1024
+	defaultKafkaGroup              = "document-service"
+	defaultRegisteredTopic         = "policy-registered"
+	defaultRendererConnectTimeout  = 2 * time.Second
+	defaultRendererRequestTimeout  = 8 * time.Second
+	defaultUploadTimeout           = 8 * time.Second
 )
 
 // Config contains settings parsed and validated once during process startup.
@@ -55,6 +69,7 @@ type Config struct {
 	HTTPMaxResponseBytes     int
 	Database                 Database
 	ObjectStore              ObjectStore
+	Events                   Events
 	StartupTimeout           time.Duration
 	MaximumDocumentBytes     int
 	MaximumResponseBytes     int
@@ -108,6 +123,22 @@ type ObjectStore struct {
 	CAFile       string
 	Bucket       string
 	FetchTimeout time.Duration
+}
+
+// Events contains the opt-in registration worker and separate writer settings.
+// Disabled workers require and retain no generation dependency settings.
+type Events struct {
+	Enabled                bool
+	Brokers                []string
+	Group                  string
+	RegisteredTopic        string
+	CAFile                 string
+	JSReportOrigin         *url.URL
+	WriterDatabase         Database
+	WriterObjectStore      ObjectStore
+	RendererConnectTimeout time.Duration
+	RendererRequestTimeout time.Duration
+	UploadTimeout          time.Duration
 }
 
 // DevelopmentIdentity labels local startup diagnostics before configuration is validated.
@@ -279,6 +310,10 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	events, err := loadEvents(lookup, identity.Environment, database, objectStore)
+	if err != nil {
+		return Config{}, err
+	}
 	startupTimeout, err := kitconfig.LoadPositiveDuration(lookup, startupTimeoutSetting, "10s")
 	if err != nil {
 		return Config{}, err
@@ -385,6 +420,7 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxResponseBytes:     maximumHTTPResponseBytes,
 		Database:                 database,
 		ObjectStore:              objectStore,
+		Events:                   events,
 		StartupTimeout:           startupTimeout,
 		MaximumDocumentBytes:     maximumDocumentBytes,
 		MaximumResponseBytes:     maximumResponseBytes,
@@ -437,6 +473,168 @@ func loadDatabase(lookup lookupEnv) (Database, error) {
 		AcquireTimeout: acquireTimeout,
 		QueryTimeout:   queryTimeout,
 	}, nil
+}
+
+func loadEvents(
+	lookup lookupEnv,
+	environment string,
+	readerDatabase Database,
+	readerObjectStore ObjectStore,
+) (Events, error) {
+	enabledValue, err := kitconfig.ValueOrDefault(lookup, EnvEventWorkersEnabled, "false")
+	if err != nil {
+		return Events{}, err
+	}
+	enabled, err := kitconfig.ParseBool(EnvEventWorkersEnabled, enabledValue)
+	if err != nil {
+		return Events{}, err
+	}
+	workerSettings := []string{
+		EnvKafkaBrokers,
+		EnvKafkaGroup,
+		EnvKafkaRegisteredTopic,
+		EnvKafkaCAFile,
+		EnvJSReportURL,
+		EnvWriterDatabaseURL,
+		EnvWriterObjectAccessKey,
+		EnvWriterObjectSecretKey,
+	}
+	if !enabled {
+		for _, name := range workerSettings {
+			if _, present := lookup(name); present {
+				return Events{}, kitconfig.Invalid(
+					name,
+					"must be unset when event processing is disabled",
+				)
+			}
+		}
+		return Events{}, nil
+	}
+	expectedBroker, expectedJSReport, supported := eventTargets(environment)
+	if !supported {
+		return Events{}, kitconfig.Invalid(
+			kitconfig.EnvDeploymentEnvironment,
+			"must be local-dev or qa when event processing is enabled",
+		)
+	}
+	brokersValue, err := required(lookup, EnvKafkaBrokers)
+	if err != nil {
+		return Events{}, err
+	}
+	brokers := strings.Split(brokersValue, ",")
+	for index := range brokers {
+		brokers[index] = strings.TrimSpace(brokers[index])
+		if brokers[index] == "" || !validBroker(brokers[index]) {
+			return Events{}, kitconfig.Invalid(
+				EnvKafkaBrokers,
+				"must contain comma-separated host:port brokers",
+			)
+		}
+	}
+	if len(brokers) != 1 || brokers[0] != expectedBroker {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaBrokers,
+			"must select the fixed TLS bootstrap for the deployment environment",
+		)
+	}
+	group, err := kitconfig.ValueOrDefault(lookup, EnvKafkaGroup, defaultKafkaGroup)
+	if err != nil {
+		return Events{}, err
+	}
+	if group != defaultKafkaGroup {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaGroup,
+			"must select the ordinary Document consumer group",
+		)
+	}
+	topic, err := kitconfig.ValueOrDefault(
+		lookup,
+		EnvKafkaRegisteredTopic,
+		defaultRegisteredTopic,
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	if topic != defaultRegisteredTopic {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaRegisteredTopic,
+			"must select the ordinary Document registration topic",
+		)
+	}
+	caFile, err := required(lookup, EnvKafkaCAFile)
+	if err != nil {
+		return Events{}, err
+	}
+	jsreportValue, err := required(lookup, EnvJSReportURL)
+	if err != nil {
+		return Events{}, err
+	}
+	jsreportOrigin, parseErr := url.Parse(jsreportValue)
+	if parseErr != nil || jsreportValue != expectedJSReport ||
+		jsreportOrigin.Scheme != "http" || jsreportOrigin.Hostname() == "" ||
+		jsreportOrigin.Port() != "5488" || jsreportOrigin.User != nil ||
+		jsreportOrigin.Opaque != "" || jsreportOrigin.RawQuery != "" ||
+		jsreportOrigin.Fragment != "" ||
+		jsreportOrigin.Path != "" {
+		return Events{}, kitconfig.Invalid(
+			EnvJSReportURL,
+			"must select the fixed private origin for the deployment environment",
+		)
+	}
+	writerDatabaseURL, err := required(lookup, EnvWriterDatabaseURL)
+	if err != nil {
+		return Events{}, err
+	}
+	parsedDatabaseURL, parseErr := url.Parse(writerDatabaseURL)
+	if parseErr != nil ||
+		parsedDatabaseURL.Scheme != "postgres" &&
+			parsedDatabaseURL.Scheme != "postgresql" ||
+		parsedDatabaseURL.Hostname() == "" || parsedDatabaseURL.Path == "" ||
+		parsedDatabaseURL.Path == "/" || parsedDatabaseURL.Fragment != "" {
+		return Events{}, kitconfig.Invalid(
+			EnvWriterDatabaseURL,
+			"must be a PostgreSQL URL with a database",
+		)
+	}
+	writerAccessKey, err := required(lookup, EnvWriterObjectAccessKey)
+	if err != nil {
+		return Events{}, err
+	}
+	writerSecretKey, err := required(lookup, EnvWriterObjectSecretKey)
+	if err != nil {
+		return Events{}, err
+	}
+	writerDatabase := readerDatabase
+	writerDatabase.URL = DatabaseURL{value: writerDatabaseURL}
+	writerObjectStore := readerObjectStore
+	writerObjectStore.AccessKey = Secret{value: writerAccessKey}
+	writerObjectStore.SecretKey = Secret{value: writerSecretKey}
+	return Events{
+		Enabled: true, Brokers: brokers, Group: group, RegisteredTopic: topic,
+		CAFile: caFile, JSReportOrigin: jsreportOrigin,
+		WriterDatabase: writerDatabase, WriterObjectStore: writerObjectStore,
+		RendererConnectTimeout: defaultRendererConnectTimeout,
+		RendererRequestTimeout: defaultRendererRequestTimeout,
+		UploadTimeout:          defaultUploadTimeout,
+	}, nil
+}
+
+func eventTargets(environment string) (string, string, bool) {
+	switch environment {
+	case "local-dev":
+		return "local-dev-kafka-kafka-bootstrap:9093",
+			"http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488", true
+	case "qa":
+		return "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
+			"http://qa-jsreport.qa-svc.svc.cluster.local:5488", true
+	default:
+		return "", "", false
+	}
+}
+
+func validBroker(value string) bool {
+	parsed, err := url.Parse("tcp://" + value)
+	return err == nil && parsed.Host == value && parsed.Hostname() != "" && parsed.Port() != ""
 }
 
 func loadObjectStore(lookup lookupEnv) (ObjectStore, error) {

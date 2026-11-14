@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: jsreport
-          image: jsreport/jsreport:4.10.1
+          image: jsreport/jsreport:4.10.1@sha256:f32e243d5e1600eeaaf7ee7ea0cf2b529bbe0b9ab89cc2823dff982880fd74f6
           ports:
             - containerPort: 5488
           volumeMounts:

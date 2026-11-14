@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,6 +25,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/domain"
+	documentkafka "github.com/igor-baiborodine/insurance-hub/services/document-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
@@ -30,6 +33,14 @@ func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
 	// given
 	settings := testConfig()
 	deps := productionDependencies()
+	deps.newGeneration = func(context.Context, config.Events, int) (generationRuntime, error) {
+		t.Fatal("disabled mode constructed generation resources")
+		return nil, nil
+	}
+	deps.newWorker = func(documentkafka.Settings, generationRuntime, *slog.Logger) (eventWorker, error) {
+		t.Fatal("disabled mode constructed a Kafka consumer")
+		return nil, nil
+	}
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -134,6 +145,127 @@ func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
 		}
 	case <-time.After(12 * time.Second):
 		t.Fatal("service did not stop")
+	}
+}
+
+func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *testing.T) {
+	// given
+	caFile := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(caFile, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings := config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"},
+		Group: "document-service", RegisteredTopic: "policy-registered", CAFile: caFile,
+	}
+	generation := &fakeGenerationRuntime{}
+	worker := &fakeEventWorker{}
+	deps := productionDependencies()
+	deps.newGeneration = func(
+		_ context.Context,
+		got config.Events,
+		maximumBytes int,
+	) (generationRuntime, error) {
+		if got.Group != "document-service" || maximumBytes != 8*1024*1024 {
+			t.Fatalf("generation settings = (%+v, %d)", got, maximumBytes)
+		}
+		return generation, nil
+	}
+	deps.newWorker = func(
+		got documentkafka.Settings,
+		owned generationRuntime,
+		_ *slog.Logger,
+	) (eventWorker, error) {
+		if got.ClientID != "policy-registered-document-listener" ||
+			got.Group != "document-service" || got.Topic != "policy-registered" ||
+			got.EventType != "registered" || got.Propagator == nil || got.Observe == nil ||
+			got.CommitFailure == nil || string(got.CACert) != "test CA" || owned != generation {
+			t.Fatalf("worker settings = %+v", got)
+		}
+		return worker, nil
+	}
+	eventObserver, err := telemetry.NewEventObserver(
+		discardLogger(), metricnoop.NewMeterProvider(), tracenoop.NewTracerProvider(), true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &runningService{}
+
+	// when
+	err = runtime.configureWorker(
+		context.Background(), settings, 8*1024*1024, discardLogger(), deps,
+		eventObserver, propagation.TraceContext{},
+	)
+	if err == nil {
+		err = runtime.worker.Preflight(context.Background())
+	}
+	if err == nil {
+		runtime.startWorker(context.Background())
+		err = runtime.checkWorker(context.Background())
+	}
+	shutdownErr := runtime.shutdown(time.Second, 100*time.Millisecond)
+
+	// then
+	if err != nil || shutdownErr != nil || !worker.started.Load() ||
+		!worker.preflighted.Load() || !worker.shutdown.Load() || generation.checks.Load() == 0 ||
+		!generation.closed.Load() {
+		t.Fatalf(
+			"lifecycle = configure:%v shutdown:%v started:%t preflight:%t worker-shutdown:%t generation-checks:%d generation-closed:%t",
+			err,
+			shutdownErr,
+			worker.started.Load(),
+			worker.preflighted.Load(),
+			worker.shutdown.Load(),
+			generation.checks.Load(),
+			generation.closed.Load(),
+		)
+	}
+}
+
+func TestRunningService_WorkerConstructionFailureReleasesGeneration(t *testing.T) {
+	// given
+	caFile := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(caFile, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	generation := &fakeGenerationRuntime{}
+	failure := errors.New("construct registration worker")
+	deps := productionDependencies()
+	deps.newGeneration = func(context.Context, config.Events, int) (generationRuntime, error) {
+		return generation, nil
+	}
+	deps.newWorker = func(documentkafka.Settings, generationRuntime, *slog.Logger) (eventWorker, error) {
+		return nil, failure
+	}
+	eventObserver, err := telemetry.NewEventObserver(
+		discardLogger(), metricnoop.NewMeterProvider(), tracenoop.NewTracerProvider(), true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &runningService{}
+
+	// when
+	err = runtime.configureWorker(
+		context.Background(),
+		config.Events{Enabled: true, CAFile: caFile},
+		8*1024*1024,
+		discardLogger(),
+		deps,
+		eventObserver,
+		propagation.TraceContext{},
+	)
+	shutdownErr := runtime.shutdown(time.Second, 100*time.Millisecond)
+
+	// then
+	if !errors.Is(err, failure) || shutdownErr != nil || !generation.closed.Load() {
+		t.Fatalf(
+			"failure = %v, shutdown = %v, generation closed = %t",
+			err,
+			shutdownErr,
+			generation.closed.Load(),
+		)
 	}
 }
 
@@ -259,6 +391,49 @@ type fakeManagedDependency struct {
 	ready   *atomic.Bool
 	failure error
 	closed  atomic.Bool
+}
+
+type fakeGenerationRuntime struct {
+	checks atomic.Int64
+	closed atomic.Bool
+}
+
+func (*fakeGenerationRuntime) Execute(
+	context.Context,
+	domain.PolicyRegistration,
+) (application.GenerationResult, error) {
+	return application.GenerationResult{}, nil
+}
+
+func (generation *fakeGenerationRuntime) Check(context.Context) error {
+	generation.checks.Add(1)
+	return nil
+}
+
+func (generation *fakeGenerationRuntime) Close() { generation.closed.Store(true) }
+
+type fakeEventWorker struct {
+	preflighted atomic.Bool
+	started     atomic.Bool
+	shutdown    atomic.Bool
+}
+
+func (worker *fakeEventWorker) Preflight(context.Context) error {
+	worker.preflighted.Store(true)
+	return nil
+}
+
+func (*fakeEventWorker) Check(context.Context) error { return nil }
+
+func (worker *fakeEventWorker) Run(ctx context.Context) error {
+	worker.started.Store(true)
+	<-ctx.Done()
+	return nil
+}
+
+func (worker *fakeEventWorker) Shutdown(context.Context) error {
+	worker.shutdown.Store(true)
+	return nil
 }
 
 func (dependency *fakeManagedDependency) Check(context.Context) error {

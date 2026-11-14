@@ -95,7 +95,7 @@ func (c *catalogConnection) ExecContext(
 	if query == c.failQuery {
 		return nil, errCatalog
 	}
-	if query != applyReaderGrantsQuery {
+	if query != applyReaderGrantsQuery && query != applyWriterGrantsQuery {
 		return nil, errors.New("unexpected write")
 	}
 	return driver.RowsAffected(0), nil
@@ -115,8 +115,8 @@ func (r *catalogRows) Next(values []driver.Value) error {
 
 func catalogDatabase(t *testing.T, state string) (*sql.DB, *catalogConnection) {
 	t.Helper()
-	table := state == "unmanaged" || state == "version=1"
-	history := state == "pending" || state == "version=1"
+	table := state == "unmanaged" || state == "version=1" || state == "version=2"
+	history := state == "pending" || state == "version=1" || state == "version=2"
 	c := &catalogConnection{rows: map[string][]driver.Value{
 		inspectPlatformQuery:           {true},
 		inspectSchemaObjectsQuery:      {table, table, history, true},
@@ -138,7 +138,7 @@ func catalogDatabase(t *testing.T, state string) (*sql.DB, *catalogConnection) {
 }
 
 func TestStatus_InspectsSupportedStatesWithoutWrites(t *testing.T) {
-	for _, want := range []string{"uninitialized", "unmanaged", "pending", "version=1"} {
+	for _, want := range []string{"uninitialized", "unmanaged", "pending", "version=1", "version=2"} {
 		t.Run(want, func(t *testing.T) {
 			// given
 			db, connection := catalogDatabase(t, want)
@@ -183,7 +183,7 @@ func TestStatus_RejectsUnsafeCatalogAndRollsBack(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			// given
-			db, connection := catalogDatabase(t, "version=1")
+			db, connection := catalogDatabase(t, "version=2")
 			connection.rows[scenario.query] = scenario.values
 			if scenario.values == nil {
 				connection.failQuery = scenario.query
@@ -211,16 +211,16 @@ func TestApplyGrants_ReplayCommitsAndFailureRollsBack(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("grant failure=%t", fail), func(t *testing.T) {
 			// given
-			db, connection := catalogDatabase(t, "version=1")
+			db, connection := catalogDatabase(t, "version=2")
 			if fail {
-				connection.failQuery = applyReaderGrantsQuery
+				connection.failQuery = applyWriterGrantsQuery
 			}
 			// when
 			err := applyGrants(t.Context(), db, Target{})
 			// then
 			if (err != nil) != fail || connection.committed == fail ||
 				connection.rolledBack != fail ||
-				connection.writes != 1 {
+				connection.writes != 2 {
 				t.Fatalf(
 					"grant transaction did not commit or roll back correctly: %v",
 					err,

@@ -54,6 +54,13 @@ FORBIDDEN_TEXT = (
 )
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
 NETWORK_POLICY_CONVERGENCE_SECONDS = 4
+EXPECTED_SYNTHETIC_LOOKUP = sorted(
+    [
+        ("SYN-362", "JVBERi0zNjI="),
+        ("SYN-362", "JVBERi0zNjI="),
+        ("SYN-362", "JVBERi1PQkpFQ1QtMzYy"),
+    ]
+)
 
 
 class DeploymentError(RuntimeError):
@@ -63,6 +70,20 @@ class DeploymentError(RuntimeError):
 def require(condition: object, message: str) -> None:
     if not condition:
         raise DeploymentError(message)
+
+
+def accepted_shared_lookup(payload: Any) -> bool:
+    if not isinstance(payload, dict) or not isinstance(payload.get("documents"), list):
+        return False
+    records = payload["documents"]
+    if not records:
+        return True
+    if not all(isinstance(item, dict) for item in records):
+        return False
+    pairs = [(item.get("policyNumber"), item.get("content")) for item in records]
+    if not all(isinstance(policy, str) and isinstance(content, str) for policy, content in pairs):
+        return False
+    return sorted(pairs) == EXPECTED_SYNTHETIC_LOOKUP
 
 
 def safe_environment() -> dict[str, str]:
@@ -336,6 +357,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "DOCUMENT_MAX_CONCURRENT_LOOKUPS": "2",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
+        "EVENT_WORKERS_ENABLED": "false",
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
     }
     if environment == "qa":
@@ -1032,13 +1054,8 @@ def verify_qualification_access(target: Target) -> None:
                     terminated.get("exitCode") == 0, "qualified Pod could not reach Document HTTP"
                 )
                 payload = json.loads(target.kubectl("logs", name))
-                contents = sorted(
-                    item.get("content")
-                    for item in payload.get("documents", [])
-                    if isinstance(item, dict)
-                )
                 require(
-                    contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"]),
+                    accepted_shared_lookup(payload),
                     "qualified Pod Document lookup differs",
                 )
                 return
@@ -1095,12 +1112,8 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             payload = json.loads(body)
         except json.JSONDecodeError as error:
             raise DeploymentError("Document lookup response is malformed") from error
-        contents = sorted(
-            item.get("content") for item in payload.get("documents", []) if isinstance(item, dict)
-        )
         require(
-            status == 200
-            and contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"]),
+            status == 200 and accepted_shared_lookup(payload),
             "Document lookup differs",
         )
     verify_qualification_access(target)

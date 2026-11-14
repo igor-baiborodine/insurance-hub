@@ -131,7 +131,52 @@ def test_import_has_no_command_effects(monkeypatch):
     # when
     module = importlib.reload(resources)
     # then
-    assert module.ROLES == ("go_document_reader", "go_document_migrator")
+    assert module.ROLES == (
+        "go_document_reader",
+        "go_document_migrator",
+        "go_document_writer",
+    )
+
+
+def test_writer_definitions_are_exact_and_template_drift_blocks():
+    # given
+    expected_actions = {
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+    }
+    jsreport = resources.JSReport("http://127.0.0.1:5488")
+    jsreport.request = lambda *_args: {
+        "value": [
+            {
+                "name": "POLICY",
+                "content": resources.POLICY_TEMPLATE.decode() + "drift",
+                "engine": "handlebars",
+                "recipe": "chrome-pdf",
+            }
+        ]
+    }
+    # when / then
+    statement = resources.WRITER_POLICY["Statement"]
+    assert len(statement) == 1
+    assert set(statement[0]["Action"]) == expected_actions
+    assert statement[0]["Resource"] == ["arn:aws:s3:::policies/*"]
+    assert len(resources.POLICY_TEMPLATE) == 183
+    assert resources.hashlib.sha256(resources.POLICY_TEMPLATE).hexdigest() == (
+        resources.POLICY_TEMPLATE_SHA256
+    )
+    with pytest.raises(resources.ResourceError, match="differs"):
+        jsreport.inspect()
+
+
+def test_existing_policy_template_is_preserved_without_write():
+    # given
+    jsreport = resources.JSReport("http://127.0.0.1:5488")
+    jsreport.request = lambda *_args: (_ for _ in ()).throw(
+        AssertionError("accepted existing template must not be rewritten")
+    )
+    # when / then
+    jsreport.ensure({"template": True})
 
 
 def test_secret_replay_never_overwrites_credentials():
@@ -140,6 +185,7 @@ def test_secret_replay_never_overwrites_credentials():
     manager.environment = "qa"
     manager.svc_ns = "qa-svc"
     manager.target_secret = "qa-postgres-document-admin-target"
+    manager.kafka_ca_secret = "qa-document-kafka-ca"
     manager.secret = lambda _name: {"password": b"original"}
 
     def forbidden(*_args, **_kwargs):
@@ -151,6 +197,64 @@ def test_secret_replay_never_overwrites_credentials():
     # then
     with pytest.raises(resources.ResourceError, match="no credential rotation"):
         manager.put_secret(manager.secret_name("reader"), {"password": b"replacement"})
+
+
+def test_kafka_ca_uses_exact_strimzi_source_identity():
+    # given
+    ca = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    manager = object.__new__(resources.Kubernetes)
+    manager.data_ns = "qa-data"
+    manager.kafka_cluster = "qa-kafka"
+    manager.kafka_source_secret = "qa-kafka-cluster-ca-cert"
+    record = {
+        "metadata": {
+            "name": manager.kafka_source_secret,
+            "namespace": manager.data_ns,
+            "labels": {"strimzi.io/cluster": manager.kafka_cluster},
+        },
+        "data": {"ca.crt": resources.base64.b64encode(ca).decode()},
+    }
+    manager.kube = lambda *_args: json.dumps(record)
+
+    # when
+    observed = manager.kafka_ca()
+
+    # then
+    assert observed == ca
+    record["metadata"]["labels"]["strimzi.io/cluster"] = "foreign-kafka"
+    with pytest.raises(resources.ResourceError, match="source identity"):
+        manager.kafka_ca()
+
+
+def test_kafka_trust_rejects_drift_and_creates_only_owned_secret():
+    # given
+    ca = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    manager = object.__new__(resources.Kubernetes)
+    manager.environment = "qa"
+    manager.svc_ns = "qa-svc"
+    manager.target_secret = "qa-postgres-document-admin-target"
+    manager.kafka_ca_secret = "qa-document-kafka-ca"
+    manager.kafka_ca = lambda: ca
+    manager.secret = lambda _name: None
+    created = []
+    manager.kube = lambda *args, text=None: created.append((args, text)) or ""
+
+    # when
+    observed, present = resources.kafka_trust(manager)
+    manager.put_secret(manager.kafka_ca_secret, {"ca.crt": observed})
+
+    # then
+    assert not present
+    payload = json.loads(created[0][1])
+    assert payload["metadata"] == {
+        "name": "qa-document-kafka-ca",
+        "namespace": "qa-svc",
+        "labels": {"insurance-hub.io/owner": "document"},
+    }
+    assert resources.base64.b64decode(payload["data"]["ca.crt"]) == ca
+    manager.secret = lambda _name: {"ca.crt": b"different-ca"}
+    with pytest.raises(resources.ResourceError, match="trust drift"):
+        resources.kafka_trust(manager)
 
 
 def test_wrong_explicit_target_rejected_before_contact(monkeypatch):

@@ -112,11 +112,11 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration` | Exercises the real HTTP-to-RPC composition with owned disposable PostgreSQL and MinIO containers, then removes them. It does not use configured live targets or retain dependency state. | Docker, OpenSSL and psql. Missing pinned PostgreSQL, MinIO and MinIO-client images are pulled by digest. |
-| `make resource-test-integration` | Runs the complete disposable PostgreSQL/MinIO migration, protection, credential-replay and lookup suite. | The `test-integration` prerequisites plus host `mc` for the administration scenarios. Missing pinned fixture images are pulled by digest. |
+| `make test-integration` | Exercises real HTTP-to-RPC lookup, the generation core and the Dashboard-aligned worker with owned disposable PostgreSQL, MinIO, JSReport and TLS Kafka containers, then removes them. One focused smoke carries an isolated-group event through render, upload and metadata into the real HTTP-to-RPC lookup; companion cases cover duplicates, malformed-followed-by-valid input and committed restart progress. It does not use configured live targets or retain dependency state. | Docker, OpenSSL, psql and `pdftotext`. Missing pinned PostgreSQL, MinIO, MinIO-client, JSReport and Kafka images are pulled by digest. |
+| `make resource-test-integration` | Runs the complete disposable PostgreSQL/MinIO migration, protection, credential-replay and lookup suite plus the generation and Kafka worker smokes. | The `test-integration` prerequisites plus host `mc` for the administration scenarios. Missing pinned fixture images are pulled by digest. |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, the owned disposable dependency lookup, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, uses configured live targets, or deploys. It starts and removes the `test-integration` containers and may pull their pinned digests. |
+| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, the owned disposable lookup, generation, Kafka-worker and event-to-lookup smokes, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, uses configured live targets, or deploys. It starts and removes the `test-integration` containers and may pull their pinned digests. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The shared `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -198,6 +198,14 @@ do not repeat its supplied value.
 | `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` / `MINIO_BUCKET` | required | Fixed HTTP(S) origin, redacted credentials and `policies` bucket. |
 | `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
 | `MINIO_FETCH_TIMEOUT` | `3s` | Positive per-object fetch duration. |
+| `EVENT_WORKERS_ENABLED` | `false` | Enables registration consumption. Disabled mode requires every Kafka, renderer and writer-only setting below to be unset and constructs none of those resources. |
+| `KAFKA_BROKERS` | required when workers are enabled | Comma-separated TLS `host:port` bootstrap addresses. |
+| `KAFKA_GROUP` | `document-service` when enabled | Must select the ordinary Document group exactly. Qualification overrides belong only to owned fixture inputs, not serving configuration. |
+| `KAFKA_REGISTERED_TOPIC` | `policy-registered` when enabled | Must select the registration topic exactly. |
+| `KAFKA_CA_FILE` | required when enabled | Bounded CA bundle for TLS 1.2+ with hostname verification; plaintext and reset fallback are unavailable. |
+| `JSREPORT_URL` | required when enabled | Private HTTP origin on port `5488`; credentials, another scheme/port, path, query or fragment are rejected. Runtime calls only fixed `/api/report`. |
+| `DOCUMENT_WRITER_DATABASE_URL` | required when enabled | Separate PostgreSQL writer URL retained in a redacting value; reader credentials are not reused. |
+| `MINIO_WRITER_ACCESS_KEY` / `MINIO_WRITER_SECRET_KEY` | required when enabled | Separate redacted object-writer credentials; the reader endpoint, CA and fixed `policies` bucket remain shared configuration. |
 | `STARTUP_TIMEOUT` | `10s` | Positive bound covering dependency construction and readiness. |
 | `DOCUMENT_MAX_BYTES` / `DOCUMENT_RESPONSE_MAX_BYTES` / `HTTP_RESPONSE_MAX_BYTES` | 8 MiB / 16 MiB / 24 MiB | Per-document, aggregate protobuf and JSON safety budgets. |
 | `DOCUMENT_MAX_CONCURRENT_LOOKUPS` | `2` | Immediate bounded admission; saturation maps to 429. |
@@ -248,6 +256,11 @@ instruments record PostgreSQL outcomes and actual object-fetch success or failur
 inline content as object-store activity. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
+
+Registration consumption adds `insurance_hub.document.events`, event duration and commit-failure
+counters plus bounded worker enabled, in-flight-age and failed gauges. Their only event dimension is
+`registered` (or `unknown` for a rejected caller-supplied type), with fixed terminal outcomes.
+Policy numbers, payloads, object keys and dependency error text are never labels or log fields.
 
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
@@ -317,9 +330,11 @@ debug endpoints and production exposure are not enabled by this foundation.
 
 ## Architecture and ownership
 
-Dashboard is the reference for common runtime, transport, telemetry and lifecycle code. Product is
-used only for PostgreSQL pool, reader, migration and administration mechanics. Neither is a runtime
-dependency; Document owns its domain, storage mapping and generated contract.
+Dashboard is the required reference for Kafka integration and the first troubleshooting reference
+for common Kafka/worker failures. It is also the reference for common runtime, transport, telemetry
+and lifecycle code. Product is used only for PostgreSQL pool, reader, migration and administration
+mechanics. Neither is a runtime dependency; Document owns its domain, storage mapping and generated
+contract.
 
 | Foundation | Product reference | Document adaptation |
 | --- | --- | --- |
@@ -329,8 +344,9 @@ dependency; Document owns its domain, storage mapping and generated contract.
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | Dashboard `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC lookup, fixed operation, safe errors and bounded transport signals. |
 | Health and lifecycle | Dashboard `internal/service/service.go` | PostgreSQL/MinIO-aware readiness, three listener ownership, HTTP-first drain and ordered cleanup. |
+| Kafka worker | Dashboard `internal/kafka`, configuration, service lifecycle and event telemetry | The same TLS, stable committed-progress preflight, inactive-group guard, range assignment, blocked-rebalance polling, weak auto-commit, W3C extraction and bounded shutdown mechanics. Document deliberately polls one record and invokes its render/upload/insert use case. |
 | PostgreSQL | Product `internal/postgres` and migration owners | Parameterized Document reader, explicit schema administration and Document-owned SQL files. Product's generated sqlc `:many` method buffers its complete result, so Document retains a pgx row stream to enforce its aggregate byte budget before allocation. `check-migration-schema` compares the real migrated schema with the exact Document inspector rather than a sqlc input. |
-| Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. |
+| Business architecture | Dashboard application ports and injected adapters | Document lookup owns duplicate, inline/key, omission and response-budget behavior. Document generation owns the explicit render, upload and metadata sequence through narrow ports; Dashboard and legacy Document remain references only. |
 
 
 Review this adaptation map when Product or Servicekit changes an operational foundation. Document
@@ -342,8 +358,10 @@ adopts compatible fixes through its own reviewed changes and behavior tests.
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
-| `internal/domain`, `internal/application` | Wire-independent Document values, lookup orchestration, concurrency and aggregate budgets. |
-| `internal/postgres`, `internal/objectstore` | Bounded metadata reads from owned SQL inputs and compatible inline/MinIO content resolution. |
+| `internal/domain`, `internal/application` | Wire-independent Document values, lookup behavior and the generation use case. Generation validates normalized policy data and owns render → upload → metadata order without compensation, deduplication or repair. |
+| `internal/jsreport` | Fixed `POLICY` request mapping, exact decimal/date/null preservation, two-second connection/eight-second request bounds and useful bounded-PDF validation. |
+| `internal/kafka` | Dashboard-aligned TLS consumer, stable-progress preflight, one-record polling, exact event mapping, assignment/readiness state, weak commit and bounded shutdown. |
+| `internal/postgres`, `internal/objectstore` | Bounded metadata/object reads plus separate metadata-insert and known-size `application/pdf` upload adapters. External SQL/SDK types remain outside the application ports. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated lookup registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Document identity and cross-setting policy. |
@@ -365,9 +383,19 @@ flowchart TD
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
     composition --> config
+    composition --> application["internal/application"]
+    composition --> kafka["internal/kafka"]
+    kafka --> application
     grpc --> telemetry
     grpc --> generated["gen/document/v1"]
+    grpc --> application
     gateway --> generated
+    application --> domain["internal/domain"]
+    postgres["internal/postgres"] --> application
+    postgres --> domain
+    objectstore["internal/objectstore"] --> application
+    jsreport["internal/jsreport"] --> application
+    jsreport --> domain
     telemetry --> config
     telemetry --> logger["internal/logger"]
     telemetry --> sharedTelemetry
@@ -384,6 +412,23 @@ HTTP and gRPC record separate bounded completion signals. Shutdown withdraws rea
 accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
 the shared deadline.
 
+When `EVENT_WORKERS_ENABLED=false`, composition constructs no Kafka inspector/consumer, JSReport
+client, PostgreSQL writer pool or MinIO writer. When enabled, startup builds the generation runtime,
+verifies stable committed Kafka progress while the group is inactive, acquires the consumer and
+waits for a stable assignment before readiness. The worker handles at most one record per poll.
+Malformed and handler-failed records are terminal consumed outcomes under the selected five-second
+weak auto-commit model; a commit failure or interruption can replay them, so this is not exactly
+once. Handler failures update the bounded failed-worker signal without latching lookup readiness;
+readiness continues to check current Kafka assignment/connectivity and writer-database health.
+Shutdown cancels the worker, commits its current consumed position, releases rebalances and closes
+the consumer before writer resources.
+
+The generation core accepts one validated registration, maps it through `internal/jsreport`,
+uploads `yyyy/MM/<policy>.pdf` through the MinIO writer, then inserts that UTF-8 key through the
+PostgreSQL writer. Renderer/upload failure stops before metadata; database failure leaves the
+uploaded object for explicit later diagnosis. Reprocessing overwrites the same object and appends a
+metadata row. The adapters, use case and worker path are disposable-tested with synthetic data.
+
 ## Deployment and operation
 
 Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev and Flux-owned QA
@@ -393,17 +438,24 @@ NetworkPolicy admits business traffic only from an explicitly labeled disposable
 caller, allows only DNS, PostgreSQL, MinIO and QA telemetry egress, and preserves the separate Java
 Document workload and ordinary gateway destination.
 
+As in Dashboard, Kafka generation qualification is disposable. C03 local-dev and QA sources keep
+the worker disabled and do not mount writer credentials or add Kafka/JSReport egress; their
+deployment checks do not create an isolated live consumer group. C06 owns ordinary worker
+activation and the first shared-environment generation observation during direct authority
+transfer.
+
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
 `internal/postgres/administration.go` for connections, and `internal/administration` for migration
 policy/SQL, following Product. These own explicit Document PostgreSQL setup/adoption and read-only
 status/version. They are not used by server startup or
 included as an administrative entrypoint in the API image. Service-local resource tooling owns
-protected PostgreSQL/MinIO read credentials separately. See
-[explicit database and read-access administration](deployment-runbook.md#explicit-database-and-read-access-administration)
+protected PostgreSQL/MinIO reader and writer credentials plus exact-match-only jsreport template
+provisioning separately. See
+[explicit database, writer and template administration](deployment-runbook.md#explicit-database-writer-and-template-administration)
 for fresh Java-independent initialization, compatible adoption, target/confirmation requirements,
 credential recovery and focused `resource-test-fast`, `test-administration` and
-`resource-test-integration` commands. The runtime mounts only the reader Secrets; migrator and
-administrative target credentials are never part of API startup or its image.
+`resource-test-integration` commands. The runtime mounts only its separate reader/writer Secrets;
+migrator and administrative target credentials are never part of API startup or its image.
 
 Both command entry points use the same service-local logger facade as Product, backed by published
 Servicekit logging. Administrative queries and session/lock/grant statements live in embedded

@@ -45,5 +45,6 @@ configMapGenerator:
       - DOCUMENT_MAX_CONCURRENT_LOOKUPS=2
       - LOG_LEVEL=info
       - OTEL_ENABLED=false
+      - EVENT_WORKERS_ENABLED=false
       - DEPLOYMENT_ENVIRONMENT=unconfigured
       - SERVICE_VERSION=git-000000000000

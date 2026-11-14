@@ -2,12 +2,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/document-service/internal/grpc"
+	documentkafka "github.com/igor-baiborodine/insurance-hub/services/document-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/objectstore"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
@@ -72,12 +76,21 @@ type managedDependency interface {
 	Close()
 }
 
+type eventWorker interface {
+	Preflight(context.Context) error
+	Check(context.Context) error
+	Run(context.Context) error
+	Shutdown(context.Context) error
+}
+
 type dependencies struct {
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newDatabase    func(context.Context, config.Database, int, int) (application.MetadataReader, managedDependency, error)
 	newObjectStore func(config.ObjectStore, int) (application.ContentReader, managedDependency, error)
 	newLookup      func(application.MetadataReader, application.ContentReader, int, int) (*application.FindDocuments, error)
+	newGeneration  func(context.Context, config.Events, int) (generationRuntime, error)
+	newWorker      func(documentkafka.Settings, generationRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.FindDocumentsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newGateway     func(documentv1.DocumentServiceClient, gateway.Settings) (http.Handler, error)
@@ -95,6 +108,14 @@ func productionDependencies() dependencies {
 		newDatabase:    newDatabaseDependency,
 		newObjectStore: newObjectStoreDependency,
 		newLookup:      application.NewFindDocuments,
+		newGeneration:  newProductionGeneration,
+		newWorker: func(
+			settings documentkafka.Settings,
+			generation generationRuntime,
+			logger *slog.Logger,
+		) (eventWorker, error) {
+			return documentkafka.NewWorker(settings, generation, logger)
+		},
 		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, find transport.FindDocumentsExecutor) (grpcServer, error) {
 			return transport.NewServer(logger, tracer, propagator, settings, find)
 		},
@@ -113,6 +134,19 @@ func productionDependencies() dependencies {
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
 	}
+}
+
+func readBoundedFile(path string, maximum int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
+	if err != nil || int64(len(data)) > maximum {
+		return nil, errors.New("file exceeds accepted certificate size")
+	}
+	return data, nil
 }
 
 type databaseDependency struct{ pool *pgxpool.Pool }
@@ -205,6 +239,11 @@ type runningService struct {
 	managementServer   httpServer
 	managementListener net.Listener
 	tracker            *handlerTracker
+	generation         generationRuntime
+	worker             eventWorker
+	workerCancel       context.CancelFunc
+	workerResult       chan error
+	workerWG           sync.WaitGroup
 }
 
 func run(
@@ -274,6 +313,28 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Events.Enabled,
+	)
+	if err != nil {
+		return fail(err)
+	}
+	if settings.Events.Enabled {
+		if err := runtime.configureWorker(
+			startupCtx,
+			settings.Events,
+			settings.MaximumDocumentBytes,
+			logger,
+			deps,
+			eventObserver,
+			provider.HTTPPropagator(),
+		); err != nil {
+			return fail(fmt.Errorf("run service: %w", err))
+		}
+	}
 	lookupObserver, err := telemetry.NewLookupObserver(logger, provider.MeterProvider())
 	if err != nil {
 		return fail(err)
@@ -339,6 +400,13 @@ func run(
 	if err == nil {
 		err = runtime.objectStore.Check(readyContext)
 	}
+	if err == nil && runtime.worker != nil {
+		err = runtime.worker.Preflight(readyContext)
+	}
+	if err == nil {
+		runtime.startWorker(ctx)
+		err = runtime.checkWorker(readyContext)
+	}
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
@@ -350,7 +418,10 @@ func run(
 		if err := runtime.database.Check(probeCtx); err != nil {
 			return err
 		}
-		return runtime.objectStore.Check(probeCtx)
+		if err := runtime.objectStore.Check(probeCtx); err != nil {
+			return err
+		}
+		return runtime.checkWorker(probeCtx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -389,6 +460,8 @@ func run(
 		return fail(unexpectedServeError("business HTTP", err))
 	case err := <-managementResult:
 		return fail(unexpectedServeError("management HTTP", err))
+	case err := <-runtime.workerResult:
+		return fail(unexpectedWorkerError(err))
 	default:
 	}
 	runtime.state.SetReady(true)
@@ -407,11 +480,85 @@ func run(
 		serveErr = unexpectedServeError("business HTTP", err)
 	case err := <-managementResult:
 		serveErr = unexpectedServeError("management HTTP", err)
+	case err := <-runtime.workerResult:
+		if ctx.Err() == nil {
+			serveErr = unexpectedWorkerError(err)
+		}
 	}
 	return errors.Join(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configureWorker(
+	ctx context.Context,
+	settings config.Events,
+	maximumDocumentBytes int,
+	logger *slog.Logger,
+	deps dependencies,
+	eventObserver *telemetry.EventObserver,
+	propagator propagation.TextMapPropagator,
+) error {
+	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
+	if err != nil {
+		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
+	}
+	runtime.generation, err = deps.newGeneration(ctx, settings, maximumDocumentBytes)
+	if err != nil {
+		return err
+	}
+	runtime.worker, err = deps.newWorker(documentkafka.Settings{
+		Brokers: settings.Brokers, Group: settings.Group,
+		Topic: settings.RegisteredTopic, ClientID: "policy-registered-document-listener",
+		CACert: caCertificate, EventType: "registered", Propagator: propagator,
+		Observe: func(ctx context.Context, eventType string) (
+			context.Context,
+			func(context.Context, string, error),
+		) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		},
+		CommitFailure: eventObserver.RecordCommitFailure,
+	}, runtime.generation, logger)
+	return err
+}
+
+func (runtime *runningService) checkWorker(ctx context.Context) error {
+	if runtime.worker == nil {
+		return nil
+	}
+	if runtime.generation == nil {
+		return errors.New("document generation is unavailable")
+	}
+	if err := runtime.generation.Check(ctx); err != nil {
+		return err
+	}
+	return runtime.worker.Check(ctx)
+}
+
+func (runtime *runningService) startWorker(parent context.Context) {
+	if runtime.worker == nil {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(parent)
+	runtime.workerCancel = cancel
+	runtime.workerResult = make(chan error, 1)
+	runtime.workerWG.Add(1)
+	go func() {
+		defer runtime.workerWG.Done()
+		runtime.workerResult <- runtime.worker.Run(workerCtx)
+	}()
+}
+
+func unexpectedWorkerError(err error) error {
+	if err == nil {
+		err = errors.New("stopped unexpectedly")
+	}
+	return fmt.Errorf("event worker stopped: %w", err)
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -458,6 +605,27 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	)
 	defer cancelGraceful()
 	var shutdownErrors []error
+	if runtime.workerCancel != nil {
+		runtime.workerCancel()
+		workerStopped := make(chan struct{})
+		go func() { runtime.workerWG.Wait(); close(workerStopped) }()
+		select {
+		case <-workerStopped:
+		case <-graceful.Done():
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("stop event worker: %w", graceful.Err()),
+			)
+		}
+	}
+	if runtime.worker != nil {
+		if err := runtime.worker.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown event worker: %w", err),
+			)
+		}
+	}
 
 	if runtime.tracker != nil {
 		runtime.tracker.beginDrain()
@@ -557,6 +725,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	}
 	if runtime.database != nil {
 		runtime.database.Close()
+	}
+	if runtime.generation != nil {
+		runtime.generation.Close()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {
