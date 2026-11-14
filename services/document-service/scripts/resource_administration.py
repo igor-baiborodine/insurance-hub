@@ -331,6 +331,9 @@ class Kubernetes:
         self.jsreport_endpoint = (
             f"http://{environment}-jsreport.{self.svc_ns}.svc.cluster.local:5488"
         )
+        self.kafka_cluster = f"{environment}-kafka"
+        self.kafka_source_secret = f"{self.kafka_cluster}-cluster-ca-cert"
+        self.kafka_ca_secret = f"{environment}-document-kafka-ca"
         required = {
             "CONTEXT": self.context,
             "DATA_NS": self.data_ns,
@@ -456,6 +459,7 @@ class Kubernetes:
             name
             in {
                 self.target_secret,
+                self.kafka_ca_secret,
                 *(self.secret_name(c) for c in (*ROLE_COMPONENTS, "minio-reader", "minio-writer")),
             },
             "unsupported Secret target",
@@ -477,6 +481,32 @@ class Kubernetes:
             return
         # Create is atomic. A concurrent creator must be inspected, never overwritten.
         self.kube("-n", self.svc_ns, "create", "-f", "-", text=json.dumps(data))
+
+    def kafka_ca(self) -> bytes:
+        raw = json.loads(
+            self.kube(
+                "-n",
+                self.data_ns,
+                "get",
+                "secret",
+                self.kafka_source_secret,
+                "-o",
+                "json",
+            )
+        )
+        metadata = raw.get("metadata", {})
+        require(
+            metadata.get("name") == self.kafka_source_secret
+            and metadata.get("namespace") == self.data_ns
+            and metadata.get("labels", {}).get("strimzi.io/cluster") == self.kafka_cluster,
+            "Kafka CA source identity differs from the enrolled platform coordinates",
+        )
+        ca = base64.b64decode(raw.get("data", {}).get("ca.crt", ""), validate=True)
+        require(
+            0 < len(ca) <= 65536 and ca.startswith(b"-----BEGIN CERTIFICATE-----"),
+            "Kafka CA source is invalid",
+        )
+        return ca
 
     def ca(self) -> bytes:
         raw = json.loads(
@@ -1027,6 +1057,17 @@ def target_document(manager: Kubernetes, instance: str) -> dict:
     }
 
 
+def kafka_trust(manager: Kubernetes) -> tuple[bytes, bool]:
+    ca = manager.kafka_ca()
+    existing = manager.secret(manager.kafka_ca_secret)
+    if existing is not None:
+        require(
+            set(existing) == {"ca.crt"} and existing["ca.crt"] == ca,
+            "Kafka CA Secret shape/trust drift",
+        )
+    return ca, existing is not None
+
+
 def inputs(manager: Kubernetes, state: dict, *, create: bool) -> tuple[dict, dict, bytes]:
     stored = manager.secret(manager.target_secret)
     target = (
@@ -1141,6 +1182,7 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio, jsreport: JSR
     state = inventory(manager)
     mstates = {kind: minio.inspect(kind) for kind in MINIO_RESOURCES}
     jstate = jsreport.inspect()
+    kafka_ca, kafka_trust_present = kafka_trust(manager)
     if action == "inspect":
         print(
             json.dumps(
@@ -1149,6 +1191,7 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio, jsreport: JSR
                     "postgres": state,
                     "minio": mstates,
                     "jsreport": jstate,
+                    "kafka": {"caSecret": kafka_trust_present},
                 },
                 sort_keys=True,
             )
@@ -1159,6 +1202,7 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio, jsreport: JSR
             state["table"] and state["historyState"] == "version=2",
             "explicit schema initialization/adoption must precede verification",
         )
+        require(kafka_trust_present, "Kafka CA Secret missing")
     target, credentials, ca = inputs(manager, state, create=action == "ensure")
     msecrets = {}
     for kind, (user_name, _policy_name, _policy) in MINIO_RESOURCES.items():
@@ -1184,6 +1228,7 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio, jsreport: JSR
         minio.verify_writer(msecrets["writer"]["secret-key"].decode(), object_probe=False)
     if action == "ensure":
         # Retain pending credentials first: interrupted setup can resume without password rotation.
+        manager.put_secret(manager.kafka_ca_secret, {"ca.crt": kafka_ca})
         manager.put_secret(
             manager.target_secret, {"target.json": json.dumps(target, sort_keys=True).encode()}
         )
