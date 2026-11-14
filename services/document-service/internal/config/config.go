@@ -310,7 +310,7 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	events, err := loadEvents(lookup, database, objectStore)
+	events, err := loadEvents(lookup, identity.Environment, database, objectStore)
 	if err != nil {
 		return Config{}, err
 	}
@@ -477,6 +477,7 @@ func loadDatabase(lookup lookupEnv) (Database, error) {
 
 func loadEvents(
 	lookup lookupEnv,
+	environment string,
 	readerDatabase Database,
 	readerObjectStore ObjectStore,
 ) (Events, error) {
@@ -509,6 +510,13 @@ func loadEvents(
 		}
 		return Events{}, nil
 	}
+	expectedBroker, expectedJSReport, supported := eventTargets(environment)
+	if !supported {
+		return Events{}, kitconfig.Invalid(
+			kitconfig.EnvDeploymentEnvironment,
+			"must be local-dev or qa when event processing is enabled",
+		)
+	}
 	brokersValue, err := required(lookup, EnvKafkaBrokers)
 	if err != nil {
 		return Events{}, err
@@ -522,6 +530,12 @@ func loadEvents(
 				"must contain comma-separated host:port brokers",
 			)
 		}
+	}
+	if len(brokers) != 1 || brokers[0] != expectedBroker {
+		return Events{}, kitconfig.Invalid(
+			EnvKafkaBrokers,
+			"must select the fixed TLS bootstrap for the deployment environment",
+		)
 	}
 	group, err := kitconfig.ValueOrDefault(lookup, EnvKafkaGroup, defaultKafkaGroup)
 	if err != nil {
@@ -556,17 +570,17 @@ func loadEvents(
 		return Events{}, err
 	}
 	jsreportOrigin, parseErr := url.Parse(jsreportValue)
-	if parseErr != nil || jsreportOrigin.Scheme != "http" || jsreportOrigin.Hostname() == "" ||
+	if parseErr != nil || jsreportValue != expectedJSReport ||
+		jsreportOrigin.Scheme != "http" || jsreportOrigin.Hostname() == "" ||
 		jsreportOrigin.Port() != "5488" || jsreportOrigin.User != nil ||
 		jsreportOrigin.Opaque != "" || jsreportOrigin.RawQuery != "" ||
 		jsreportOrigin.Fragment != "" ||
-		jsreportOrigin.Path != "" && jsreportOrigin.Path != "/" {
+		jsreportOrigin.Path != "" {
 		return Events{}, kitconfig.Invalid(
 			EnvJSReportURL,
-			"must be a private HTTP origin on port 5488 without credentials or a path",
+			"must select the fixed private origin for the deployment environment",
 		)
 	}
-	jsreportOrigin.Path = ""
 	writerDatabaseURL, err := required(lookup, EnvWriterDatabaseURL)
 	if err != nil {
 		return Events{}, err
@@ -603,6 +617,19 @@ func loadEvents(
 		RendererRequestTimeout: defaultRendererRequestTimeout,
 		UploadTimeout:          defaultUploadTimeout,
 	}, nil
+}
+
+func eventTargets(environment string) (string, string, bool) {
+	switch environment {
+	case "local-dev":
+		return "local-dev-kafka-kafka-bootstrap:9093",
+			"http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488", true
+	case "qa":
+		return "qa-kafka-kafka-bootstrap.qa-data.svc:9093",
+			"http://qa-jsreport.qa-svc.svc.cluster.local:5488", true
+	default:
+		return "", "", false
+	}
 }
 
 func validBroker(value string) bool {

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -137,8 +138,14 @@ func TestEventWorkerIntegration_GeneratesRetrievableDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(writerPool.Close)
+	jsreportOrigin, err := url.Parse(
+		requiredIntegrationSetting(t, "DOCUMENT_TEST_JSREPORT_URL"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	renderer, err := jsreport.NewClient(jsreport.Settings{
-		Origin: configured.Events.JSReportOrigin, ConnectTimeout: 2 * time.Second,
+		Origin: jsreportOrigin, ConnectTimeout: 2 * time.Second,
 		RequestTimeout: 8 * time.Second, MaximumBytes: configured.MaximumDocumentBytes,
 	})
 	if err != nil {

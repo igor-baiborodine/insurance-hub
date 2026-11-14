@@ -144,6 +144,69 @@ func TestClient_Render_HonorsRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestClient_Render_DoesNotFollowRedirects(t *testing.T) {
+	// given
+	destinationCalls := 0
+	destination := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			destinationCalls++
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = io.WriteString(writer, "%PDF-leaked")
+		}),
+	)
+	defer destination.Close()
+	redirect := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			http.Redirect(
+				writer,
+				request,
+				destination.URL,
+				http.StatusTemporaryRedirect,
+			)
+		}),
+	)
+	defer redirect.Close()
+	client := newTestClient(t, redirect.URL, 1024)
+	defer client.Close()
+
+	// when
+	_, err := client.Render(context.Background(), syntheticRegistration(t))
+
+	// then
+	if !errors.Is(err, application.ErrUnavailable) || destinationCalls != 0 {
+		t.Fatalf("redirect result = (%v, destination calls %d)", err, destinationCalls)
+	}
+}
+
+func TestClient_Render_DoesNotUseDefaultTransportProxy(t *testing.T) {
+	// given
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("Content-Type", "application/pdf")
+			_, _ = io.WriteString(writer, "%PDF-direct")
+		}),
+	)
+	defer server.Close()
+	proxyCalls := 0
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{Proxy: func(*http.Request) (*url.URL, error) {
+		proxyCalls++
+		return nil, errors.New("unexpected proxy call")
+	}}
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	client := newTestClient(t, server.URL, 1024)
+	http.DefaultTransport = originalTransport
+	defer client.Close()
+
+	// when
+	pdf, err := client.Render(context.Background(), syntheticRegistration(t))
+
+	// then
+	if err != nil || string(pdf) != "%PDF-direct" || proxyCalls != 0 {
+		t.Fatalf("direct render = (%q, %v), proxy calls = %d", pdf, err, proxyCalls)
+	}
+}
+
 func TestNewClient_RejectsNonFixedOriginAndInvalidLimits(t *testing.T) {
 	tests := []string{
 		"https://jsreport.example",

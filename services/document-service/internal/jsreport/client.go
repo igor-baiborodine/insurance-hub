@@ -56,12 +56,19 @@ func NewClient(settings Settings) (*Client, error) {
 		)
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
 	transport.DialContext = (&net.Dialer{Timeout: settings.ConnectTimeout}).DialContext
 	origin := *settings.Origin
 	origin.Path = reportPath
 	origin.RawPath = ""
 	return &Client{
-		client:       &http.Client{Transport: transport, Timeout: settings.RequestTimeout},
+		client: &http.Client{
+			Transport: transport,
+			Timeout:   settings.RequestTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		transport:    transport,
 		reportURL:    origin.String(),
 		requestLimit: settings.RequestTimeout,
