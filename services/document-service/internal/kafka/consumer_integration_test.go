@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/postgres"
 )
 
-func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(t *testing.T) {
+func TestEventWorkerIntegration_ResumesAfterMalformedRecordWithoutReplay(t *testing.T) {
 	// given
 	broker := requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_BROKERS")
 	topic := requiredIntegrationSetting(t, "DOCUMENT_TEST_KAFKA_TOPIC")
@@ -68,10 +69,11 @@ func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(
 	checkIntegrationWorker(t, ctx, worker)
 
 	// when
-	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363", validRegistration)
-	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363", validRegistration)
+	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363-A", registrationFor("SYN-363-A"))
+	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363-B", registrationFor("SYN-363-B"))
 	waitForIntegrationWrites(t, ctx, metadata.written, 2)
 	stopIntegrationWorker(t, cancelWorker, workerResult, worker)
+	requireIntegrationCommittedOffset(t, ctx, producer, topic, group, 2)
 
 	restarted := newIntegrationWorker(t, ctx, settings, generation)
 	restartCtx, cancelRestart := context.WithCancel(ctx)
@@ -79,15 +81,16 @@ func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(
 	go func() { restartResult <- restarted.Run(restartCtx) }()
 	checkIntegrationWorker(t, ctx, restarted)
 	produceIntegrationRecord(t, ctx, producer, topic, "OTHER", validRegistration)
-	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363", validRegistration)
+	produceIntegrationRecord(t, ctx, producer, topic, "SYN-363-C", registrationFor("SYN-363-C"))
 	waitForIntegrationWrites(t, ctx, metadata.written, 1)
 	stopIntegrationWorker(t, cancelRestart, restartResult, restarted)
+	requireIntegrationCommittedOffset(t, ctx, producer, topic, group, 4)
 
 	// then
 	wantKeys := []string{
-		"2026/02/SYN-363.pdf",
-		"2026/02/SYN-363.pdf",
-		"2026/02/SYN-363.pdf",
+		"2026/02/SYN-363-A.pdf",
+		"2026/02/SYN-363-B.pdf",
+		"2026/02/SYN-363-C.pdf",
 	}
 	if renderer.count() != 3 || !slices.Equal(uploader.keys(), wantKeys) {
 		t.Fatalf(
@@ -96,14 +99,18 @@ func TestEventWorkerIntegration_ConsumesDuplicateAndResumesAfterMalformedRecord(
 			uploader.keys(),
 		)
 	}
-	if got := metadata.values(); len(got) != 3 {
+	wantMetadata := []string{
+		"SYN-363-A:2026/02/SYN-363-A.pdf",
+		"SYN-363-B:2026/02/SYN-363-B.pdf",
+		"SYN-363-C:2026/02/SYN-363-C.pdf",
+	}
+	if got := metadata.values(); !slices.Equal(got, wantMetadata) {
 		t.Fatalf("metadata writes = %v", got)
 	}
-	for _, value := range metadata.values() {
-		if value != "SYN-363:2026/02/SYN-363.pdf" {
-			t.Fatalf("metadata write = %q", value)
-		}
-	}
+}
+
+func registrationFor(number string) string {
+	return strings.Replace(validRegistration, "SYN-363", number, 1)
 }
 
 func TestEventWorkerIntegration_GeneratesRetrievableDocument(t *testing.T) {
@@ -359,6 +366,24 @@ func initializeIntegrationProgress(
 		len(committed.Topics[0].Partitions) != 1 ||
 		committed.Topics[0].Partitions[0].ErrorCode != 0 {
 		t.Fatalf("initialize event progress = (%T, %v)", response, err)
+	}
+}
+
+func requireIntegrationCommittedOffset(
+	t *testing.T,
+	ctx context.Context,
+	client *kgo.Client,
+	topic string,
+	group string,
+	want int64,
+) {
+	t.Helper()
+	committed, err := readCommittedOffsets(ctx, client, topic, group, []int32{0})
+	if err != nil {
+		t.Fatalf("read committed event progress: %v", err)
+	}
+	if got := committed[0]; got != want {
+		t.Fatalf("committed event offset = %d, want %d", got, want)
 	}
 }
 
