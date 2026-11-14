@@ -221,6 +221,70 @@ func TestWorker_HandlerFailureWithdrawsReadinessUntilSuccess(t *testing.T) {
 	}
 }
 
+func TestWorker_CheckRequiresReachableKafkaAndStableAssignment(t *testing.T) {
+	t.Run("Kafka unavailable", func(t *testing.T) {
+		client := &fakeClient{pingErr: errors.New("private broker failure")}
+		worker := newWorker(
+			client,
+			&fakeGenerator{},
+			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+		)
+		err := worker.Check(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "Kafka unavailable") {
+			t.Fatalf("readiness error = %v", err)
+		}
+	})
+
+	t.Run("stable assignment", func(t *testing.T) {
+		worker := newWorker(&fakeClient{}, &fakeGenerator{}, slog.Default())
+		worker.assigned.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		started := time.Now()
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			worker.assigned.Store(true)
+			time.Sleep(50 * time.Millisecond)
+			worker.assigned.Store(false)
+			time.Sleep(20 * time.Millisecond)
+			worker.assigned.Store(true)
+		}()
+		if err := worker.Check(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(started); elapsed < 300*time.Millisecond {
+			t.Fatalf("readiness returned after unstable assignment in %s", elapsed)
+		}
+	})
+
+	t.Run("assignment unavailable", func(t *testing.T) {
+		worker := newWorker(
+			&fakeClient{},
+			&fakeGenerator{},
+			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+		)
+		worker.assigned.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		err := worker.Check(ctx)
+		if err == nil || !strings.Contains(err.Error(), "group assignment unavailable") {
+			t.Fatalf("readiness error = %v", err)
+		}
+	})
+}
+
+func TestKafkaHeaderCarrier_UpdatesAndListsFixedHeaders(t *testing.T) {
+	carrier := kafkaHeaderCarrier{{Key: "traceparent", Value: []byte("before")}}
+	carrier.Set("traceparent", "after")
+	carrier.Set("missing", "ignored")
+	if got := carrier.Get("traceparent"); got != "after" {
+		t.Fatalf("traceparent = %q", got)
+	}
+	if keys := carrier.Keys(); len(keys) != 1 || keys[0] != "traceparent" {
+		t.Fatalf("keys = %v", keys)
+	}
+}
+
 func waitForFailureState(t *testing.T, worker *Worker) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -288,6 +352,37 @@ func TestWorker_ShutdownCommitsReleasesAndCloses(t *testing.T) {
 			client.allowCount(),
 			err,
 		)
+	}
+}
+
+func TestWorker_ShutdownBoundsCommitAndCloseFailures(t *testing.T) {
+	// given
+	release := make(chan struct{})
+	commitFailure := errors.New("synthetic commit failure")
+	client := &fakeClient{commitErr: commitFailure, closeRelease: release}
+	worker := newWorker(client, &fakeGenerator{}, slog.Default())
+	commitFailures := make(chan string, 1)
+	worker.commitFailure = func(_ context.Context, eventType string) {
+		commitFailures <- eventType
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	// when
+	err := worker.Shutdown(ctx)
+	close(release)
+
+	// then
+	if !errors.Is(err, commitFailure) || !errors.Is(err, context.DeadlineExceeded) ||
+		client.allowCount() == 0 {
+		t.Fatalf(
+			"bounded shutdown error = %v, rebalance releases = %d",
+			err,
+			client.allowCount(),
+		)
+	}
+	if eventType := <-commitFailures; eventType != "registered" {
+		t.Fatalf("commit failure event type = %q", eventType)
 	}
 }
 
@@ -647,6 +742,9 @@ type fakeClient struct {
 	allowed        int
 	committed      bool
 	closed         bool
+	pingErr        error
+	commitErr      error
+	closeRelease   <-chan struct{}
 }
 
 func (client *fakeClient) Poll(ctx context.Context, limit int) pollResult {
@@ -673,7 +771,7 @@ func (client *fakeClient) Poll(ctx context.Context, limit int) pollResult {
 	return pollResult{errors: []error{ctx.Err()}}
 }
 
-func (*fakeClient) Ping(context.Context) error { return nil }
+func (client *fakeClient) Ping(context.Context) error { return client.pingErr }
 
 func (client *fakeClient) AllowRebalance() {
 	client.mu.Lock()
@@ -685,10 +783,13 @@ func (client *fakeClient) CommitUncommittedOffsets(context.Context) error {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.committed = true
-	return nil
+	return client.commitErr
 }
 
 func (client *fakeClient) CloseAllowingRebalance() {
+	if client.closeRelease != nil {
+		<-client.closeRelease
+	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.closed = true
