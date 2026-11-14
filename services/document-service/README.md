@@ -418,9 +418,10 @@ verifies stable committed Kafka progress while the group is inactive, acquires t
 waits for a stable assignment before readiness. The worker handles at most one record per poll.
 Malformed and handler-failed records are terminal consumed outcomes under the selected five-second
 weak auto-commit model; a commit failure or interruption can replay them, so this is not exactly
-once. A non-cancellation handler failure withdraws readiness while liveness remains independent;
-the next successful registration restores readiness. Shutdown cancels the worker, commits its
-current consumed position, releases rebalances and closes the consumer before writer resources.
+once. Handler failures update the bounded failed-worker signal without latching lookup readiness;
+readiness continues to check current Kafka assignment/connectivity and writer-database health.
+Shutdown cancels the worker, commits its current consumed position, releases rebalances and closes
+the consumer before writer resources.
 
 The generation core accepts one validated registration, maps it through `internal/jsreport`,
 uploads `yyyy/MM/<policy>.pdf` through the MinIO writer, then inserts that UTF-8 key through the

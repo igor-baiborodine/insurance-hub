@@ -166,39 +166,20 @@ func TestWorker_HandlesOneRecordWithTraceAndSafeOutcome(t *testing.T) {
 	}
 }
 
-func TestWorker_HandlerFailureWithdrawsReadinessUntilSuccess(t *testing.T) {
+func TestWorker_HandlerFailureDoesNotLatchReadiness(t *testing.T) {
 	// given
 	ctx, cancel := context.WithCancel(context.Background())
-	secondPoll := make(chan struct{})
-	client := &fakeClient{polls: []pollResult{
-		{
-			records: []*kgo.Record{
-				{Key: []byte("SYN-363"), Value: []byte(validRegistration)},
-			},
-		},
-		{
-			records: []*kgo.Record{
-				{Key: []byte("SYN-363"), Value: []byte(validRegistration)},
-			},
-		},
-	}, secondPollGate: secondPoll}
+	client := &fakeClient{polls: []pollResult{{records: []*kgo.Record{
+		{Key: []byte("SYN-363"), Value: []byte(validRegistration)},
+	}}}}
 	firstHandled := make(chan struct{})
-	secondHandled := make(chan struct{})
-	call := 0
 	generator := &fakeGenerator{execute: func(
 		context.Context,
 		domain.PolicyRegistration,
 	) (application.GenerationResult, error) {
-		call++
-		if call == 1 {
-			close(firstHandled)
-			return application.GenerationResult{}, errors.New(
-				"private dependency failure",
-			)
-		}
-		close(secondHandled)
+		close(firstHandled)
 		cancel()
-		return application.GenerationResult{}, nil
+		return application.GenerationResult{}, errors.New("private dependency failure")
 	}}
 	worker := newWorker(client, generator, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 	done := make(chan error, 1)
@@ -206,18 +187,17 @@ func TestWorker_HandlerFailureWithdrawsReadinessUntilSuccess(t *testing.T) {
 	// when
 	go func() { done <- worker.Run(ctx) }()
 	<-firstHandled
-	waitForFailureState(t, worker)
-	readinessErr := worker.Check(context.Background())
-	close(secondPoll)
-	<-secondHandled
 	runErr := <-done
+	readinessCtx, cancelReadiness := context.WithTimeout(context.Background(), time.Second)
+	defer cancelReadiness()
+	readinessErr := worker.Check(readinessCtx)
 
 	// then
-	if readinessErr == nil || !strings.Contains(readinessErr.Error(), "generation dependency") {
+	if readinessErr != nil {
 		t.Fatalf("readiness error = %v", readinessErr)
 	}
-	if runErr != nil || worker.failed.Load() {
-		t.Fatalf("recovered worker = failed:%t run:%v", worker.failed.Load(), runErr)
+	if runErr != nil {
+		t.Fatalf("worker run error = %v", runErr)
 	}
 }
 
@@ -311,18 +291,6 @@ func TestKafkaHeaderCarrier_UpdatesAndListsFixedHeaders(t *testing.T) {
 	}
 }
 
-func waitForFailureState(t *testing.T, worker *Worker) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if worker.failed.Load() {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("worker did not record generation failure")
-}
-
 func TestWorker_InvalidRecordIsConsumedWithoutCallingGenerator(t *testing.T) {
 	// given
 	ctx, cancel := context.WithCancel(context.Background())
@@ -351,10 +319,9 @@ func TestWorker_InvalidRecordIsConsumedWithoutCallingGenerator(t *testing.T) {
 
 	// when
 	err := worker.Run(ctx)
-
 	// then
-	if err != nil || worker.failed.Load() {
-		t.Fatalf("invalid record handling = failed:%t err:%v", worker.failed.Load(), err)
+	if err != nil {
+		t.Fatalf("invalid record handling = %v", err)
 	}
 }
 

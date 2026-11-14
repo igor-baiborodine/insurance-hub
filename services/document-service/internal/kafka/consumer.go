@@ -85,7 +85,6 @@ type Worker struct {
 	generator     generator
 	logger        *slog.Logger
 	assigned      *atomic.Bool
-	failed        atomic.Bool
 	eventType     string
 	propagator    propagation.TextMapPropagator
 	observe       func(context.Context, string) (context.Context, func(context.Context, string, error))
@@ -222,15 +221,11 @@ func newWorker(client consumerClient, generator generator, logger *slog.Logger) 
 	}
 }
 
-// Check verifies broker reachability, handler state, and stable group assignment.
+// Check verifies broker reachability and stable group assignment. The event observer owns the
+// last-handler-outcome signal; a completed record failure must not latch service readiness.
 func (worker *Worker) Check(ctx context.Context) error {
 	if worker == nil || worker.client == nil {
 		return errors.New("check Document registration worker: preflight is required")
-	}
-	if worker.failed.Load() {
-		return errors.New(
-			"check Document registration worker: generation dependency failed",
-		)
 	}
 	if err := worker.client.Ping(ctx); err != nil {
 		worker.logger.ErrorContext(
@@ -243,11 +238,6 @@ func (worker *Worker) Check(ctx context.Context) error {
 	}
 	stableSince := time.Time{}
 	for {
-		if worker.failed.Load() {
-			return errors.New(
-				"check Document registration worker: generation dependency failed",
-			)
-		}
 		if worker.assigned.Load() {
 			if stableSince.IsZero() {
 				stableSince = time.Now()
@@ -321,8 +311,6 @@ func (worker *Worker) Run(ctx context.Context) error {
 				if errors.Is(err, context.Canceled) ||
 					errors.Is(err, context.DeadlineExceeded) {
 					outcome = "cancelled"
-				} else {
-					worker.failed.Store(true)
 				}
 				finish(recordCtx, outcome, err)
 				worker.logger.ErrorContext(
@@ -331,7 +319,6 @@ func (worker *Worker) Run(ctx context.Context) error {
 				)
 				break
 			}
-			worker.failed.Store(false)
 			finish(recordCtx, "success", nil)
 		}
 		worker.client.AllowRebalance()
