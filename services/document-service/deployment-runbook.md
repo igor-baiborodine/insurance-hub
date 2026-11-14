@@ -6,7 +6,7 @@
   - [Candidate identity and caller proof](#candidate-identity-and-caller-proof)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
-  - [Explicit database and read-access administration](#explicit-database-and-read-access-administration)
+  - [Explicit database, writer and template administration](#explicit-database-writer-and-template-administration)
     - [Fresh schema initialization and compatible adoption](#fresh-schema-initialization-and-compatible-adoption)
     - [Verification and focused disposable smoke](#verification-and-focused-disposable-smoke)
 
@@ -178,14 +178,17 @@ context, namespaces, source revision, digest, Pod image ID, runtime version, ren
 legacy separation differs. Recovery uses a reviewed release commit or Flux reconciliation; never
 patch QA, suspend the shared owner or remove Java resources.
 
-## Explicit database and read-access administration
+## Explicit database, writer and template administration
 
 The administrative executable and resource tooling are separate from API startup. Lookup uses the
 restricted reader identities only; Java retains ordinary routes and registration authority.
 `document` owns both fresh and adopted tables/sequences/history. `go_document_migrator` is a
-NOINHERIT login that explicitly assumes `document`; `go_document_reader` has SELECT only and no
-sequence/owner membership. MinIO uses a separate `document-reader` identity with a `document-reader`
-policy limited to reads and bucket metadata on `policies`.
+NOINHERIT login that explicitly assumes `document`; `go_document_reader` has SELECT only.
+`go_document_writer` has INSERT plus sequence USAGE and no read, update, delete, DDL or owner
+membership. MinIO uses separate `document-reader` and `document-writer` identities. The writer is
+limited to PutObject, AbortMultipartUpload and ListMultipartUploadParts on `policies/*`. This same
+explicit interface creates the fixed jsreport `POLICY` Handlebars/chrome-pdf template only when it
+is absent; any existing content, engine or recipe difference blocks without replacement.
 
 Use an independently verified administrative runner with Kubernetes access, psql, mc and network
 reachability to the enrolled MinIO DNS endpoint. Supply mc's private `config.json` with alias
@@ -205,6 +208,7 @@ export DOCUMENT_RESOURCE_CLUSTER=local-dev-postgres-document
 export DOCUMENT_RESOURCE_DB_HOST=local-dev-postgres-document-rw.local-dev-all.svc.cluster.local
 export DOCUMENT_RESOURCE_MINIO_NS=local-dev-minio-document
 export DOCUMENT_RESOURCE_MINIO_ENDPOINT=http://minio.local-dev-minio-document.svc.cluster.local:80
+export DOCUMENT_RESOURCE_JSREPORT_ENDPOINT=http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488
 export DOCUMENT_MINIO_ADMIN_CONFIG=/protected/document-minio/config.json
 make -C services/document-service resource-inspect
 ```
@@ -220,6 +224,7 @@ export DOCUMENT_RESOURCE_CLUSTER=qa-postgres-document
 export DOCUMENT_RESOURCE_DB_HOST=qa-postgres-document-rw.qa-data.svc.cluster.local
 export DOCUMENT_RESOURCE_MINIO_NS=qa-minio-document
 export DOCUMENT_RESOURCE_MINIO_ENDPOINT=https://minio.qa-minio-document.svc.cluster.local:443
+export DOCUMENT_RESOURCE_JSREPORT_ENDPOINT=http://qa-jsreport.qa-svc.svc.cluster.local:5488
 export DOCUMENT_MINIO_ADMIN_CONFIG=/protected/qa-document-minio/config.json
 make -C services/document-service resource-inspect
 ```
@@ -234,12 +239,13 @@ unset DOCUMENT_RESOURCE_CONFIRM
 ```
 
 Ensure validates the owned boundary before writes, enrolls the CNPG UID and a stable instance UUID,
-creates only absent PostgreSQL reader/migrator and MinIO read resources, and preserves existing
+creates only absent PostgreSQL reader/migrator/writer, MinIO read/write and jsreport template
+resources, and preserves existing
 credentials. It removes inherited PUBLIC database/schema access only after checking consumers;
 Java's `document` ownership remains usable. In the dedicated Document CNPG cluster, it also
 revokes PUBLIC CONNECT on the `postgres` and `template1` maintenance databases so service logins
 cannot enter them. A foreign database, maintenance owner or unknown login blocks this operation;
-no other service's database cluster is modified. No seed, Go writer, rotation, revoke or reset is provided.
+no other service's database cluster is modified. No seed, rotation, revoke or reset is provided.
 It creates the following environment-prefixed Secrets in the selected service namespace:
 
 | Secret suffix after environment prefix | Contents and purpose |
@@ -247,7 +253,9 @@ It creates the following environment-prefixed Secrets in the selected service na
 | `postgres-document-admin-target` | `target.json`: protected environment/context/namespaces/database/host/cluster UID/instance UUID enrollment |
 | `postgres-document-reader-creds` | `database-url`, `password`, `ca.crt`: verify-full read login and public CNPG trust |
 | `postgres-document-migrator-creds` | `database-url`, `password`, `ca.crt`: administrative login and trust, never mounted in the API |
+| `postgres-document-writer-creds` | `database-url`, `password`, `ca.crt`: verify-full INSERT/sequence-USAGE login for generation only |
 | `minio-document-reader-creds` | `access-key`, `secret-key`, `endpoint`, `ca.crt`: separate read identity and QA public trust (empty CA for accepted local-dev HTTP) |
+| `minio-document-writer-creds` | `access-key`, `secret-key`, `endpoint`, `ca.crt`: separate `policies/*` upload identity and the same explicit trust |
 
 Pending Secrets are created before external credential/resource creation and retained if setup is
 interrupted. Rerun against the same verified target: existing private credentials are reused,
@@ -282,14 +290,15 @@ make -C services/document-service migration
 ```
 
 Status/version are genuinely read-only, including before Goose exists. Status distinguishes
-`uninitialized`, `unmanaged`, `pending` and `version=1`; version reports `uninitialized`, `0` or `1`.
+`uninitialized`, `unmanaged`, `pending`, `version=1` and `version=2`; version reports
+`uninitialized`, `0`, `1` or `2`.
 An unmanaged compatible schema has no recorded migration version yet. Neither command initializes
 history, advances a sequence, creates objects or repairs state. An incompatible schema is an error.
 
 For a fresh installation, infrastructure and resource ensure must already exist; Java is not
 needed to initialize the schema. The explicit operation creates the accepted nullable bytea/
-policy-number table and increment-1 Hibernate sequence as `document`, records Goose version 1,
-and grants reader SELECT:
+policy-number table and increment-1 Hibernate sequence as `document`, records Goose versions 1 and
+2, grants reader SELECT, and grants the separate writer INSERT plus sequence USAGE:
 
 ```sh
 export DOCUMENT_MIGRATION_OPERATION=migrate
@@ -307,7 +316,8 @@ sequence safety validation. Java's unpooled increment-1 nextval may advance natu
 never calls nextval/setval on that sequence. It checks safety against existing IDs rather than
 computing a replacement position from them. Compatible data, duplicates, IDs, bytes and sequence
 progress are preserved; partial/foreign schema, unsafe/exhausted sequence and history drift fail.
-Reader grants can be restored by repeating the operation. A failed or uncertain command needs
+Reader grants can be restored by repeating the operation. Writer object grants remain owned by the
+immutable version-2 migration. A failed or uncertain command needs
 read-only status/catalog inspection before retry. Applied SQL is immutable; use forward migrations
 for later changes. No down/reset, reseeding, Java startup dependency or ownership transfer exists.
 
@@ -319,15 +329,19 @@ must not bypass Flux workload ownership; these commands do not deploy or change 
 
 ### Verification and focused disposable smoke
 
-After explicit migration, read verification accepts an empty metadata table and tests actual reader
-login/SELECT, owner-role assumption and SQLSTATE 42501 denials. PostgreSQL forbidden-operation
+After explicit migration, verification accepts an empty metadata table and tests actual reader and
+writer logins, required grants, owner-role assumption and SQLSTATE 42501 denials. PostgreSQL forbidden-operation
 probes always roll back and never call nextval; unexpected privileges fail verification. MinIO
 verification authenticates the separate read identity, checks the exact policy and private bucket,
 and requires an independently provisioned synthetic object `2026/02/SYN-362.pdf` with bytes
 `%PDF-362`. Its creation on any shared target requires separately authorized fixture scope.
 No customer object is selected for this probe. Verification downloads only that eight-byte fixture
 to a private disposable file, then checks denied unrelated-bucket/admin reads without issuing
-object writes/deletes. Real write/delete denials are exercised on disposable storage by the smoke.
+object writes/deletes. Writer verification uploads one fixed administration probe through the
+writer identity, checks it through the administrator and removes it through the administrator;
+writer read/list/delete/admin and unrelated-resource requests must be real authorization denials.
+The jsreport definition must remain exactly 183 bytes with SHA-256
+`2074d32d049fb12d4d3cbacb9f47d27cfcc133ae5ac7ac37f4f8c434ba13db4d`.
 
 ```sh
 export DOCUMENT_RESOURCE_PROBE_KEY=2026/02/SYN-362.pdf

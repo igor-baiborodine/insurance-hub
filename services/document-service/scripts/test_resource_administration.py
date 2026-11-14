@@ -131,7 +131,52 @@ def test_import_has_no_command_effects(monkeypatch):
     # when
     module = importlib.reload(resources)
     # then
-    assert module.ROLES == ("go_document_reader", "go_document_migrator")
+    assert module.ROLES == (
+        "go_document_reader",
+        "go_document_migrator",
+        "go_document_writer",
+    )
+
+
+def test_writer_definitions_are_exact_and_template_drift_blocks():
+    # given
+    expected_actions = {
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+    }
+    jsreport = resources.JSReport("http://127.0.0.1:5488")
+    jsreport.request = lambda *_args: {
+        "value": [
+            {
+                "name": "POLICY",
+                "content": resources.POLICY_TEMPLATE.decode() + "drift",
+                "engine": "handlebars",
+                "recipe": "chrome-pdf",
+            }
+        ]
+    }
+    # when / then
+    statement = resources.WRITER_POLICY["Statement"]
+    assert len(statement) == 1
+    assert set(statement[0]["Action"]) == expected_actions
+    assert statement[0]["Resource"] == ["arn:aws:s3:::policies/*"]
+    assert len(resources.POLICY_TEMPLATE) == 183
+    assert resources.hashlib.sha256(resources.POLICY_TEMPLATE).hexdigest() == (
+        resources.POLICY_TEMPLATE_SHA256
+    )
+    with pytest.raises(resources.ResourceError, match="differs"):
+        jsreport.inspect()
+
+
+def test_existing_policy_template_is_preserved_without_write():
+    # given
+    jsreport = resources.JSReport("http://127.0.0.1:5488")
+    jsreport.request = lambda *_args: (_ for _ in ()).throw(
+        AssertionError("accepted existing template must not be rewritten")
+    )
+    # when / then
+    jsreport.ensure({"template": True})
 
 
 def test_secret_replay_never_overwrites_credentials():

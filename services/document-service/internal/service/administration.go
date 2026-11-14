@@ -65,7 +65,7 @@ func runMigration(
 		if err := administration.Migrate(ctx, db, target); err != nil {
 			return "", err
 		}
-		return "version=1", nil
+		return "version=2", nil
 	case MigrationOperationStatus:
 		return administration.Status(ctx, db, target)
 	case MigrationOperationVersion:
@@ -74,6 +74,8 @@ func runMigration(
 			return "", err
 		}
 		switch state {
+		case "version=2":
+			return "2", nil
 		case "version=1":
 			return "1", nil
 		case "pending":

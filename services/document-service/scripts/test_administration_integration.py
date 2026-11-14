@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -13,7 +12,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 import pytest
 
@@ -665,11 +664,13 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     assert migrate("version") == "0"
     admin(
         resources.role_sql(
-            {role: "a" * 64 for role in resources.ROLES}, {"go_document_migrator"}, target
+            {role: "a" * 64 for role in resources.ROLES},
+            {"go_document_migrator", "go_document_writer"},
+            target,
         )
     )
     # when
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
     # then
     # Exact independent legacy schema; an empty table is valid and no JVM is required.
     assert (
@@ -684,9 +685,9 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
         )
         == "document"
     )
-    assert migrate() == "version=1"
-    assert migrate("status") == "version=1"
-    assert migrate("version") == "1"
+    assert migrate() == "version=2"
+    assert migrate("status") == "version=2"
+    assert migrate("version") == "2"
     admin(
         "SET ROLE document; INSERT INTO public.policy_document VALUES(nextval('public.hibernate_sequence'),'\\x25504446','SYN-362'),(nextval('public.hibernate_sequence'),NULL,'SYN-362'); SELECT setval('public.hibernate_sequence',35,true);"
     )
@@ -696,8 +697,8 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     # Turn initialized fixture into an independent Java-owned populated schema, then adopt it.
     admin("SET ROLE document; DROP TABLE public.goose_db_version;")
     assert migrate("status") == "unmanaged"
-    assert migrate() == "version=1"
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
+    assert migrate() == "version=2"
     assert (
         admin(
             "SELECT md5(string_agg(id||':'||coalesce(encode(bytes,'hex'),'null')||':'||policy_number,',' ORDER BY id)) FROM public.policy_document;"
@@ -744,6 +745,27 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     admin("SET ROLE document; REVOKE INSERT ON public.policy_document FROM go_document_reader;")
     resources.verify_reader(reader)
 
+    writer_pgpass = private(
+        root / "writer.pgpass", f"localhost:*:document:go_document_writer:{'a' * 64}\n"
+    )
+    writer_env = os.environ.copy()
+    writer_env.update(PGPASSFILE=str(writer_pgpass), PGCONNECT_TIMEOUT="3")
+    writer_dsn = dsn.replace("user=go_document_reader", "user=go_document_writer")
+
+    def writer(sql):
+        result = subprocess.run(
+            ["psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1", "-d", writer_dsn],
+            input=sql,
+            env=writer_env,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    resources.verify_writer(writer)
+
     private(pgpass, pgpass.read_text() + f"localhost:*:postgres:go_document_reader:{'a' * 64}\n")
     other = subprocess.run(
         [
@@ -764,6 +786,30 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     assert other.returncode != 0 and 'permission denied for database "postgres"' in other.stderr, (
         "unrelated database admission was not denied"
     )
+    private(
+        writer_pgpass,
+        writer_pgpass.read_text() + f"localhost:*:postgres:go_document_writer:{'a' * 64}\n",
+    )
+    writer_other = subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-v",
+            "VERBOSITY=verbose",
+            "-d",
+            writer_dsn.replace("dbname=document", "dbname=postgres"),
+            "-c",
+            "SELECT 1",
+        ],
+        env=writer_env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert (
+        writer_other.returncode != 0
+        and 'permission denied for database "postgres"' in writer_other.stderr
+    ), "writer entered the maintenance database"
 
     assert (
         admin(
@@ -776,8 +822,8 @@ def test_fresh_adoption_repeat_and_privileges(postgres):
     bad = dict(target, instanceID="00000000-0000-4000-8000-000000000999")
     mismatch = private(root / "wrong-target.json", json.dumps(bad))
     migrate(failure=True, enrollment=mismatch)
-    assert admin("SELECT count(*) FROM public.goose_db_version;") == "2"
-    admin("SET ROLE document; UPDATE public.goose_db_version SET version_id=99 WHERE version_id=1;")
+    assert admin("SELECT count(*) FROM public.goose_db_version;") == "3"
+    admin("SET ROLE document; UPDATE public.goose_db_version SET version_id=99 WHERE version_id=2;")
     migrate(failure=True)
 
 
@@ -843,7 +889,7 @@ def test_rejects_unsafe_schema_sequence_and_bounded_contention(postgres):
             == "0"
         )
     )
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
 
 
 def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypatch):
@@ -967,7 +1013,7 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
 def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
     # given
     admin, migrate, _target, root, pg_name = postgres
-    assert migrate() == "version=1"
+    assert migrate() == "version=2"
     pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
         "5432/tcp"
     ][0]["HostPort"]
@@ -1078,16 +1124,8 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
 def test_generation_traverses_real_dependencies(postgres, tmp_path):
     # given
     admin, migrate, _target, root, pg_name = postgres
-    assert migrate() == "version=1"
-    writer_password = "synthetic-document-writer-363"
-    admin(
-        "CREATE ROLE go_document_writer LOGIN NOINHERIT PASSWORD "
-        f"'{writer_password}'; "
-        "GRANT CONNECT ON DATABASE document TO go_document_writer; "
-        "GRANT USAGE ON SCHEMA public TO go_document_writer; "
-        "GRANT INSERT ON public.policy_document TO go_document_writer; "
-        "GRANT USAGE ON SEQUENCE public.hibernate_sequence TO go_document_writer;"
-    )
+    assert migrate() == "version=2"
+    writer_password = "a" * 64
     pg_port = json.loads(run([DOCKER, "inspect", pg_name]))[0]["NetworkSettings"]["Ports"][
         "5432/tcp"
     ][0]["HostPort"]
@@ -1135,7 +1173,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         )
         minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
         wait_for(lambda: minio_ready(minio))
-        minio.mc("mb", "--ignore-existing", "document/policies")
+        minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
         minio.mc("anonymous", "set", "upload", "document/policies")
 
         jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
@@ -1143,32 +1181,9 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         ]["5488/tcp"][0]["HostPort"]
         jsreport_endpoint = f"http://127.0.0.1:{jsreport_port}"
         wait_for(lambda: urlopen(jsreport_endpoint, timeout=1).status == 200)
-        template_path = (
-            Path(os.environ["INSURANCE_HUB_ROOT"])
-            / "legacy/documents-service/src/main/resources/policy.template"
-        )
-        template_bytes = template_path.read_bytes()
-        assert len(template_bytes) == 183
-        assert (
-            hashlib.sha256(template_bytes).hexdigest()
-            == "2074d32d049fb12d4d3cbacb9f47d27cfcc133ae5ac7ac37f4f8c434ba13db4d"
-        )
-        template = template_bytes.decode()
-        template_request = Request(
-            f"{jsreport_endpoint}/odata/templates",
-            data=json.dumps(
-                {
-                    "name": "POLICY",
-                    "content": template,
-                    "engine": "handlebars",
-                    "recipe": "chrome-pdf",
-                }
-            ).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urlopen(template_request, timeout=5) as response:
-            assert response.status == 201
+        jsreport = resources.JSReport(jsreport_endpoint)
+        jsreport.ensure(jsreport.inspect())
+        assert jsreport.inspect() == {"template": True}
 
         binary = Path(os.environ["GENERATION_TEST_OUTPUT"])
         assert binary.is_file(), "build the owning generation test before integration"
@@ -1177,6 +1192,8 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
             {
                 "DOCUMENT_GENERATION_JSREPORT_URL": jsreport_endpoint,
                 "DOCUMENT_GENERATION_MINIO_URL": minio_endpoint,
+                "AWS_ACCESS_KEY_ID": resources.WRITER_USER,
+                "AWS_SECRET_ACCESS_KEY": "a" * 64,
                 "DOCUMENT_GENERATION_POSTGRES_URL": (
                     f"postgresql://go_document_writer:{writer_password}@localhost:{pg_port}/document"
                     f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
@@ -1212,6 +1229,26 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         assert "This is your new POLICY with number SYN-363" in extracted
         assert "From 2026,2,3 to 2027,2,2" in extracted
         assert "Policy Holder: Synthetic Holder" in extracted
+        with minio.identity("a" * 64, "writer") as writer:
+            writer.mc("pipe", "document/policies/2026/02/SYN-363-writer.pdf", text="%PDF-363")
+            assert (
+                json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363-writer.pdf"))["size"]
+                == 8
+            )
+            for args in (
+                ("cat", "document/policies/2026/02/SYN-363.pdf"),
+                ("rm", "document/policies/2026/02/SYN-363.pdf"),
+                ("admin", "user", "list", "document"),
+            ):
+                result = subprocess.run(
+                    ["mc", "--json", "--config-dir", str(writer.config.parent), *args],
+                    text=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+                assert result.returncode != 0
+                assert resources.authorization_denied(result.stdout), result.stdout
+        minio.mc("rm", "--force", "document/policies/2026/02/SYN-363-writer.pdf")
 
 
 def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, monkeypatch):
@@ -1283,7 +1320,7 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
         stored = {
             manager.target_secret: {"target.json": json.dumps(target, sort_keys=True).encode()}
         }
-        for role, component in zip(resources.ROLES, ("reader", "migrator"), strict=True):
+        for role, component in zip(resources.ROLES, resources.ROLE_COMPONENTS, strict=True):
             stored[manager.secret_name(component)] = {
                 "password": b"a" * 64,
                 "database-url": resources.database_url(role, "a" * 64, "localhost").encode(),
@@ -1327,19 +1364,30 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
             yield execute
 
         manager.connection = connection
+
+        class Templates:
+            present = False
+
+            def inspect(self):
+                return {"template": self.present}
+
+            def ensure(self, _state):
+                self.present = True
+
+        templates = Templates()
         # Simulate a pending credential whose external role has not survived setup.
         admin(
             "REVOKE document FROM go_document_migrator; DROP OWNED BY go_document_migrator; DROP ROLE go_document_migrator;"
         )
 
         # when
-        resources.execute_action("ensure", manager, minio)
+        resources.execute_action("ensure", manager, minio, templates)
         snapshot = dict(stored)
-        resources.execute_action("ensure", manager, minio)
+        resources.execute_action("ensure", manager, minio, templates)
 
         # then
         assert stored == snapshot
-        assert len(writes) == 1  # only the absent MinIO credential was created
+        assert len(writes) == 2  # only the absent MinIO reader/writer credentials were created
         with manager.connection("go_document_migrator", "a" * 64, ca) as execute:
             assert execute("SET ROLE document; SELECT current_user;") == "document"
         # Unrecoverable external credentials are rejected before any new writes.
@@ -1347,6 +1395,6 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
 
         # when / then
         with pytest.raises(resources.ResourceError, match="without recoverable Secret"):
-            resources.execute_action("ensure", manager, minio)
+            resources.execute_action("ensure", manager, minio, templates)
         stored[manager.secret_name("reader")] = saved
-        assert len(writes) == 1
+        assert len(writes) == 2

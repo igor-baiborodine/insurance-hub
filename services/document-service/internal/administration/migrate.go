@@ -21,7 +21,7 @@ const (
 var migrationSQL embed.FS
 
 // Migrate verifies the protected target and schema under the same session lock Goose uses for
-// history setup and version-1 execution. Replays validate even when version 1 is already applied.
+// history setup and forward migration execution. Replays validate even when all versions are applied.
 func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	source, err := fs.Sub(migrationSQL, "migrations")
 	if err != nil {
@@ -46,9 +46,11 @@ func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	if err != nil {
 		return fmt.Errorf("configure Document migration: %w", err)
 	}
-	_, err = provider.ApplyVersion(parent, 1, true)
-	if err != nil && !isOnlyAlreadyApplied(err) {
-		return fmt.Errorf("apply Document migration: %w", err)
+	for _, version := range []int64{1, 2} {
+		_, err = provider.ApplyVersion(parent, version, true)
+		if err != nil && !isOnlyAlreadyApplied(err) {
+			return fmt.Errorf("apply Document migration version %d: %w", version, err)
+		}
 	}
 	return applyGrants(parent, db, target)
 }
@@ -74,10 +76,10 @@ func applyGrants(ctx context.Context, db *sql.DB, target Target) (resultErr erro
 	if err != nil {
 		return fmt.Errorf("verify Document migration: %w", err)
 	}
-	if status != "version=1" {
+	if status != "version=2" {
 		return fmt.Errorf("verify Document migration: unexpected state %q", status)
 	}
-	grants := []string{applyReaderGrantsQuery}
+	grants := []string{applyReaderGrantsQuery, applyWriterGrantsQuery}
 
 	for _, grant := range grants {
 		if _, err := tx.ExecContext(ctx, grant); err != nil {

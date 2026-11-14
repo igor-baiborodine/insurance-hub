@@ -442,12 +442,13 @@ The standalone `cmd/migrate` uses `internal/service/administration.go` for comma
 policy/SQL, following Product. These own explicit Document PostgreSQL setup/adoption and read-only
 status/version. They are not used by server startup or
 included as an administrative entrypoint in the API image. Service-local resource tooling owns
-protected PostgreSQL/MinIO read credentials separately. See
-[explicit database and read-access administration](deployment-runbook.md#explicit-database-and-read-access-administration)
+protected PostgreSQL/MinIO reader and writer credentials plus exact-match-only jsreport template
+provisioning separately. See
+[explicit database, writer and template administration](deployment-runbook.md#explicit-database-writer-and-template-administration)
 for fresh Java-independent initialization, compatible adoption, target/confirmation requirements,
 credential recovery and focused `resource-test-fast`, `test-administration` and
-`resource-test-integration` commands. The runtime mounts only the reader Secrets; migrator and
-administrative target credentials are never part of API startup or its image.
+`resource-test-integration` commands. The runtime mounts only its separate reader/writer Secrets;
+migrator and administrative target credentials are never part of API startup or its image.
 
 Both command entry points use the same service-local logger facade as Product, backed by published
 Servicekit logging. Administrative queries and session/lock/grant statements live in embedded

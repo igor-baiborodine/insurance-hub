@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -18,6 +19,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -35,7 +37,8 @@ ENVIRONMENTS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-data", "qa-svc"),
 }
-ROLES = ("go_document_reader", "go_document_migrator")
+ROLES = ("go_document_reader", "go_document_migrator", "go_document_writer")
+ROLE_COMPONENTS = ("reader", "migrator", "writer")
 ATTRIBUTES = {
     "rolcanlogin": True,
     "rolsuper": False,
@@ -65,6 +68,34 @@ POLICY = {
 }
 POLICY_NAME = "document-reader"
 USER = "document-reader"
+WRITER_POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:AbortMultipartUpload",
+                "s3:ListMultipartUploadParts",
+            ],
+            "Resource": ["arn:aws:s3:::policies/*"],
+        }
+    ],
+}
+WRITER_POLICY_NAME = "document-writer"
+WRITER_USER = "document-writer"
+MINIO_RESOURCES = {
+    "reader": (USER, POLICY_NAME, POLICY),
+    "writer": (WRITER_USER, WRITER_POLICY_NAME, WRITER_POLICY),
+}
+POLICY_TEMPLATE = b"""<h1>
+    <center>This is your new POLICY with number {{ number }}</center>
+</h1>
+<h2>From {{ from }} to {{ to }} </h2>
+<h2>Policy Holder: {{ policyHolder}} </h2>
+
+Thank you very much!"""
+POLICY_TEMPLATE_SHA256 = "2074d32d049fb12d4d3cbacb9f47d27cfcc133ae5ac7ac37f4f8c434ba13db4d"
 MIGRATOR_CA_MOUNT = "/etc/document-admin/migrator/ca.crt"
 
 
@@ -237,11 +268,11 @@ class Commands:
 
 def database_url(role: str, password: str, host: str) -> str:
     require(role in ROLES, "unsupported Document role")
-    mount = (
-        "/etc/document-service/postgres/ca.crt"
-        if role == ROLES[0]
-        else "/etc/document-admin/migrator/ca.crt"
-    )
+    mount = {
+        ROLES[0]: "/etc/document-service/postgres/ca.crt",
+        ROLES[1]: MIGRATOR_CA_MOUNT,
+        ROLES[2]: "/etc/document-service/postgres-writer/ca.crt",
+    }[role]
     return f"postgresql://{role}:{quote(password, safe='')}@{host}:5432/document?sslmode=verify-full&sslrootcert={mount}"
 
 
@@ -269,8 +300,8 @@ def role_sql(passwords: dict[str, str], existing: set[str], target: dict) -> str
         "REVOKE ALL ON DATABASE document FROM PUBLIC",
         "REVOKE CONNECT ON DATABASE postgres,template1 FROM PUBLIC",
         "REVOKE ALL ON SCHEMA public FROM PUBLIC",
-        "GRANT CONNECT ON DATABASE document TO go_document_reader,go_document_migrator",
-        "GRANT USAGE ON SCHEMA public TO go_document_reader",
+        "GRANT CONNECT ON DATABASE document TO go_document_reader,go_document_migrator,go_document_writer",
+        "GRANT USAGE ON SCHEMA public TO go_document_reader,go_document_writer",
         "GRANT document TO go_document_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE",
         "CREATE SCHEMA IF NOT EXISTS document_admin AUTHORIZATION postgres",
         "REVOKE ALL ON SCHEMA document_admin FROM PUBLIC",
@@ -297,6 +328,9 @@ class Kubernetes:
         self.host = f"{self.cluster}-rw.{self.data_ns}.svc.cluster.local"
         self.minio_ns = f"{environment}-minio-document"
         self.endpoint = f"{'https' if environment == 'qa' else 'http'}://minio.{self.minio_ns}.svc.cluster.local:{443 if environment == 'qa' else 80}"
+        self.jsreport_endpoint = (
+            f"http://{environment}-jsreport.{self.svc_ns}.svc.cluster.local:5488"
+        )
         required = {
             "CONTEXT": self.context,
             "DATA_NS": self.data_ns,
@@ -305,6 +339,7 @@ class Kubernetes:
             "DB_HOST": self.host,
             "MINIO_NS": self.minio_ns,
             "MINIO_ENDPOINT": self.endpoint,
+            "JSREPORT_ENDPOINT": self.jsreport_endpoint,
         }
         for key, value in required.items():
             require(
@@ -400,7 +435,7 @@ class Kubernetes:
         )
 
     def secret_name(self, component: str) -> str:
-        return f"{self.environment}-{'minio' if component == 'minio-reader' else 'postgres'}-document-{component.removeprefix('minio-')}-creds"
+        return f"{self.environment}-{'minio' if component.startswith('minio-') else 'postgres'}-document-{component.removeprefix('minio-')}-creds"
 
     def secret(self, name: str) -> dict | None:
         raw = self.kube(
@@ -421,7 +456,7 @@ class Kubernetes:
             name
             in {
                 self.target_secret,
-                *(self.secret_name(c) for c in ("reader", "migrator", "minio-reader")),
+                *(self.secret_name(c) for c in (*ROLE_COMPONENTS, "minio-reader", "minio-writer")),
             },
             "unsupported Secret target",
         )
@@ -450,6 +485,40 @@ class Kubernetes:
         ca = base64.b64decode(raw["data"]["ca.crt"], validate=True)
         require(ca.startswith(b"-----BEGIN CERTIFICATE-----"), "CNPG CA is missing")
         return ca
+
+    @contextmanager
+    def jsreport(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        process = subprocess.Popen(
+            [
+                os.environ.get("KUBECTL", "kubectl"),
+                f"--context={self.context}",
+                "-n",
+                self.svc_ns,
+                "port-forward",
+                f"service/{self.environment}-jsreport",
+                f"{port}:5488",
+                "--address=127.0.0.1",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(40):
+                require(process.poll() is None, "jsreport forward ended early")
+                with socket.socket() as check:
+                    check.settimeout(0.1)
+                    if check.connect_ex(("127.0.0.1", port)) == 0:
+                        break
+                time.sleep(0.1)
+            else:
+                raise ResourceError("jsreport forward did not become ready")
+            yield JSReport(f"http://127.0.0.1:{port}")
+        finally:
+            require(terminate_process_group(process, 5), "jsreport forward cleanup failed")
 
     @contextmanager
     def connection(self, role: str, password: str, ca: bytes):
@@ -574,35 +643,37 @@ class Minio:
             missing=missing,
         )
 
-    def inspect(self) -> dict:
+    def inspect(self, kind: str = "reader") -> dict:
+        require(kind in MINIO_RESOURCES, "unsupported MinIO resource")
+        user_name, policy_name, expected_policy = MINIO_RESOURCES[kind]
         bucket = self.mc("stat", "document/policies", missing=("NoSuchBucket",))
         user = self.mc(
-            "admin", "user", "info", "document", USER, missing=("XMinioAdminNoSuchUser",)
+            "admin", "user", "info", "document", user_name, missing=("XMinioAdminNoSuchUser",)
         )
         policy = self.mc(
-            "admin", "policy", "info", "document", POLICY_NAME, missing=("XMinioAdminNoSuchPolicy",)
+            "admin", "policy", "info", "document", policy_name, missing=("XMinioAdminNoSuchPolicy",)
         )
         bound = False
         if user:
             record = json.loads(user)
             require(
-                record.get("policyName", "") in ("", POLICY_NAME)
+                record.get("policyName", "") in ("", policy_name)
                 and record.get("userStatus") == "enabled"
                 and not record.get("memberOf", []),
                 "foreign/incompatible MinIO user or groups",
             )
-            bound = record.get("policyName") == POLICY_NAME
+            bound = record.get("policyName") == policy_name
         if policy:
             record = json.loads(policy)
             value = record.get("policyInfo", record.get("policy"))
             if isinstance(value, str):
                 value = json.loads(value)
             if isinstance(value, dict) and "Policy" in value:
-                require(value.get("PolicyName") == POLICY_NAME, "foreign policy identity")
+                require(value.get("PolicyName") == policy_name, "foreign policy identity")
                 value = value["Policy"]
             require(
-                canonical_policy(value) == canonical_policy(POLICY),
-                "foreign/incompatible MinIO reader policy",
+                canonical_policy(value) == canonical_policy(expected_policy),
+                f"foreign/incompatible MinIO {kind} policy",
             )
         if bucket:
             anonymous = json.loads(self.mc("anonymous", "get-json", "document/policies"))
@@ -612,29 +683,33 @@ class Minio:
             )
         return {"bucket": bool(bucket), "user": bool(user), "policy": bool(policy), "bound": bound}
 
-    def ensure(self, before: dict, credential: str) -> None:
+    def ensure(self, before: dict, credential: str, kind: str = "reader") -> None:
+        require(kind in MINIO_RESOURCES, "unsupported MinIO resource")
+        user_name, policy_name, expected_policy = MINIO_RESOURCES[kind]
         with tempfile.TemporaryDirectory(prefix="document-policy-") as directory:
             policy = Path(directory) / "policy.json"
-            policy.write_text(json.dumps(POLICY))
+            policy.write_text(json.dumps(expected_policy))
             if not before["bucket"]:
                 self.mc("mb", "document/policies")
             if not before["policy"]:
-                self.mc("admin", "policy", "create", "document", POLICY_NAME, str(policy))
+                self.mc("admin", "policy", "create", "document", policy_name, str(policy))
             if not before["user"]:
-                self.mc("admin", "user", "add", "document", text=f"{USER}\n{credential}\n")
+                self.mc("admin", "user", "add", "document", text=f"{user_name}\n{credential}\n")
             if not before["bound"]:
-                self.mc("admin", "policy", "attach", "document", POLICY_NAME, "--user", USER)
+                self.mc("admin", "policy", "attach", "document", policy_name, "--user", user_name)
 
     @contextmanager
-    def reader(self, credential: str):
-        with tempfile.TemporaryDirectory(prefix="document-minio-reader-") as directory:
+    def identity(self, credential: str, kind: str = "reader"):
+        require(kind in MINIO_RESOURCES, "unsupported MinIO identity")
+        user_name = MINIO_RESOURCES[kind][0]
+        with tempfile.TemporaryDirectory(prefix=f"document-minio-{kind}-") as directory:
             path = Path(directory) / "config.json"
             value = {
                 "version": "10",
                 "aliases": {
                     "document": {
                         "url": self.endpoint,
-                        "accessKey": USER,
+                        "accessKey": user_name,
                         "secretKey": credential,
                         "api": "S3v4",
                         "path": "auto",
@@ -648,6 +723,9 @@ class Minio:
                 (path.parent / "certs").mkdir(mode=0o700)
                 shutil.copytree(source, path.parent / "certs" / "CAs")
             yield Minio(self.commands, path, self.endpoint)
+
+    def reader(self, credential: str):
+        return self.identity(credential, "reader")
 
     def verify(self, credential: str, *, object_probe: bool) -> None:
         with self.reader(credential) as reader:
@@ -677,6 +755,93 @@ class Minio:
                         )
                     else:
                         raise ResourceError("MinIO unrelated/admin read unexpectedly allowed")
+
+    def verify_writer(self, credential: str, *, object_probe: bool) -> None:
+        with self.identity(credential, "writer") as writer:
+            if object_probe:
+                key = "document/policies/.document-admin/SYN-363-probe.pdf"
+                require(not self.mc("stat", key, missing=("NoSuchKey",)), "writer probe key exists")
+                writer.mc("pipe", key, text="%PDF-363")
+                try:
+                    require(
+                        json.loads(self.mc("stat", key)).get("size") == 8, "writer upload failed"
+                    )
+                finally:
+                    self.mc("rm", "--force", key)
+            for args in (
+                ("stat", "document/policies"),
+                ("cat", "document/policies/2026/02/SYN-362.pdf"),
+                ("rm", "document/policies/2026/02/SYN-362.pdf"),
+                ("admin", "user", "list", "document"),
+                ("stat", "document/unrelated-document-probe"),
+            ):
+                try:
+                    writer.mc(*args)
+                except ResourceError as error:
+                    require(
+                        authorization_denied(error.__cause__.stdout),
+                        "MinIO writer denial was not an authorization denial",
+                    )
+                else:
+                    raise ResourceError("MinIO writer received forbidden access")
+
+
+class JSReport:
+    def __init__(self, endpoint: str):
+        parsed = urlsplit(endpoint)
+        require(
+            parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"},
+            "jsreport administration requires a verified loopback forward",
+        )
+        self.endpoint = endpoint.rstrip("/")
+
+    def request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        body = None if payload is None else json.dumps(payload).encode()
+        request = Request(
+            self.endpoint + path,
+            data=body,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            method=method,
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                require(response.status in {200, 201}, "unexpected jsreport response")
+                data = response.read(262145)
+        except OSError as error:
+            raise ResourceError("jsreport administration request failed") from error
+        require(len(data) <= 262144, "jsreport response exceeds safe bound")
+        return json.loads(data) if data else {}
+
+    def inspect(self) -> dict:
+        payload = self.request("GET", "/odata/templates?%24filter=name%20eq%20%27POLICY%27")
+        templates = payload.get("value", payload if isinstance(payload, list) else [])
+        require(isinstance(templates, list) and len(templates) <= 1, "ambiguous POLICY template")
+        if not templates:
+            return {"template": False}
+        template = templates[0]
+        require(
+            template.get("name") == "POLICY"
+            and template.get("engine") == "handlebars"
+            and template.get("recipe") == "chrome-pdf"
+            and template.get("content", "").encode() == POLICY_TEMPLATE
+            and hashlib.sha256(template.get("content", "").encode()).hexdigest()
+            == POLICY_TEMPLATE_SHA256,
+            "existing POLICY template differs from the accepted definition",
+        )
+        return {"template": True}
+
+    def ensure(self, state: dict) -> None:
+        if not state["template"]:
+            self.request(
+                "POST",
+                "/odata/templates",
+                {
+                    "name": "POLICY",
+                    "content": POLICY_TEMPLATE.decode(),
+                    "engine": "handlebars",
+                    "recipe": "chrome-pdf",
+                },
+            )
 
 
 def inventory(manager: Kubernetes) -> dict:
@@ -722,21 +887,23 @@ def inventory(manager: Kubernetes) -> dict:
             .read_text()
             .replace("$1", "true" if flags[0] == "t" else "false")
         )
-        require(history_state in {"pending", "version=1"}, "inconsistent migration history")
+        require(
+            history_state in {"pending", "version=1", "version=2"}, "inconsistent migration history"
+        )
     raw = manager.admin(
-        "SELECT coalesce(json_agg(row_to_json(r)),'[]') FROM (SELECT rolname,rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls FROM pg_roles WHERE rolname IN ('go_document_reader','go_document_migrator')) r;"
+        "SELECT coalesce(json_agg(row_to_json(r)),'[]') FROM (SELECT rolname,rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls FROM pg_roles WHERE rolname IN ('go_document_reader','go_document_migrator','go_document_writer')) r;"
     )
     roles = json.loads(raw)
     for role in roles:
         require({k: role[k] for k in ATTRIBUTES} == ATTRIBUTES, "foreign/elevated Document role")
     memberships = json.loads(
         manager.admin(
-            "SELECT coalesce(json_agg(json_build_object('role',r.rolname,'member',m.rolname,'inherit',a.inherit_option,'set',a.set_option,'admin',a.admin_option)),'[]') FROM pg_auth_members a JOIN pg_roles r ON r.oid=a.roleid JOIN pg_roles m ON m.oid=a.member WHERE m.rolname IN ('go_document_reader','go_document_migrator') OR r.rolname IN ('go_document_reader','go_document_migrator');"
+            "SELECT coalesce(json_agg(json_build_object('role',r.rolname,'member',m.rolname,'inherit',a.inherit_option,'set',a.set_option,'admin',a.admin_option)),'[]') FROM pg_auth_members a JOIN pg_roles r ON r.oid=a.roleid JOIN pg_roles m ON m.oid=a.member WHERE m.rolname IN ('go_document_reader','go_document_migrator','go_document_writer') OR r.rolname IN ('go_document_reader','go_document_migrator','go_document_writer');"
         )
     )
     require(memberships in ([], [MEMBERSHIP]), "foreign Document role memberships")
     others = manager.admin(
-        "SELECT count(*) FROM pg_roles WHERE rolcanlogin AND rolname NOT IN ('postgres','document','go_document_reader','go_document_migrator','streaming_replica') AND rolname !~ '^pg_';"
+        "SELECT count(*) FROM pg_roles WHERE rolcanlogin AND rolname NOT IN ('postgres','document','go_document_reader','go_document_migrator','go_document_writer','streaming_replica') AND rolname !~ '^pg_';"
     )
     require(others == "0", "unknown database consumers; PUBLIC grants require inspection")
     schemas = manager.admin(
@@ -771,6 +938,32 @@ def inventory(manager: Kubernetes) -> dict:
             == "t",
             "reader can connect to unrelated maintenance databases",
         )
+    if any(role["rolname"] == ROLES[2] for role in roles):
+        require(
+            manager.admin(
+                "SELECT NOT has_database_privilege('go_document_writer','postgres','CONNECT') AND NOT has_database_privilege('go_document_writer','template1','CONNECT') AND NOT has_database_privilege('go_document_writer','document','CREATE,TEMPORARY') AND NOT has_schema_privilege('go_document_writer','public','CREATE') AND NOT pg_has_role('go_document_writer','document','MEMBER') AND NOT EXISTS(SELECT FROM pg_class WHERE relowner='go_document_writer'::regrole);"
+            )
+            == "t",
+            "writer owns resources, can assume owner, or has administrative privileges",
+        )
+        if flags[0] == "t":
+            expected_writer = history_state == "version=2"
+            writer_grants = (
+                "has_table_privilege('go_document_writer','public.policy_document','INSERT') "
+                "AND has_sequence_privilege('go_document_writer','public.hibernate_sequence','USAGE')"
+                if expected_writer
+                else "NOT has_table_privilege('go_document_writer','public.policy_document','INSERT') "
+                "AND NOT has_sequence_privilege('go_document_writer','public.hibernate_sequence','USAGE')"
+            )
+            require(
+                manager.admin(
+                    "SELECT "
+                    + writer_grants
+                    + " AND NOT has_table_privilege('go_document_writer','public.policy_document','SELECT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND NOT has_any_column_privilege('go_document_writer','public.policy_document','SELECT,UPDATE,REFERENCES') AND NOT has_sequence_privilege('go_document_writer','public.hibernate_sequence','SELECT,UPDATE');"
+                )
+                == "t",
+                "writer grants differ from migration state",
+            )
     if any(role["rolname"] == ROLES[0] for role in roles):
         require(
             manager.admin(
@@ -789,7 +982,7 @@ def inventory(manager: Kubernetes) -> dict:
             )
     require(
         manager.admin(
-            "SELECT NOT EXISTS(SELECT FROM pg_default_acl d,LATERAL aclexplode(d.defaclacl) a WHERE d.defaclnamespace IN (0,'public'::regnamespace) AND d.defaclobjtype IN ('r','S') AND a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='go_document_reader')));"
+            "SELECT NOT EXISTS(SELECT FROM pg_default_acl d,LATERAL aclexplode(d.defaclacl) a WHERE d.defaclnamespace IN (0,'public'::regnamespace) AND d.defaclobjtype IN ('r','S') AND a.grantee IN (0,(SELECT oid FROM pg_roles WHERE rolname='go_document_reader'),(SELECT oid FROM pg_roles WHERE rolname='go_document_writer')));"
         )
         == "t",
         "unexpected PUBLIC/reader default grants",
@@ -801,6 +994,14 @@ def inventory(manager: Kubernetes) -> dict:
             )
             == "t",
             "reader can access unrelated objects",
+        )
+    if any(role["rolname"] == ROLES[2] for role in roles):
+        require(
+            manager.admin(
+                "SELECT NOT EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname NOT IN ('policy_document','hibernate_sequence') AND c.relkind IN ('r','p','v','m','S') AND CASE WHEN c.relkind='S' THEN has_sequence_privilege('go_document_writer',c.oid,'USAGE,SELECT,UPDATE') ELSE has_table_privilege('go_document_writer',c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') END);"
+            )
+            == "t",
+            "writer can access unrelated objects",
         )
     return {
         "table": flags[0] == "t",
@@ -856,7 +1057,7 @@ def inputs(manager: Kubernetes, state: dict, *, create: bool) -> tuple[dict, dic
     require(create or stored, "target enrollment is missing")
     ca = manager.ca()
     credentials = {}
-    for role, component in zip(ROLES, ("reader", "migrator"), strict=True):
+    for role, component in zip(ROLES, ROLE_COMPONENTS, strict=True):
         secret = manager.secret(manager.secret_name(component))
         require(
             role not in state["roles"] or secret is not None,
@@ -907,46 +1108,86 @@ def verify_reader(execute) -> None:
         require(not result, "unexpected reader probe output")
 
 
-def execute_action(action: str, manager: Kubernetes, minio: Minio) -> None:
+def verify_writer(execute) -> None:
+    require(
+        execute(
+            "SELECT has_table_privilege(current_user,'public.policy_document','INSERT') AND has_sequence_privilege(current_user,'public.hibernate_sequence','USAGE');"
+        )
+        == "t",
+        "writer lacks required insert/sequence access",
+    )
+    for statement in (
+        "SELECT * FROM public.policy_document",
+        "UPDATE public.policy_document SET bytes=bytes WHERE false",
+        "DELETE FROM public.policy_document WHERE false",
+        "TRUNCATE public.policy_document",
+        "CREATE TABLE public.document_denied_probe(id integer)",
+        "CREATE TEMP TABLE document_denied_probe(id integer)",
+        "SELECT * FROM public.hibernate_sequence",
+        "SELECT * FROM public.goose_db_version",
+        "SELECT * FROM document_admin.target_identity",
+        "SET ROLE document",
+    ):
+        literal = "'" + statement.replace("'", "''") + "'"
+        result = execute(
+            "BEGIN; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='2s'; DO $$ DECLARE s text := '00000'; BEGIN BEGIN EXECUTE "
+            + literal
+            + "; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS s=RETURNED_SQLSTATE; END; IF s<>'42501' THEN RAISE EXCEPTION 'privilege denial must be 42501'; END IF; END $$; ROLLBACK;"
+        )
+        require(not result, "unexpected writer probe output")
+
+
+def execute_action(action: str, manager: Kubernetes, minio: Minio, jsreport: JSReport) -> None:
     state = inventory(manager)
-    mstate = minio.inspect()
+    mstates = {kind: minio.inspect(kind) for kind in MINIO_RESOURCES}
+    jstate = jsreport.inspect()
     if action == "inspect":
         print(
             json.dumps(
-                {"environment": manager.environment, "postgres": state, "minio": mstate},
+                {
+                    "environment": manager.environment,
+                    "postgres": state,
+                    "minio": mstates,
+                    "jsreport": jstate,
+                },
                 sort_keys=True,
             )
         )
         return
     if action == "verify":
         require(
-            state["table"] and state["historyState"] == "version=1",
+            state["table"] and state["historyState"] == "version=2",
             "explicit schema initialization/adoption must precede verification",
         )
     target, credentials, ca = inputs(manager, state, create=action == "ensure")
-    msecret_name = manager.secret_name("minio-reader")
-    msecret = manager.secret(msecret_name)
-    require(
-        not mstate["user"] or msecret is not None,
-        "MinIO user has no recoverable Secret; no rotation performed",
-    )
-    if msecret:
+    msecrets = {}
+    for kind, (user_name, _policy_name, _policy) in MINIO_RESOURCES.items():
+        secret_name = manager.secret_name(f"minio-{kind}")
+        secret = manager.secret(secret_name)
         require(
-            set(msecret) == {"access-key", "secret-key", "endpoint", "ca.crt"}
-            and msecret["access-key"] == USER.encode()
-            and msecret["endpoint"] == manager.endpoint.encode()
-            and msecret["ca.crt"] == minio.trust(),
-            "MinIO credential target drift",
+            not mstates[kind]["user"] or secret is not None,
+            f"MinIO {kind} user has no recoverable Secret; no rotation performed",
         )
-    require(action == "ensure" or msecret, "MinIO credential Secret missing")
-    if mstate["user"] and mstate["bound"]:
-        minio.verify(msecret["secret-key"].decode(), object_probe=False)
+        if secret:
+            require(
+                set(secret) == {"access-key", "secret-key", "endpoint", "ca.crt"}
+                and secret["access-key"] == user_name.encode()
+                and secret["endpoint"] == manager.endpoint.encode()
+                and secret["ca.crt"] == minio.trust(),
+                f"MinIO {kind} credential target drift",
+            )
+        require(action == "ensure" or secret, f"MinIO {kind} credential Secret missing")
+        msecrets[kind] = secret
+    if mstates["reader"]["user"] and mstates["reader"]["bound"]:
+        minio.verify(msecrets["reader"]["secret-key"].decode(), object_probe=False)
+    if mstates["writer"]["user"] and mstates["writer"]["bound"]:
+        minio.verify_writer(msecrets["writer"]["secret-key"].decode(), object_probe=False)
     if action == "ensure":
         # Retain pending credentials first: interrupted setup can resume without password rotation.
         manager.put_secret(
             manager.target_secret, {"target.json": json.dumps(target, sort_keys=True).encode()}
         )
-        for role, component in zip(ROLES, ("reader", "migrator"), strict=True):
+        for role, component in zip(ROLES, ROLE_COMPONENTS, strict=True):
             manager.put_secret(
                 manager.secret_name(component),
                 {
@@ -955,25 +1196,32 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio) -> None:
                     "ca.crt": ca,
                 },
             )
-        msecret = msecret or {
-            "access-key": USER.encode(),
-            "secret-key": secrets.token_hex(32).encode(),
-            "endpoint": manager.endpoint.encode(),
-            "ca.crt": minio.trust(),
-        }
-        manager.put_secret(msecret_name, msecret)
+        for kind, (user_name, _policy_name, _policy) in MINIO_RESOURCES.items():
+            msecrets[kind] = msecrets[kind] or {
+                "access-key": user_name.encode(),
+                "secret-key": secrets.token_hex(32).encode(),
+                "endpoint": manager.endpoint.encode(),
+                "ca.crt": minio.trust(),
+            }
+            manager.put_secret(manager.secret_name(f"minio-{kind}"), msecrets[kind])
         manager.admin(role_sql(credentials, set(state["roles"]), target))
         require(inventory(manager)["memberships"] == [MEMBERSHIP], "role setup verification failed")
-        minio.ensure(mstate, msecret["secret-key"].decode())
-        require(
-            minio.inspect() == {"bucket": True, "user": True, "policy": True, "bound": True},
-            "MinIO setup incomplete; rerun with retained credentials",
-        )
+        for kind in MINIO_RESOURCES:
+            minio.ensure(minio.inspect(kind), msecrets[kind]["secret-key"].decode(), kind)
+            require(
+                minio.inspect(kind)
+                == {"bucket": True, "user": True, "policy": True, "bound": True},
+                f"MinIO {kind} setup incomplete; rerun with retained credentials",
+            )
+        jsreport.ensure(jstate)
+        require(jsreport.inspect() == {"template": True}, "POLICY template setup incomplete")
     else:
-        require(
-            mstate == {"bucket": True, "user": True, "policy": True, "bound": True},
-            "MinIO setup incomplete",
-        )
+        for kind in MINIO_RESOURCES:
+            require(
+                mstates[kind] == {"bucket": True, "user": True, "policy": True, "bound": True},
+                f"MinIO {kind} setup incomplete",
+            )
+        require(jstate == {"template": True}, "POLICY template setup incomplete")
         for role in ROLES:
             with manager.connection(role, credentials[role], ca) as connection:
                 require(
@@ -986,8 +1234,9 @@ def execute_action(action: str, manager: Kubernetes, minio: Minio) -> None:
                         "migrator owner membership failed",
                     )
                 elif state["table"]:
-                    verify_reader(connection)
-        minio.verify(msecret["secret-key"].decode(), object_probe=True)
+                    (verify_reader if role == ROLES[0] else verify_writer)(connection)
+        minio.verify(msecrets["reader"]["secret-key"].decode(), object_probe=True)
+        minio.verify_writer(msecrets["writer"]["secret-key"].decode(), object_probe=True)
     print(f"document-resources: {action} complete for {manager.environment}")
 
 
@@ -1054,7 +1303,8 @@ def main(argv: list[str] | None = None) -> int:
             minio = Minio(
                 commands, Path(os.environ.get("DOCUMENT_MINIO_ADMIN_CONFIG", "")), manager.endpoint
             )
-            execute_action(args.action, manager, minio)
+            with manager.jsreport() as jsreport:
+                execute_action(args.action, manager, minio, jsreport)
         return 0
     except ResourceError, OSError, ValueError, KeyError, TypeError:
         print(
