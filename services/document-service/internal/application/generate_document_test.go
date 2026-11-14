@@ -156,9 +156,13 @@ func TestGenerateDocument_Execute_HonorsCancellationBeforeEffects(t *testing.T) 
 }
 
 func syntheticRegistration(t *testing.T) domain.PolicyRegistration {
+	return syntheticRegistrationFor(t, "SYN-363")
+}
+
+func syntheticRegistrationFor(t *testing.T, number string) domain.PolicyRegistration {
 	t.Helper()
 	registration, err := domain.NewPolicyRegistration(domain.PolicyRegistrationInput{
-		Number:       "SYN-363",
+		Number:       number,
 		From:         [3]int{2026, 2, 3},
 		To:           [3]int{2027, 2, 2},
 		PolicyHolder: "Synthetic Holder",

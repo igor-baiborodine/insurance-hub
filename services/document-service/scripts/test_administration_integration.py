@@ -1175,7 +1175,6 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
         wait_for(lambda: minio_ready(minio))
         minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
-        minio.mc("anonymous", "set", "upload", "document/policies")
 
         jsreport_port = json.loads(run([DOCKER, "inspect", jsreport_name]))[0]["NetworkSettings"][
             "Ports"
@@ -1188,17 +1187,32 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
 
         binary = Path(os.environ["GENERATION_TEST_OUTPUT"])
         assert binary.is_file(), "build the owning generation test before integration"
+        writer_url = (
+            f"postgresql://go_document_writer:{writer_password}@localhost:{pg_port}/document"
+            f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
+        )
         environment = os.environ.copy()
         environment.update(
             {
+                "DOCUMENT_DATABASE_URL": writer_url,
+                "MINIO_ENDPOINT": minio_endpoint,
+                "MINIO_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_SECRET_KEY": "a" * 64,
+                "MINIO_BUCKET": "policies",
+                "DEPLOYMENT_ENVIRONMENT": "local-dev",
+                "SERVICE_VERSION": "git-000000000001",
+                "EVENT_WORKERS_ENABLED": "true",
+                "KAFKA_BROKERS": "local-dev-kafka-kafka-bootstrap:9093",
+                "KAFKA_GROUP": "document-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": str(root / "ca.crt"),
+                "JSREPORT_URL": ("http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"),
+                "DOCUMENT_WRITER_DATABASE_URL": writer_url,
+                "MINIO_WRITER_ACCESS_KEY": resources.WRITER_USER,
+                "MINIO_WRITER_SECRET_KEY": "a" * 64,
                 "DOCUMENT_GENERATION_JSREPORT_URL": jsreport_endpoint,
-                "DOCUMENT_GENERATION_MINIO_URL": minio_endpoint,
-                "AWS_ACCESS_KEY_ID": resources.WRITER_USER,
-                "AWS_SECRET_ACCESS_KEY": "a" * 64,
-                "DOCUMENT_GENERATION_POSTGRES_URL": (
-                    f"postgresql://go_document_writer:{writer_password}@localhost:{pg_port}/document"
-                    f"?sslmode=verify-full&sslrootcert={root / 'ca.crt'}"
-                ),
+                "DOCUMENT_GENERATION_POSTGRES_URL": writer_url,
+                "OTEL_ENABLED": "false",
             }
         )
 
@@ -1224,6 +1238,9 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
             )
             == "2:2026/02/SYN-363.pdf:2026/02/SYN-363.pdf"
         )
+        stored = json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363.pdf"))
+        stored_metadata = {key.lower(): value for key, value in stored["metadata"].items()}
+        assert stored_metadata["content-type"] == "application/pdf"
         pdf = tmp_path / "SYN-363.pdf"
         minio.mc("cp", "document/policies/2026/02/SYN-363.pdf", str(pdf))
         extracted = run(["pdftotext", str(pdf), "-"])
@@ -1248,6 +1265,41 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
                 else:
                     raise AssertionError("MinIO writer received forbidden access")
         minio.mc("rm", "--force", "document/policies/2026/02/SYN-363-writer.pdf")
+
+        sequence_before = int(admin("SELECT last_value FROM public.hibernate_sequence;"))
+        constraint = "document_generation_failure_probe"
+        admin(
+            "SET ROLE document; ALTER TABLE public.policy_document ADD CONSTRAINT "
+            f"{constraint} CHECK(policy_number <> 'SYN-363-ORPHAN');"
+        )
+        try:
+            failure = run(
+                [
+                    str(binary),
+                    "-test.v",
+                    "-test.run",
+                    "^TestGenerateDocumentIntegration_DatabaseFailureLeavesUploadedObject$",
+                ],
+                environment=environment,
+            )
+        finally:
+            admin(
+                "SET ROLE document; ALTER TABLE public.policy_document DROP CONSTRAINT "
+                f"{constraint};"
+            )
+        assert "PASS" in failure
+        assert (
+            admin(
+                "SELECT count(*) FROM public.policy_document WHERE policy_number='SYN-363-ORPHAN';"
+            )
+            == "0"
+        )
+        assert (
+            int(admin("SELECT last_value FROM public.hibernate_sequence;")) == sequence_before + 1
+        )
+        orphan = json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363-ORPHAN.pdf"))
+        orphan_metadata = {key.lower(): value for key, value in orphan["metadata"].items()}
+        assert orphan_metadata["content-type"] == "application/pdf"
 
 
 def test_event_to_http_lookup_traverses_real_dependencies(postgres, tmp_path):
