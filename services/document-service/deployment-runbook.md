@@ -387,12 +387,12 @@ make -C services/document-service test-administration
 make -C services/document-service resource-test-integration
 ```
 
-Disposable integration requires Docker, OpenSSL and psql. The complete
+Disposable integration requires Docker, OpenSSL, psql and `pdftotext`. The complete
 `resource-test-integration` suite additionally requires host `mc`; the lookup selected by
 `test-integration` and `image-check` instead uses the pinned containerized MinIO client. Missing
-pinned PostgreSQL, Chainguard MinIO and MinIO-client images are pulled by digest. The suite creates
-uniquely named/labeled local containers, temporary PostgreSQL storage and private synthetic
-TLS/credential files; cleanup removes only those containers/files. It proves fresh
+pinned PostgreSQL, Chainguard MinIO, MinIO-client, JSReport and Kafka images are pulled by digest.
+The suite creates uniquely named/labeled local containers, temporary PostgreSQL storage and private
+synthetic TLS/credential files; cleanup removes only those containers/files. It proves fresh
 Java-independent setup, compatible adoption/replay, byte/ID/sequence preservation, subsequent safe
 ID allocation, schema/history/target rejection, bounded contention, TLS hostname rejection and
 actual PostgreSQL/MinIO read and denied-write/admin behavior. It is not evidence of deployed
