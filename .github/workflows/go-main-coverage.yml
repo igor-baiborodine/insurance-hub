@@ -76,6 +76,13 @@ jobs:
           cache: true
           cache-dependency-path: ${{ matrix.module }}/go.sum
 
+      - name: Install Document module operating-system dependencies
+        if: matrix.module == 'services/document-service'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes poppler-utils
+
       - name: Bootstrap shared coverage tools
         if: matrix.role == 'public-shared'
         env:
