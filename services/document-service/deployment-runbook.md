@@ -108,6 +108,12 @@ or initialize a consumer group, mount writer credentials or add Kafka/JSReport e
 ordinary `document-service` group activation and the first shared-environment generation
 observation as part of the explicitly authorized direct authority transfer.
 
+Shared deployment verification is non-mutating. The lookup probe accepts the contractually valid
+empty `{"documents":[]}` result when no synthetic fixture is provisioned. If `SYN-362` exists, it
+must match the exact three-document synthetic fixture; any foreign or partial non-empty result
+fails. Exact object/reader permission verification remains the separately authorized
+`resource-verify` path below and still requires its explicitly provisioned eight-byte fixture.
+
 Start troubleshooting with the Dashboard comparison in the
 [observability runbook](observability-runbook.md#kafka-and-generation-troubleshooting-order); do
 not inspect or mutate Dashboard runtime state.

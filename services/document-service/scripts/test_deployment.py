@@ -395,7 +395,22 @@ def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
     target.kubectl.assert_not_called()
 
 
-def test_qualified_access_probe_waits_for_network_policy_convergence() -> None:
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"documents": []},
+        {
+            "documents": [
+                {"policyNumber": "SYN-362", "content": "JVBERi0zNjI="},
+                {"policyNumber": "SYN-362", "content": "JVBERi0zNjI="},
+                {"policyNumber": "SYN-362", "content": "JVBERi1PQkpFQ1QtMzYy"},
+            ]
+        },
+    ],
+)
+def test_qualified_access_probe_accepts_empty_or_owned_fixture_and_waits_for_policy(
+    payload: dict,
+) -> None:
     # given
     target = Mock()
     target.business = "qa-document-api"
@@ -405,15 +420,7 @@ def test_qualified_access_probe_waits_for_network_policy_convergence() -> None:
     ]
     target.kubectl.side_effect = [
         None,
-        json.dumps(
-            {
-                "documents": [
-                    {"content": "JVBERi0zNjI="},
-                    {"content": "JVBERi0zNjI="},
-                    {"content": "JVBERi1PQkpFQ1QtMzYy"},
-                ]
-            }
-        ),
+        json.dumps(payload),
         None,
     ]
 
@@ -436,6 +443,22 @@ def test_qualified_access_probe_waits_for_network_policy_convergence() -> None:
         "pod",
         "document-qualified-http",
     )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"documents": "invalid"},
+        {"documents": [{"policyNumber": "FOREIGN", "content": "JVBERi0zNjI="}]},
+    ],
+)
+def test_shared_lookup_rejects_malformed_or_foreign_results(payload: object) -> None:
+    # when
+    accepted = checks.accepted_shared_lookup(payload)
+
+    # then
+    assert not accepted
 
 
 def test_deployment_adapter_maps_interrupt_to_shell_status(monkeypatch) -> None:
