@@ -12,6 +12,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/jsreport"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/objectstore"
 	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/postgres"
+	"github.com/igor-baiborodine/insurance-hub/services/document-service/internal/telemetry"
 )
 
 type generationRuntime interface {
@@ -31,7 +32,13 @@ func newProductionGeneration(
 	ctx context.Context,
 	settings config.Events,
 	maximumDocumentBytes int,
+	observer *telemetry.DependencyObserver,
 ) (generationRuntime, error) {
+	if observer == nil {
+		return nil, errors.New(
+			"initialize document generation: dependency observer is required",
+		)
+	}
 	pool, err := postgres.OpenPool(ctx, settings.WriterDatabase)
 	if err != nil {
 		return nil, errors.New("initialize document generation: open writer database")
@@ -66,7 +73,11 @@ func newProductionGeneration(
 		renderer.Close()
 		return nil, errors.New("initialize document generation: configure object writer")
 	}
-	useCase, err := application.NewGenerateDocument(renderer, uploader, metadata)
+	useCase, err := application.NewGenerateDocument(
+		newObservedPolicyRenderer(renderer, observer),
+		newObservedDocumentUploader(uploader, observer),
+		newObservedDocumentMetadataWriter(metadata, observer),
+	)
 	if err != nil {
 		uploader.Close()
 		renderer.Close()

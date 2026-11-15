@@ -33,7 +33,12 @@ func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
 	// given
 	settings := testConfig()
 	deps := productionDependencies()
-	deps.newGeneration = func(context.Context, config.Events, int) (generationRuntime, error) {
+	deps.newGeneration = func(
+		context.Context,
+		config.Events,
+		int,
+		*telemetry.DependencyObserver,
+	) (generationRuntime, error) {
 		t.Fatal("disabled mode constructed generation resources")
 		return nil, nil
 	}
@@ -160,13 +165,16 @@ func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *te
 	}
 	generation := &fakeGenerationRuntime{}
 	worker := &fakeEventWorker{}
+	dependencyObserver := newTestDependencyObserver(t)
 	deps := productionDependencies()
 	deps.newGeneration = func(
 		_ context.Context,
 		got config.Events,
 		maximumBytes int,
+		gotObserver *telemetry.DependencyObserver,
 	) (generationRuntime, error) {
-		if got.Group != "document-service" || maximumBytes != 8*1024*1024 {
+		if got.Group != "document-service" || maximumBytes != 8*1024*1024 ||
+			gotObserver != dependencyObserver {
 			t.Fatalf("generation settings = (%+v, %d)", got, maximumBytes)
 		}
 		return generation, nil
@@ -195,7 +203,7 @@ func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *te
 	// when
 	err = runtime.configureWorker(
 		context.Background(), settings, 8*1024*1024, discardLogger(), deps,
-		eventObserver, propagation.TraceContext{},
+		eventObserver, dependencyObserver, propagation.TraceContext{},
 	)
 	if err == nil {
 		err = runtime.worker.Preflight(context.Background())
@@ -231,8 +239,14 @@ func TestRunningService_WorkerConstructionFailureReleasesGeneration(t *testing.T
 	}
 	generation := &fakeGenerationRuntime{}
 	failure := errors.New("construct registration worker")
+	dependencyObserver := newTestDependencyObserver(t)
 	deps := productionDependencies()
-	deps.newGeneration = func(context.Context, config.Events, int) (generationRuntime, error) {
+	deps.newGeneration = func(
+		context.Context,
+		config.Events,
+		int,
+		*telemetry.DependencyObserver,
+	) (generationRuntime, error) {
 		return generation, nil
 	}
 	deps.newWorker = func(documentkafka.Settings, generationRuntime, *slog.Logger) (eventWorker, error) {
@@ -254,6 +268,7 @@ func TestRunningService_WorkerConstructionFailureReleasesGeneration(t *testing.T
 		discardLogger(),
 		deps,
 		eventObserver,
+		dependencyObserver,
 		propagation.TraceContext{},
 	)
 	shutdownErr := runtime.shutdown(time.Second, 100*time.Millisecond)
@@ -385,6 +400,19 @@ func TestObservedContentReader_RecordsOnlyObjectFetches(t *testing.T) {
 		bytes.Contains(output.Bytes(), []byte("missing.pdf")) {
 		t.Fatalf("object dependency signal = %s", output.Bytes())
 	}
+}
+
+func newTestDependencyObserver(t *testing.T) *telemetry.DependencyObserver {
+	t.Helper()
+	observer, err := telemetry.NewDependencyObserver(
+		discardLogger(),
+		metricnoop.NewMeterProvider(),
+		tracenoop.NewTracerProvider(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return observer
 }
 
 type fakeManagedDependency struct {
