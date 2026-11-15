@@ -76,7 +76,8 @@ PDF_TEXT_IMAGE ?= ghcr.io/randomcontainers/poppler:26.11.0-alpine3.24@sha256:e1c
 GENERATION_TEST_OUTPUT ?= $(CURDIR)/.tools/document-generation-integration.test
 EVENT_TEST_OUTPUT ?= $(CURDIR)/.tools/document-event-integration.test
 TEST_PACKAGES ?= ./...
-COVERAGE_EXCLUDE_PATHS := gen
+COVERAGE_PACKAGES = $(filter-out %/internal/testing/cmd/observabilityprobe,$(shell GOWORK=off $(GO) list ./...))
+COVERAGE_EXCLUDE_PATHS := gen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)

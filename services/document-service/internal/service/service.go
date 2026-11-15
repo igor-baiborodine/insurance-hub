@@ -89,7 +89,7 @@ type dependencies struct {
 	newDatabase    func(context.Context, config.Database, int, int) (application.MetadataReader, managedDependency, error)
 	newObjectStore func(config.ObjectStore, int) (application.ContentReader, managedDependency, error)
 	newLookup      func(application.MetadataReader, application.ContentReader, int, int) (*application.FindDocuments, error)
-	newGeneration  func(context.Context, config.Events, int) (generationRuntime, error)
+	newGeneration  func(context.Context, config.Events, int, *telemetry.DependencyObserver) (generationRuntime, error)
 	newWorker      func(documentkafka.Settings, generationRuntime, *slog.Logger) (eventWorker, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.FindDocumentsExecutor) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
@@ -330,6 +330,7 @@ func run(
 			logger,
 			deps,
 			eventObserver,
+			dependencyObserver,
 			provider.HTTPPropagator(),
 		); err != nil {
 			return fail(fmt.Errorf("run service: %w", err))
@@ -498,6 +499,7 @@ func (runtime *runningService) configureWorker(
 	logger *slog.Logger,
 	deps dependencies,
 	eventObserver *telemetry.EventObserver,
+	dependencyObserver *telemetry.DependencyObserver,
 	propagator propagation.TextMapPropagator,
 ) error {
 	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
@@ -507,7 +509,12 @@ func (runtime *runningService) configureWorker(
 	if len(bytes.TrimSpace(caCertificate)) == 0 {
 		return errors.New("read Kafka CA file: empty certificate")
 	}
-	runtime.generation, err = deps.newGeneration(ctx, settings, maximumDocumentBytes)
+	runtime.generation, err = deps.newGeneration(
+		ctx,
+		settings,
+		maximumDocumentBytes,
+		dependencyObserver,
+	)
 	if err != nil {
 		return err
 	}

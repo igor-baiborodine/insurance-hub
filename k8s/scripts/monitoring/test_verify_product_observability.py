@@ -32,6 +32,18 @@ class TestProductObservabilityVerification:
         assert "qa-product-api" == selected.flux_kustomization
         assert "qa-prometheus-kube-prometh-prometheus" == selected.prometheus_service
 
+    def test_configuration_rejects_source_assets_without_live_coordinates(self) -> None:
+        # given
+        environment = dataclasses.replace(self.assets.environment, service_verification={})
+        assets = dataclasses.replace(self.assets, environment=environment)
+
+        # when / then
+        with pytest.raises(
+            verifier.VerificationError,
+            match="environment has no product verification coordinates",
+        ):
+            verifier.verification_config(assets)
+
     def test_probe_selection_rejects_cross_service_and_unregistered_defaults(self) -> None:
         # given
         cross_contract = dataclasses.replace(
@@ -405,6 +417,53 @@ class TestProductObservabilityVerification:
             "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
         }
 
+    def test_document_probe_uses_exact_target_and_worker_disabled_safe_read(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "document")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        responses = ["live\n", "ready\n", '{"documents":[]}']
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
+            lookups = probe.workload(
+                {"health": 1001, "document": 1002},
+                "d" * 32,
+                {"EVENT_WORKERS_ENABLED": "false"},
+            )
+
+        # then
+        assert probe.service == "document"
+        assert services == [
+            ("document", "qa-svc", "qa-document-api", 80),
+            ("health", "qa-svc", "qa-document-api-management", 8081),
+        ]
+        assert lookups == 1
+        assert request.call_args_list[-1].args[0].endswith("/documents/OBSERVABILITY-NOT-FOUND")
+        assert request.call_args_list[-1].args[1] == {
+            "traceparent": "00-" + "d" * 32 + "-0123456789abcdef-01"
+        }
+
+    @pytest.mark.parametrize("configured", ("true", "", "unexpected"))
+    def test_document_probe_rejects_non_disabled_workers_before_reads(
+        self, configured: str
+    ) -> None:
+        # when / then
+        with (
+            mock.patch.object(verifier, "request_text") as request,
+            pytest.raises(
+                verifier.VerificationError,
+                match="requires EVENT_WORKERS_ENABLED=false",
+            ),
+        ):
+            verifier.document_reads(
+                {"health": 1001, "document": 1002},
+                "d" * 32,
+                {"EVENT_WORKERS_ENABLED": configured},
+            )
+        request.assert_not_called()
+
     def test_dashboard_probe_resolves_its_own_target_and_safe_reads(self) -> None:
         # given
         assets = verifier.load_assets(ASSETS_ROOT, "qa", "dashboard")
@@ -601,3 +660,45 @@ class TestProductObservabilityVerification:
                 "pod-uid",
                 {"EVENT_WORKERS_ENABLED": configured},
             )
+
+    def test_document_enabled_signals_require_disabled_worker_metric(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "document")
+        worker_results = [
+            {
+                "metric": {"insurance_hub_document_event_type": "registered"},
+                "value": [0, "0"],
+            }
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Document worker metric":
+                return worker_results
+            if "trace" in description:
+                return [{"trace": "observed"}]
+            return [{"value": [0, "1"]}]
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(
+                verifier,
+                "request_json",
+                return_value={"data": {"result": [{"value": [0, "0"]}]}},
+            ),
+        ):
+            result = verifier.verify_document_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {"EVENT_WORKERS_ENABLED": "false"},
+            )
+
+        # then
+        assert result["metric_series"] == {
+            "request": 1,
+            "postgresql": 1,
+            "worker": 1,
+            "runtime": 1,
+        }

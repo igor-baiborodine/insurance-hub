@@ -48,6 +48,38 @@ PDF_TEXT_IMAGE = os.environ.get(
     "e1c8434466222f6ace15f91b892bc41a0d4ac102e9147eb38e44ff76f1a6ea5a",
 )
 CONTAINER_START_TIMEOUT = 180
+PILOT_OUTPUT_DIR = os.environ.get("DOCUMENT_ALERT_PILOT_OUTPUT_DIR")
+
+
+def write_pilot_observation(name, observations):
+    if not PILOT_OUTPUT_DIR:
+        return
+    source_revision = os.environ.get("SOURCE_REVISION", "")
+    assert len(source_revision) == 40 and all(
+        character in "0123456789abcdef" for character in source_revision
+    ), "SOURCE_REVISION must be a full lowercase Git revision for pilot output"
+    output_dir = Path(PILOT_OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / f"{name}.json"
+    temporary = output.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source_revision": source_revision,
+                "scenario": name,
+                "observations": observations,
+                "limitation": (
+                    "Owned disposable synthetic smoke only; durations include client and test "
+                    "process overhead and are not SLO or capacity evidence."
+                ),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    temporary.replace(output)
 
 
 def run(args, text=None, *, failure=False, environment=None, timeout=30):
@@ -1159,16 +1191,38 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
             )
 
             # when
+            partial_started = time.monotonic()
             with urlopen(f"http://127.0.0.1:{http_port}/documents/SYN-362", timeout=5) as response:
                 payload = json.load(response)
+            partial_seconds = time.monotonic() - partial_started
 
             # then
             contents = sorted(item["content"] for item in payload["documents"])
             assert contents == sorted(["JVBERi0zNjI=", "JVBERi0zNjI=", "JVBERi1PQkpFQ1QtMzYy"])
 
             # when / then
+            empty_started = time.monotonic()
             with urlopen(f"http://127.0.0.1:{http_port}/documents/ABSENT", timeout=5) as response:
                 assert json.load(response) == {"documents": []}
+            empty_seconds = time.monotonic() - empty_started
+            write_pilot_observation(
+                "lookup",
+                {
+                    "request_count": 2,
+                    "results": [
+                        {
+                            "duration_seconds": round(partial_seconds, 6),
+                            "documents_returned": 3,
+                            "outcome": "partial",
+                        },
+                        {
+                            "duration_seconds": round(empty_seconds, 6),
+                            "documents_returned": 0,
+                            "outcome": "empty",
+                        },
+                    ],
+                },
+            )
             if server_container is not None:
                 log_result = subprocess.run(
                     [DOCKER, "logs", server_container],
@@ -1282,6 +1336,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         )
 
         # when
+        successful_generation_started = time.monotonic()
         result = run(
             [
                 str(binary),
@@ -1291,6 +1346,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
             ],
             environment=environment,
         )
+        successful_generation_seconds = time.monotonic() - successful_generation_started
 
         # then
         assert "PASS" in result
@@ -1338,6 +1394,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
             f"{constraint} CHECK(policy_number <> 'SYN-363-ORPHAN');"
         )
         try:
+            metadata_failure_started = time.monotonic()
             failure = run(
                 [
                     str(binary),
@@ -1347,6 +1404,7 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
                 ],
                 environment=environment,
             )
+            metadata_failure_seconds = time.monotonic() - metadata_failure_started
         finally:
             admin(
                 "SET ROLE document; ALTER TABLE public.policy_document DROP CONSTRAINT "
@@ -1365,6 +1423,23 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         orphan = json.loads(minio.mc("stat", "document/policies/2026/02/SYN-363-ORPHAN.pdf"))
         orphan_metadata = {key.lower(): value for key, value in orphan["metadata"].items()}
         assert orphan_metadata["content-type"] == "application/pdf"
+        write_pilot_observation(
+            "generation",
+            {
+                "attempt_count": 3,
+                "metadata_failure": {
+                    "attempt_count": 1,
+                    "duration_seconds": round(metadata_failure_seconds, 6),
+                    "orphan_object_observed": True,
+                    "registration_count": 0,
+                },
+                "success": {
+                    "attempt_count": 2,
+                    "batch_duration_seconds": round(successful_generation_seconds, 6),
+                    "registration_count": 2,
+                },
+            },
+        )
 
 
 def test_event_to_http_lookup_traverses_real_dependencies(postgres, tmp_path):

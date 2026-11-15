@@ -431,17 +431,26 @@ metadata row. The adapters, use case and worker path are disposable-tested with 
 
 ## Deployment and operation
 
-Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev and Flux-owned QA
-commands. Use the [observability runbook](observability-runbook.md) for safe foundation signal
-checks. The Go workload exposes separate private HTTP/gRPC and management Services. Its
-NetworkPolicy admits business traffic only from an explicitly labeled disposable qualification
-caller, allows only DNS, PostgreSQL, MinIO and QA telemetry egress, and preserves the separate Java
-Document workload and ordinary gateway destination.
+Use the [deployment runbook](deployment-runbook.md) for candidate, local-dev, Flux-owned QA and
+guarded monitoring coordinates. Use the [observability runbook](observability-runbook.md) for
+truthful state meaning, source/disposable checks, the fresh identity preflight, guarded
+provisioning and read-back, Dashboard-first investigation, alert response and restoration. The Go
+workload exposes
+separate private HTTP/gRPC and management Services. Its NetworkPolicy admits business traffic only
+from an explicitly labeled disposable qualification caller, allows only DNS, PostgreSQL, MinIO and
+QA telemetry egress, and preserves the separate Java Document workload and ordinary gateway
+destination.
 
-As in Dashboard, Kafka generation qualification is disposable. C03 local-dev and QA sources keep
-the worker disabled and do not mount writer credentials or add Kafka/JSReport egress; their
-deployment checks do not create an isolated live consumer group. C06 owns ordinary worker
-activation and the first shared-environment generation observation during direct authority
+The runbook commands grant no live authority. Each QA monitoring write requires separate approval
+and a fresh identity preflight. `VERIFY_MODE=enabled` means OTel export is enabled; it does not
+enable the event worker. QA workload recovery remains Flux-owned, monitoring restoration uses the
+guarded selected-service owners, and shared worker activation and generation require a separate
+authority transfer.
+
+As in Dashboard, Kafka generation qualification is disposable. Local-dev and QA sources keep the
+worker disabled and do not mount writer credentials or add Kafka/JSReport egress; their deployment
+checks do not create an isolated live consumer group. Ordinary worker activation and the first
+shared-environment generation observation require a separate, explicitly authorized authority
 transfer.
 
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,

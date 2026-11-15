@@ -381,6 +381,43 @@ def product_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]
     ]
 
 
+def document_reads(
+    ports: Mapping[str, int], trace_id: str, deployment_settings: Mapping[str, str]
+) -> int:
+    require(
+        deployment_settings.get("EVENT_WORKERS_ENABLED") == "false",
+        "Document QA verification requires EVENT_WORKERS_ENABLED=false",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
+        "Document liveness failed",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
+        "Document readiness failed",
+    )
+    policy_number = urllib.parse.quote("OBSERVABILITY-NOT-FOUND", safe="")
+    body = request_text(
+        f"http://127.0.0.1:{ports['document']}/documents/{policy_number}",
+        {"traceparent": f"00-{trace_id}-0123456789abcdef-01"},
+    )
+    try:
+        response = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise VerificationError("Document lookup response is malformed") from error
+    documents = response.get("documents") if isinstance(response, dict) else None
+    require(isinstance(documents, list), "Document lookup response has no document array")
+    return 1
+
+
+def document_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    require(target.config.management_service is not None, "Document management service is required")
+    return [
+        ("document", target.service_namespace, target.config.business_service, 80),
+        ("health", target.service_namespace, target.config.management_service, 8081),
+    ]
+
+
 def policy_search_reads(
     ports: Mapping[str, int], trace_id: str, deployment_settings: Mapping[str, str]
 ) -> int:
@@ -701,6 +738,114 @@ def verify_policy_search_enabled_signals(
     }
 
 
+def verify_document_enabled_signals(
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    trace_id: str,
+    pod_uid: str,
+    deployment_settings: Mapping[str, str],
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        len(expected.metrics) == 3
+        and len(expected.logs) == 1
+        and expected.traces == (assets.contract.service_name,),
+        "Document expected signal inventory differs from its registered probe",
+    )
+    require(
+        deployment_settings.get("EVENT_WORKERS_ENABLED") == "false",
+        "Document QA verification requires EVENT_WORKERS_ENABLED=false",
+    )
+    common = (
+        f'service_name="{assets.contract.service_name}",'
+        'deployment_environment_name="qa",service_implementation="go",'
+        f'service_instance_id="{pod_uid}"'
+    )
+    queries = {
+        "request": (
+            f'{expected.metrics[0]}{{{common},insurance_hub_document_transport="http",'
+            'insurance_hub_document_operation="find_documents"}'
+        ),
+        "postgresql": (
+            f'{expected.metrics[1]}{{{common},insurance_hub_document_dependency="postgresql",'
+            'insurance_hub_document_operation="find_documents"}'
+        ),
+        "worker": f"{expected.metrics[2]}{{{common}}}",
+        "runtime": f"go_goroutine_count{{{common}}}",
+    }
+    metric_results: dict[str, list[dict[str, Any]]] = {}
+    for label, expression in queries.items():
+        url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+            {"query": expression}
+        )
+        metric_results[label] = wait_for(
+            f"Document {label} metric",
+            lambda url=url: query_results(request_json(url)),
+        )
+
+    worker_results = metric_results["worker"]
+    require(len(worker_results) == 1, "Document registration worker metric is missing")
+    worker_metric = worker_results[0].get("metric", {})
+    worker_sample = worker_results[0].get("value", [])
+    require(
+        isinstance(worker_metric, dict)
+        and worker_metric.get("insurance_hub_document_event_type") == "registered"
+        and isinstance(worker_sample, list)
+        and len(worker_sample) == 2,
+        "Document registration worker metric is malformed",
+    )
+    try:
+        worker_value = float(worker_sample[1])
+    except (TypeError, ValueError) as error:
+        raise VerificationError("Document registration worker value is malformed") from error
+    require(worker_value == 0, "Document QA registration worker is unexpectedly enabled")
+
+    now = time.time_ns()
+    loki_query = (
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        f'service_implementation="go"}} | json | {expected.logs[0]}=' + json.dumps(trace_id)
+    )
+    loki_url = (
+        f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
+        + urllib.parse.urlencode(
+            {
+                "query": loki_query,
+                "start": now - 300_000_000_000,
+                "end": now + 30_000_000_000,
+                "limit": 20,
+            }
+        )
+    )
+    logs = wait_for(
+        "correlated Document completion logs",
+        lambda: query_results(request_json(loki_url)),
+    )
+    trace = wait_for(
+        "correlated Document trace",
+        lambda: request_json(f"http://127.0.0.1:{ports['tempo']}/api/traces/{trace_id}").get(
+            "batches"
+        ),
+    )
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
+    alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": alert_query}
+    )
+    alerts = query_results(request_json(alert_url))
+    require(
+        len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
+        "a selected-service Document alert is firing",
+    )
+    return {
+        "metric_series": {label: len(results) for label, results in metric_results.items()},
+        "log_streams": len(logs),
+        "trace_batches": len(trace),
+        "firing_alerts": 0,
+    }
+
+
 def verify_dashboard_enabled_signals(
     assets: MonitoringAssets,
     ports: Mapping[str, int],
@@ -838,6 +983,13 @@ SERVICE_PROBES = {
         workload=dashboard_reads,
         enabled_signals=verify_dashboard_enabled_signals,
         result_key="dashboard_operations",
+    ),
+    "document": ServiceProbe(
+        service="document",
+        services=document_services,
+        workload=document_reads,
+        enabled_signals=verify_document_enabled_signals,
+        result_key="document_lookups",
     ),
     "policy-search": ServiceProbe(
         service="policy-search",

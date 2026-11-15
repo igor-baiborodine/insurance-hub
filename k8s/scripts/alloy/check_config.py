@@ -340,8 +340,8 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         for line in metric_transform.splitlines()
         if "keep_matching_keys(attributes" in line and "metric.name" in line
     ]
-    if len(metric_dimension_allowlists) != 9:
-        raise ValidationError("shared Go metric policy must contain nine dimension allowlists")
+    if len(metric_dimension_allowlists) != 10:
+        raise ValidationError("shared Go metric policy must contain ten dimension allowlists")
     if any(
         'resource.attributes["insurance_hub.service.implementation"] == "go"' not in line
         for line in metric_dimension_allowlists
@@ -349,7 +349,7 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         raise ValidationError("metric datapoint allowlists must remain Go-service scoped")
     if re.search(r"insurance_hub\\\\\.[a-z0-9_]+", metric_transform):
         raise ValidationError("shared Go metric policy must not encode one service namespace")
-    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 9:
+    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 10:
         raise ValidationError(
             "metric policy must bind instruments and dimensions to service domain"
         )
@@ -638,6 +638,8 @@ def sanitize_go_span(service_domain: str, attributes: Mapping[str, object]) -> d
         f"insurance_hub.{service_domain}.database.stage",
         f"insurance_hub.{service_domain}.event.type",
         f"insurance_hub.{service_domain}.dependency",
+        f"insurance_hub.{service_domain}.stage",
+        f"insurance_hub.{service_domain}.lookup.outcome",
     }
     allowed = set(COMMON_SPAN_ATTRIBUTES) | service_attributes
     return {key: value for key, value in attributes.items() if key in allowed}
@@ -680,6 +682,10 @@ def sanitize_datapoint(
     elif metric_name in {
         f"{application_prefix}.events",
         f"{application_prefix}.event.duration",
+        f"{application_prefix}.event.commit.failures",
+        f"{application_prefix}.event.worker.enabled",
+        f"{application_prefix}.event.worker.in_flight_age",
+        f"{application_prefix}.event.worker.failed",
     }:
         dimensions = (
             f"{application_prefix}.event.type",
@@ -692,7 +698,13 @@ def sanitize_datapoint(
         dimensions = (
             f"{application_prefix}.dependency",
             f"{application_prefix}.operation",
+            f"{application_prefix}.stage",
             f"{application_prefix}.outcome",
+        )
+    elif metric_name == f"{application_prefix}.lookup.results":
+        dimensions = (
+            f"{application_prefix}.operation",
+            f"{application_prefix}.lookup.outcome",
         )
     elif metric_name == "db.client.operation.duration":
         dimensions = (

@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "decision": "Q364-01",
+  "status": "accepted",
+  "evidence": {
+    "source_revision": "c60f35a87e51560b652c9892f29d3be834237053",
+    "observation_seam_sha256": "c071b2b0ce6844c7e85fce7942b37ad70912346ac42d71579a1eb8bd321b0a38",
+    "lookup_report_sha256": "45e76ce2122a5d099add3caf57f0d65fe3b1ede8d8027de089191b109dfacb2f",
+    "generation_report_sha256": "24c0ed67269166f79967678b073e33e2b61193ad461bb3316c715fed4ac9a71f",
+    "dashboard_adaptation_matrix_sha256": "f411f0641bc9b908872175f04c3cc6e924d3e4ade20af13c5127ad3bad9bf108",
+    "dashboard_acceptance_sha256": "e4269be65f1e110796a51ea7bf7f8ed1b373f86a0a2e3c46d879849ea9141428",
+    "dashboard_alerts_sha256": "2cc2136236615c9a26ac820ee198f05826f2233148de75cc3a3a7955ec72d7cc",
+    "document_deployment_sha256": "ee7038ea78e402d1a3aa33139db3922695cfbb38aed9ae1f49caf00d18e2eae3",
+    "document_configuration_sha256": "c4621a19ba7eef9222f6ae53f78c6973d55e70ca399675fe933a60dce41fb6f8",
+    "limitation": "These values are warning operating limits for a bounded synthetic disposable smoke and unchanged common runtime contracts. They are not production SLOs, capacity evidence or shared-environment generation acceptance. Stage-specific latency alerts are intentionally excluded because the pilot observed end-to-end paths rather than independently measured render, upload and metadata latency distributions."
+  },
+  "workload": {
+    "owner": "make -C services/document-service resource-test-integration",
+    "selected_scenarios": [
+      "test_lookup_traverses_real_rpc_postgres_and_minio",
+      "test_generation_traverses_real_dependencies"
+    ],
+    "dependencies": [
+      "PostgreSQL 17.10",
+      "MinIO",
+      "JSReport 4.10.1"
+    ],
+    "lookup_requests": 2,
+    "lookup_partial_seconds": 0.007929,
+    "lookup_empty_seconds": 0.001104,
+    "generation_attempts": 3,
+    "successful_generation_attempts": 2,
+    "successful_generation_batch_seconds": 1.443594,
+    "metadata_failure_attempts": 1,
+    "metadata_failure_seconds": 0.101416,
+    "metadata_failure_registration_count": 0,
+    "metadata_failure_orphan_object_observed": true
+  },
+  "resource_budget": {
+    "cpu_limit_cores": 0.3,
+    "memory_limit_bytes": 268435456,
+    "cpu_alert_cores": 0.24,
+    "memory_alert_bytes": 214748364.8
+  },
+  "rules": {
+    "DocumentServiceErrorRate": {
+      "basis": "unchanged Dashboard common request contract",
+      "threshold": 0.1,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_requests": 20,
+      "severity": "warning",
+      "just_below": 0.1,
+      "firing": 0.11,
+      "suppression": "Fewer than 20 requests or only success/invalid_request outcomes.",
+      "recovery": "The five-minute unexpected-error ratio returns to 10% or lower.",
+      "response": "Split failures by transport and status, inspect safe logs/traces, then follow PostgreSQL and object-store lookup dependencies."
+    },
+    "DocumentHighLatency": {
+      "basis": "unchanged Dashboard common request contract, supported by 1.104ms and 7.929ms Document lookup observations",
+      "threshold_seconds": 0.25,
+      "quantile": 0.95,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "minimum_requests": 20,
+      "severity": "warning",
+      "just_below_seconds": 0.25,
+      "firing_seconds": 0.3,
+      "suppression": "Fewer than 20 requests.",
+      "recovery": "The five-minute request p95 returns to 250ms or lower.",
+      "response": "Split latency by transport and correlate PostgreSQL/object-store duration with a representative trace."
+    },
+    "DocumentGenerationStageFailure": {
+      "basis": "Document-local low-volume partial-effect contract; one metadata failure left an object and recorded zero registrations",
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "minimum_operations": 1,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "No render, upload or metadata operation ended in a bounded non-success outcome.",
+      "recovery": "The last bounded generation-stage failure ages out of the five-minute window.",
+      "response": "Identify the fixed render, upload or metadata stage, inspect its dependency and correlated trace, and preserve orphan-risk evidence before retry."
+    },
+    "DocumentLookupFailure": {
+      "basis": "Document-local low-traffic result contract; the pilot independently observed a partial lookup",
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "minimum_lookups": 1,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "outcomes": [
+        "partial",
+        "cancelled",
+        "deadline_exceeded",
+        "limit_exceeded",
+        "dependency_unavailable",
+        "internal_error"
+      ],
+      "suppression": "All completed lookups are complete or empty without omitted documents or failures.",
+      "recovery": "The last partial or failed lookup ages out of the five-minute window.",
+      "response": "Separate metadata from object-store lookup, inspect omitted-document and dependency outcomes, and do not infer retrievability from registration alone."
+    },
+    "DocumentEventFailure": {
+      "basis": "Document-local low-volume partial-effect contract; unlike Dashboard, a ten-event gate would hide one actionable failure",
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "minimum_events": 1,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "The worker is disabled or no malformed/error/cancelled registration completed in five minutes.",
+      "recovery": "The last failed registration ages out of the five-minute window.",
+      "response": "Inspect the bounded registration outcome, failing stage and Kafka readiness without exposing event values."
+    },
+    "DocumentEventStalled": {
+      "basis": "unchanged Dashboard worker contract; 30s exceeds the fixed 8s render, 8s upload and 2s metadata timeout chain plus scheduling margin",
+      "threshold_seconds": 30,
+      "comparison": ">",
+      "for": "2m",
+      "minimum_events": 1,
+      "severity": "warning",
+      "just_below_seconds": 30,
+      "firing_seconds": 31,
+      "suppression": "Worker enabled is zero or in-flight age is zero.",
+      "recovery": "Completion or cancellation resets in-flight age to zero.",
+      "response": "Inspect render, upload, metadata and Kafka readiness with a correlated trace; preserve offset and orphan-risk evidence before restart."
+    },
+    "DocumentEventWorkerFailed": {
+      "basis": "Document-local truthful-state requirement",
+      "threshold": 1,
+      "comparison": "==",
+      "for": "1m",
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "The worker is disabled or its failed gauge is zero.",
+      "recovery": "A successful completion clears the failed gauge while the worker remains enabled.",
+      "response": "Inspect the last bounded worker outcome and stage diagnostics; distinguish failed from disabled and healthy idle."
+    },
+    "DocumentEventCommitFailure": {
+      "basis": "unchanged Dashboard weak-commit contract",
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "No registration offset commit failure occurred in five minutes.",
+      "recovery": "The last commit failure ages out of the five-minute window.",
+      "response": "Inspect bounded commit diagnostics and broker readiness, then preserve offset and document evidence before retry."
+    },
+    "DocumentResourcePressure": {
+      "basis": "unchanged Dashboard common resource contract and identical 300m/256Mi limits",
+      "cpu_threshold_cores": 0.24,
+      "memory_threshold_bytes": 214748364.8,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "severity": "warning",
+      "cpu_just_below_cores": 0.24,
+      "cpu_firing_cores": 0.25,
+      "memory_just_below_bytes": 214748364.8,
+      "memory_firing_bytes": 220000000,
+      "suppression": "Both CPU and memory remain at or below 80% of their deployment limits.",
+      "recovery": "Both resource signals remain below their thresholds.",
+      "response": "Inspect lookup/generation load, runtime memory, throttling, Pod events and rollout identity."
+    },
+    "DocumentUnavailable": {
+      "basis": "unchanged Dashboard common availability contract",
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "Available replicas equal desired replicas.",
+      "recovery": "The Deployment returns to its desired available replica count.",
+      "response": "Inspect rollout, readiness, configuration and read dependencies before rollback."
+    },
+    "DocumentTelemetryMissing": {
+      "basis": "unchanged Dashboard common telemetry contract",
+      "absence_window": "2m",
+      "for": "1m",
+      "severity": "warning",
+      "suppression": "The Deployment is unavailable or bounded Go runtime samples are present.",
+      "recovery": "A bounded Go runtime sample resumes.",
+      "response": "Verify OTLP configuration, Alloy receiver and remote-write health before changing the rule."
+    },
+    "DocumentTelemetryDeliveryFailure": {
+      "basis": "unchanged Dashboard shared-Alloy contract",
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "Delivery failure/drop counters do not increase; absent exporter series do not fabricate failure.",
+      "recovery": "All five-minute failure/drop increases return to zero.",
+      "response": "Identify the failed signal/backend and inspect bounded retry/drop counters while preserving service availability."
+    },
+    "DocumentTelemetryBacklog": {
+      "basis": "unchanged Dashboard shared-Alloy contract",
+      "remote_write_lag_seconds": 30,
+      "queue_ratio": 0.8,
+      "for": "2m",
+      "severity": "warning",
+      "lag_just_below_seconds": 30,
+      "lag_firing_seconds": 31,
+      "queue_just_below_ratio": 0.8,
+      "queue_firing_ratio": 0.81,
+      "suppression": "No samples are pending and exporter queue use is 80% or lower; absent series do not fabricate backlog.",
+      "recovery": "Pending samples clear and exporter queues return to 80% or lower.",
+      "response": "Check backend reachability and Alloy queue/WAL health, then verify recovery within two minutes."
+    },
+    "DocumentUnexpectedRestart": {
+      "basis": "unchanged Dashboard common restart contract",
+      "window": "15m",
+      "threshold": 0,
+      "comparison": ">",
+      "for": null,
+      "severity": "warning",
+      "just_below": 0,
+      "firing": 1,
+      "suppression": "No Go Document container restart occurred in 15 minutes.",
+      "recovery": "The last restart ages out of the 15-minute window.",
+      "response": "Inspect prior state, safe logs, Pod events, resource pressure and rollout identity."
+    }
+  },
+  "delivery": {
+    "metric_export_interval_seconds": 10,
+    "rule_evaluation_interval_seconds": 30,
+    "expected_signal_seconds": 30,
+    "expected_recovery_seconds": 120
+  }
+}

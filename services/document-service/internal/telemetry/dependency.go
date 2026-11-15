@@ -13,8 +13,10 @@ import (
 )
 
 const (
+	OperationGenerateDocument   = "generate_document"
 	DependencyPostgreSQL        = "postgresql"
 	DependencyObjectStore       = "object_store"
+	DependencyJSReport          = "jsreport"
 	DependencyResultSuccess     = "success"
 	DependencyResultFetchFailed = "fetch_failed"
 )
@@ -62,31 +64,66 @@ type DependencyRequest struct {
 	observer   *DependencyObserver
 	started    time.Time
 	span       trace.Span
+	operation  string
 	dependency string
+	stage      string
 }
 
 func (observer *DependencyObserver) Start(
 	ctx context.Context,
+	operation string,
 	dependency string,
 ) (context.Context, *DependencyRequest) {
+	operation = boundedDependencyOperation(operation)
 	dependency = boundedDependency(dependency)
+	stage := boundedDependencyStage(operation, dependency)
 	ctx, span := observer.tracer.Start(
 		ctx,
-		dependency+" "+OperationFindDocuments,
+		dependency+" "+operation,
 		trace.WithSpanKind(trace.SpanKindClient),
 	)
 	return ctx, &DependencyRequest{
-		observer: observer, started: time.Now(), span: span, dependency: dependency,
+		observer: observer, started: time.Now(), span: span, operation: operation,
+		dependency: dependency, stage: stage,
+	}
+}
+
+func boundedDependencyOperation(operation string) string {
+	switch operation {
+	case OperationFindDocuments, OperationGenerateDocument:
+		return operation
+	default:
+		return "unknown"
 	}
 }
 
 func boundedDependency(dependency string) string {
 	switch dependency {
-	case DependencyPostgreSQL, DependencyObjectStore:
+	case DependencyPostgreSQL, DependencyObjectStore, DependencyJSReport:
 		return dependency
 	default:
 		return "unknown"
 	}
+}
+
+func boundedDependencyStage(operation, dependency string) string {
+	if operation == OperationFindDocuments {
+		switch dependency {
+		case DependencyPostgreSQL, DependencyObjectStore:
+			return "lookup"
+		}
+	}
+	if operation == OperationGenerateDocument {
+		switch dependency {
+		case DependencyJSReport:
+			return "render"
+		case DependencyObjectStore:
+			return "upload"
+		case DependencyPostgreSQL:
+			return "metadata"
+		}
+	}
+	return "unknown"
 }
 
 func (request *DependencyRequest) Finish(ctx context.Context, result string, err error) {
@@ -105,7 +142,8 @@ func (request *DependencyRequest) Finish(ctx context.Context, result string, err
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
 		attribute.String("insurance_hub.document.dependency", request.dependency),
-		attribute.String("insurance_hub.document.operation", OperationFindDocuments),
+		attribute.String("insurance_hub.document.operation", request.operation),
+		attribute.String("insurance_hub.document.stage", request.stage),
 		attribute.String("insurance_hub.document.outcome", outcome),
 	}
 	request.span.SetAttributes(attrs...)
@@ -119,7 +157,8 @@ func (request *DependencyRequest) Finish(ctx context.Context, result string, err
 	request.observer.logger.LogAttrs(
 		ctx, level, "dependency completed",
 		slog.String("dependency", request.dependency),
-		slog.String("operation", OperationFindDocuments),
+		slog.String("operation", request.operation),
+		slog.String("stage", request.stage),
 		slog.String("outcome", outcome),
 		slog.Float64("duration_ms", float64(elapsed)/float64(time.Millisecond)),
 	)
