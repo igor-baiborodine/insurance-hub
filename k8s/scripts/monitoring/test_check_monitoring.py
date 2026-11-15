@@ -237,6 +237,61 @@ class TestMonitoringTooling:
         }
         assert assets.contract.dashboard.outcomes.workers == {"events": ("Search worker",)}
 
+    def test_document_dependencies_allow_cross_dependency_alerts_in_common_inventory(
+        self, tmp_path: Path
+    ) -> None:
+        # given
+        root = copied_assets(tmp_path)
+
+        def document_capabilities(contract: dict) -> None:
+            contract["capabilities"] = {
+                "dependencies": ["jsreport", "object_store", "postgresql"],
+                "workers": [],
+            }
+            contract["dashboard"]["outcomes"]["dependencies"] = {
+                "jsreport": ["Render outcomes"],
+                "object_store": ["Object-store outcomes"],
+                "postgresql": ["PostgreSQL outcomes"],
+            }
+            contract["dashboard"]["outcomes"]["workers"] = {}
+            contract["alerts"]["inventory"]["common"].extend(
+                alert
+                for capability in ("dependencies", "workers")
+                for alerts in contract["alerts"]["inventory"][capability].values()
+                for alert in alerts
+            )
+            contract["alerts"]["inventory"]["dependencies"] = {}
+            contract["alerts"]["inventory"]["workers"] = {}
+
+        mutate_contract(root, document_capabilities)
+
+        # when
+        assets = monitoring_assets.load_assets(root, "qa", "product")
+
+        # then
+        assert assets.contract.capabilities.dependencies == (
+            "jsreport",
+            "object_store",
+            "postgresql",
+        )
+        assert assets.contract.alerts.inventory.dependencies == {}
+
+    def test_source_assets_load_before_live_verification_coordinates_are_registered(
+        self, tmp_path: Path
+    ) -> None:
+        # given
+        root = copied_assets(tmp_path)
+        environment_path = root / "environments/qa.json"
+        environment = json.loads(environment_path.read_text(encoding="utf-8"))
+        del environment["service_verification"]["product"]
+        environment_path.write_text(json.dumps(environment), encoding="utf-8")
+
+        # when
+        assets = monitoring_assets.load_assets(root, "qa", "product")
+
+        # then
+        assert "product" not in assets.environment.service_verification
+
     def test_nested_dashboard_values_must_use_declared_types(self) -> None:
         # given
         dashboard = copy.deepcopy(self.assets.dashboard)

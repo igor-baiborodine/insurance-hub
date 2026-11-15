@@ -32,6 +32,18 @@ class TestProductObservabilityVerification:
         assert "qa-product-api" == selected.flux_kustomization
         assert "qa-prometheus-kube-prometh-prometheus" == selected.prometheus_service
 
+    def test_configuration_rejects_source_assets_without_live_coordinates(self) -> None:
+        # given
+        environment = dataclasses.replace(self.assets.environment, service_verification={})
+        assets = dataclasses.replace(self.assets, environment=environment)
+
+        # when / then
+        with pytest.raises(
+            verifier.VerificationError,
+            match="environment has no product verification coordinates",
+        ):
+            verifier.verification_config(assets)
+
     def test_probe_selection_rejects_cross_service_and_unregistered_defaults(self) -> None:
         # given
         cross_contract = dataclasses.replace(

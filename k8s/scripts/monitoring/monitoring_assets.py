@@ -11,7 +11,7 @@ from typing import Any
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
 SIGNAL_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]*$")
-DEPENDENCY_CAPABILITIES = frozenset({"elasticsearch", "postgresql"})
+DEPENDENCY_CAPABILITIES = frozenset({"elasticsearch", "jsreport", "object_store", "postgresql"})
 WORKER_CAPABILITIES = frozenset({"events"})
 COMMON_OUTCOMES = frozenset(
     {
@@ -300,6 +300,7 @@ def parse_capability_inventory(
     capabilities: Capabilities,
     *,
     common_dashboard: bool,
+    require_all_capabilities: bool,
 ) -> OutcomeInventory:
     mapping = require_object(value, label)
     require_fields(mapping, {"common", "dependencies", "workers"}, label)
@@ -315,10 +316,17 @@ def parse_capability_inventory(
 
     dependencies_value = require_object(mapping["dependencies"], f"{label}.dependencies")
     workers_value = require_object(mapping["workers"], f"{label}.workers")
-    if set(dependencies_value) != set(capabilities.dependencies):
-        raise AssetError(f"{label}.dependencies must exactly match declared dependencies")
-    if set(workers_value) != set(capabilities.workers):
-        raise AssetError(f"{label}.workers must exactly match declared workers")
+    declared_dependencies = set(capabilities.dependencies)
+    declared_workers = set(capabilities.workers)
+    actual_dependencies = set(dependencies_value)
+    actual_workers = set(workers_value)
+    if require_all_capabilities:
+        if actual_dependencies != declared_dependencies:
+            raise AssetError(f"{label}.dependencies must exactly match declared dependencies")
+        if actual_workers != declared_workers:
+            raise AssetError(f"{label}.workers must exactly match declared workers")
+    elif not (actual_dependencies <= declared_dependencies and actual_workers <= declared_workers):
+        raise AssetError(f"{label} contains undeclared capabilities")
     dependencies = {
         key: require_text_list(values, f"{label}.dependencies.{key}")
         for key, values in dependencies_value.items()
@@ -389,7 +397,11 @@ def parse_dashboard(value: Any, service_name: str, capabilities: Capabilities) -
             mapping["required_markers"], f"{label}.required_markers"
         ),
         outcomes=parse_capability_inventory(
-            mapping["outcomes"], f"{label}.outcomes", capabilities, common_dashboard=True
+            mapping["outcomes"],
+            f"{label}.outcomes",
+            capabilities,
+            common_dashboard=True,
+            require_all_capabilities=True,
         ),
     )
 
@@ -414,7 +426,11 @@ def parse_alerts(value: Any, service_name: str, capabilities: Capabilities) -> A
         label,
     )
     inventory = parse_capability_inventory(
-        mapping["inventory"], f"{label}.inventory", capabilities, common_dashboard=False
+        mapping["inventory"],
+        f"{label}.inventory",
+        capabilities,
+        common_dashboard=False,
+        require_all_capabilities=False,
     )
     names = set(inventory.values())
     durations_value = require_object(mapping["for"], f"{label}.for")
@@ -675,12 +691,6 @@ def load_assets(assets_root: Path, environment_name: str, service: str) -> Monit
     validate_registry(root, contract)
     if environment_name not in contract.supported_environments:
         raise AssetError(f"service {service!r} does not support environment {environment_name!r}")
-    if service not in environment.service_verification:
-        raise AssetError(
-            f"environment {environment_name!r} has no verification coordinates for service "
-            f"{service!r}"
-        )
-
     paths = {
         "dashboard": resolve_child(
             service_dir, contract.dashboard.path, "dashboard asset", {".json"}

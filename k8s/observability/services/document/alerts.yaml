@@ -1,0 +1,152 @@
+groups:
+- interval: 30s
+  name: insurance-hub-document-service
+  rules:
+  - alert: DocumentServiceErrorRate
+    annotations:
+      description: "More than 10% of at least 20 Document requests failed unexpectedly in five minutes."
+      runbook_action: "Split failures by transport and status, inspect safe logs and traces, then inspect PostgreSQL and object-store lookup dependencies."
+      summary: "Document error rate exceeds the accepted warning threshold"
+    expr: >-
+      sum(rate(insurance_hub_document_requests_total{service_name="document-service",insurance_hub_document_outcome=~"internal_error|deadline_exceeded"}[5m])) / clamp_min(sum(rate(insurance_hub_document_requests_total{service_name="document-service"}[5m])), 0.000001) > 0.1 and sum(increase(insurance_hub_document_requests_total{service_name="document-service"}[5m])) >= 20
+    for: 2m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentHighLatency
+    annotations:
+      description: "Aggregate Document request p95 exceeded 250ms with at least 20 requests in five minutes."
+      runbook_action: "Split latency by transport, correlate PostgreSQL and object-store duration, and inspect a representative trace."
+      summary: "Document request latency exceeds the accepted warning threshold"
+    expr: >-
+      histogram_quantile(0.95, sum by (le) (rate(insurance_hub_document_request_duration_seconds_bucket{service_name="document-service"}[5m]))) > 0.25 and sum(increase(insurance_hub_document_requests_total{service_name="document-service"}[5m])) >= 20
+    for: 5m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentGenerationStageFailure
+    annotations:
+      description: "At least one render, upload, or metadata stage ended in a bounded non-success outcome during the last five minutes."
+      runbook_action: "Identify the fixed stage and dependency, inspect its correlated trace, and preserve orphan-risk evidence before retry."
+      summary: "A Document generation stage failed"
+    expr: >-
+      sum by (insurance_hub_document_stage, insurance_hub_document_dependency, insurance_hub_document_outcome) (increase(insurance_hub_document_dependencies_total{service_name="document-service",insurance_hub_document_operation="generate_document",insurance_hub_document_stage=~"render|upload|metadata",insurance_hub_document_outcome!="success"}[5m])) > 0
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentLookupFailure
+    annotations:
+      description: "At least one lookup was partial, cancelled, bounded by a limit, dependency-unavailable, or internally failed during the last five minutes."
+      runbook_action: "Separate metadata from object-store lookup, inspect omitted-document and dependency outcomes, and do not infer retrievability from registration alone."
+      summary: "A Document lookup was partial or failed"
+    expr: >-
+      sum by (insurance_hub_document_lookup_outcome) (increase(insurance_hub_document_lookup_results_total{service_name="document-service",insurance_hub_document_lookup_outcome=~"partial|cancelled|deadline_exceeded|limit_exceeded|dependency_unavailable|internal_error"}[5m])) > 0
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentEventFailure
+    annotations:
+      description: "The enabled registration worker completed at least one malformed, error, or cancelled event during the last five minutes."
+      runbook_action: "Inspect the bounded registration outcome, failing stage, and Kafka readiness without exposing event values."
+      summary: "A Document registration event failed"
+    expr: >-
+      sum by (insurance_hub_document_event_type) (increase(insurance_hub_document_events_total{service_name="document-service",insurance_hub_document_outcome=~"malformed|error|cancelled"}[5m])) > 0 and on (insurance_hub_document_event_type) max by (insurance_hub_document_event_type) (insurance_hub_document_event_worker_enabled{service_name="document-service"}) == 1
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentEventStalled
+    annotations:
+      description: "The enabled registration worker has held one synchronous record for more than 30 seconds."
+      runbook_action: "Inspect render, upload, metadata, and Kafka readiness with a correlated trace; preserve offset and orphan-risk evidence before restart."
+      summary: "The Document registration worker appears stalled"
+    expr: >-
+      max by (insurance_hub_document_event_type) (insurance_hub_document_event_worker_in_flight_age_seconds{service_name="document-service"}) > 30 and on (insurance_hub_document_event_type) max by (insurance_hub_document_event_type) (insurance_hub_document_event_worker_enabled{service_name="document-service"}) == 1
+    for: 2m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentEventWorkerFailed
+    annotations:
+      description: "The enabled registration worker failed gauge has remained set for one minute."
+      runbook_action: "Inspect the last bounded worker outcome and stage diagnostics; distinguish failed from disabled and healthy idle."
+      summary: "The Document registration worker reports a failed state"
+    expr: >-
+      max by (insurance_hub_document_event_type) (insurance_hub_document_event_worker_failed{service_name="document-service"}) == 1 and on (insurance_hub_document_event_type) max by (insurance_hub_document_event_type) (insurance_hub_document_event_worker_enabled{service_name="document-service"}) == 1
+    for: 1m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentEventCommitFailure
+    annotations:
+      description: "The Document registration worker reported an offset commit failure during the last five minutes."
+      runbook_action: "Inspect bounded commit diagnostics and broker readiness, then preserve offset and document evidence before retry."
+      summary: "Document registration offset commit failed"
+    expr: >-
+      sum(increase(insurance_hub_document_event_commit_failures_total{service_name="document-service"}[5m])) > 0
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentResourcePressure
+    annotations:
+      description: "Document memory exceeded 80% of 256MiB or CPU exceeded 80% of 300m for five minutes."
+      runbook_action: "Inspect lookup and generation load, runtime memory, throttling, Pod events, and rollout identity."
+      summary: "Document resource use exceeds the accepted warning budget"
+    expr: >-
+      sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-document-api-.*",pod!~"qa-document-api-legacy-.*",container="document-api"}) > 214748364.8 or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-document-api-.*",pod!~"qa-document-api-legacy-.*",container="document-api"}[5m])) > 0.24
+    for: 5m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentUnavailable
+    annotations:
+      description: "The QA Document Deployment has been unavailable or under-replicated for two minutes."
+      runbook_action: "Inspect rollout, readiness, configuration, and read dependencies before rollback."
+      summary: "Document has fewer available replicas than desired"
+    expr: >-
+      sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-document-api"}) > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-document-api"})
+    for: 2m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentTelemetryMissing
+    annotations:
+      description: "A Document replica is available, but no bounded Go runtime sample has arrived for two minutes."
+      runbook_action: "Verify OTLP configuration, Alloy receiver, and remote-write health before changing the rule."
+      summary: "Document is available but runtime telemetry is missing"
+    expr: >-
+      sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-document-api"}) > 0 and on() absent_over_time(go_goroutine_count{service_name="document-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+    for: 1m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentTelemetryDeliveryFailure
+    annotations:
+      description: "Alloy reported a Loki drop, Prometheus remote-write failure, or OTLP span export failure in five minutes."
+      runbook_action: "Identify the failed signal and backend, inspect bounded retry and drop counters, and preserve service availability."
+      summary: "The shared Document telemetry path dropped or failed data"
+    expr: >-
+      sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) > 0 or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m])) > 0 or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m])) > 0 or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m])) > 0
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentTelemetryBacklog
+    annotations:
+      description: "Remote-write lag exceeded 30 seconds while samples were pending, or an OTLP exporter queue exceeded 80%."
+      runbook_action: "Check backend reachability and Alloy queue or WAL health, then verify recovery within two minutes."
+      summary: "The shared Document telemetry path has a sustained backlog"
+    expr: >-
+      (sum(prometheus_remote_storage_samples_pending{job=~".*alloy.*"}) > 0 and time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~".*alloy.*"}) or vector(0)) > 30) or sum(otelcol_exporter_queue_size{job=~".*alloy.*"}) / clamp_min(sum(otelcol_exporter_queue_capacity{job=~".*alloy.*"}), 1) > 0.8
+    for: 2m
+    labels:
+      service: document-service
+      severity: warning
+  - alert: DocumentUnexpectedRestart
+    annotations:
+      description: "A Document container restarted during the last 15 minutes."
+      runbook_action: "Inspect prior state, safe logs, Pod events, resource pressure, and rollout identity before rollback."
+      summary: "Document restarted unexpectedly"
+    expr: >-
+      sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-document-api-.*",pod!~"qa-document-api-legacy-.*",container="document-api"}[15m])) > 0
+    labels:
+      service: document-service
+      severity: warning

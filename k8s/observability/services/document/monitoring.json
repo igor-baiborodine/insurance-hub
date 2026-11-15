@@ -1,0 +1,248 @@
+{
+  "alerts": {
+    "expression_markers": {
+      "DocumentServiceErrorRate": [
+        "> 0.1",
+        ">= 20",
+        "[5m]"
+      ],
+      "DocumentHighLatency": [
+        "histogram_quantile(0.95",
+        "> 0.25",
+        ">= 20"
+      ],
+      "DocumentGenerationStageFailure": [
+        "insurance_hub_document_stage=~\"render|upload|metadata\"",
+        "insurance_hub_document_outcome!=\"success\"",
+        "> 0"
+      ],
+      "DocumentLookupFailure": [
+        "insurance_hub_document_lookup_results_total",
+        "insurance_hub_document_lookup_outcome=~\"partial|cancelled|deadline_exceeded|limit_exceeded|dependency_unavailable|internal_error\"",
+        "> 0"
+      ],
+      "DocumentEventFailure": [
+        "insurance_hub_document_event_worker_enabled",
+        "insurance_hub_document_outcome=~\"malformed|error|cancelled\"",
+        "> 0"
+      ],
+      "DocumentEventStalled": [
+        "insurance_hub_document_event_worker_in_flight_age_seconds",
+        "> 30",
+        "insurance_hub_document_event_worker_enabled"
+      ],
+      "DocumentEventWorkerFailed": [
+        "insurance_hub_document_event_worker_failed",
+        "== 1",
+        "insurance_hub_document_event_worker_enabled"
+      ],
+      "DocumentEventCommitFailure": [
+        "insurance_hub_document_event_commit_failures_total",
+        "> 0",
+        "[5m]"
+      ],
+      "DocumentResourcePressure": [
+        "> 214748364.8",
+        "> 0.24"
+      ],
+      "DocumentUnavailable": [
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available"
+      ],
+      "DocumentTelemetryMissing": [
+        "absent_over_time",
+        "go_goroutine_count",
+        "[2m]"
+      ],
+      "DocumentTelemetryDeliveryFailure": [
+        "loki_write_dropped_entries_total",
+        "prometheus_remote_storage_samples_failed_total",
+        "prometheus_remote_storage_samples_dropped_total",
+        "otelcol_exporter_send_failed_spans_total"
+      ],
+      "DocumentTelemetryBacklog": [
+        "prometheus_remote_storage_samples_pending",
+        "highest_sent_timestamp_seconds",
+        "otelcol_exporter_queue_size",
+        "> 0.8"
+      ],
+      "DocumentUnexpectedRestart": [
+        "kube_pod_container_status_restarts_total",
+        "[15m]"
+      ]
+    },
+    "for": {
+      "DocumentServiceErrorRate": "2m",
+      "DocumentHighLatency": "5m",
+      "DocumentGenerationStageFailure": null,
+      "DocumentLookupFailure": null,
+      "DocumentEventFailure": null,
+      "DocumentEventStalled": "2m",
+      "DocumentEventWorkerFailed": "1m",
+      "DocumentEventCommitFailure": null,
+      "DocumentResourcePressure": "5m",
+      "DocumentUnavailable": "2m",
+      "DocumentTelemetryMissing": "1m",
+      "DocumentTelemetryDeliveryFailure": null,
+      "DocumentTelemetryBacklog": "2m",
+      "DocumentUnexpectedRestart": null
+    },
+    "group_name": "insurance-hub-document-service",
+    "interval": "30s",
+    "common_labels": {
+      "service": "document-service",
+      "severity": "warning"
+    },
+    "inventory": {
+      "common": [
+        "DocumentServiceErrorRate",
+        "DocumentHighLatency",
+        "DocumentGenerationStageFailure",
+        "DocumentLookupFailure",
+        "DocumentResourcePressure",
+        "DocumentUnavailable",
+        "DocumentTelemetryMissing",
+        "DocumentTelemetryDeliveryFailure",
+        "DocumentTelemetryBacklog",
+        "DocumentUnexpectedRestart"
+      ],
+      "dependencies": {},
+      "workers": {
+        "events": [
+          "DocumentEventFailure",
+          "DocumentEventStalled",
+          "DocumentEventWorkerFailed",
+          "DocumentEventCommitFailure"
+        ]
+      }
+    },
+    "path": "alerts.yaml",
+    "prometheus_rule_name": "document-service",
+    "required_annotations": [
+      "summary",
+      "description",
+      "runbook_action"
+    ],
+    "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [
+      "jsreport",
+      "object_store",
+      "postgresql"
+    ],
+    "workers": [
+      "events"
+    ]
+  },
+  "dashboard": {
+    "application_selector": "service_name=\"document-service\"",
+    "editable": false,
+    "minimum_prometheus_targets": 49,
+    "path": "dashboard.json",
+    "refresh": "30s",
+    "required_markers": [
+      "\"type\": \"loki\"",
+      "\"type\": \"tempo\"",
+      "trace_id",
+      "generate_document",
+      "find_documents",
+      "partial",
+      "Event worker state",
+      "Legitimate idle time",
+      "missing telemetry",
+      "collection failure",
+      "pod!~\\\"qa-document-api-legacy-.*\\\""
+    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Lookup completion outcomes",
+          "Failed request and worker investigation logs",
+          "Document traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Request rate",
+          "Service error rate",
+          "Request latency percentiles"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {
+        "jsreport": [
+          "Render outcomes",
+          "Render duration percentiles"
+        ],
+        "object_store": [
+          "Upload outcomes",
+          "Upload duration percentiles",
+          "Object-store lookup outcomes",
+          "Object-store lookup duration percentiles"
+        ],
+        "postgresql": [
+          "Metadata outcomes",
+          "Metadata duration percentiles",
+          "PostgreSQL lookup outcomes",
+          "PostgreSQL lookup duration percentiles"
+        ]
+      },
+      "workers": {
+        "events": [
+          "Registration outcomes and commit failures",
+          "Registration duration percentiles",
+          "Event worker state"
+        ]
+      }
+    },
+    "required_query_filters": [
+      "deployment_environment_name=~\"$environment\"",
+      "service_implementation=~\"$implementation\""
+    ],
+    "uid": "insurance-hub-document-service",
+    "variables": {
+      "environment": "deployment_environment_name",
+      "implementation": "service_implementation"
+    }
+  },
+  "fixture": {
+    "minimum_scrapes_per_series": 4,
+    "path": "fixture.json"
+  },
+  "schema_version": 2,
+  "service": "document",
+  "service_name": "document-service",
+  "supported_environments": [
+    "qa"
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_document_requests_total",
+        "insurance_hub_document_dependencies_total",
+        "insurance_hub_document_event_worker_enabled"
+      ],
+      "traces": [
+        "document-service"
+      ]
+    },
+    "probe": "document"
+  }
+}
