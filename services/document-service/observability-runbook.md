@@ -95,7 +95,6 @@ Capture the monitoring objects read-only. Keep the commands in one shell so the 
 and private evidence directory remain bound to the attempt:
 
 ```sh
-export DOCUMENT_SOURCE_REVISION="$(git rev-parse HEAD)"
 export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
 test -z "$(git status --porcelain)"
 test "$(kubectl config current-context)" = qa-insurance-hub
@@ -116,6 +115,15 @@ kubectl --context qa-insurance-hub -n qa-monitoring get \
   configmap/qa-document-dashboard -o json --ignore-not-found \
   > "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
 
+test "$(jq -er '.status.artifact.revision' \
+  "$MONITORING_EVIDENCE_DIR/flux-source.json")" = \
+  "$(jq -er '.status.lastAppliedRevision' \
+  "$MONITORING_EVIDENCE_DIR/flux-qa-svc.json")"
+export MONITORING_SOURCE_REVISION="$(jq -er \
+  '.status.lastAppliedRevision | capture("sha1:(?<sha>[0-9a-f]{40})$").sha' \
+  "$MONITORING_EVIDENCE_DIR/flux-qa-svc.json")"
+test "$MONITORING_SOURCE_REVISION" = "$(git rev-parse HEAD)"
+
 if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
   test -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
 else
@@ -132,7 +140,7 @@ make verify-service-observability \
   ENV_NAME=qa \
   SVC_NAME=document \
   VERIFY_MODE=pre-provision \
-  VERIFY_SOURCE_REVISION="$DOCUMENT_SOURCE_REVISION"
+  VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
 ```
 
 Stop for an unexpected context, namespace, Flux revision, Deployment/Pod/configuration/image
@@ -199,8 +207,8 @@ cmp "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" \
 
 Inspect the active Prometheus group and immutable Grafana dashboard by UID. The repository's
 foreground Grafana access owner is `make -C k8s grafana-ui`; stop it with Ctrl+C after the bounded
-read-only inspection. Then use the full reconciled monitoring source revision, never a branch or
-short SHA:
+read-only inspection. Reuse the full reconciled `MONITORING_SOURCE_REVISION` established by the
+preflight, never a branch or short SHA:
 
 ```sh
 : "${MONITORING_SOURCE_REVISION:?set the full reconciled monitoring source revision}"
