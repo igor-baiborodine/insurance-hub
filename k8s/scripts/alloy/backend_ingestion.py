@@ -37,6 +37,7 @@ SERVICE_INSTANCE_ID = "13500000-0000-4000-8000-000000000015"
 SERVICE_TRACE_ID = "13513513513513513513513513513515"
 SYNTHETIC_TRACE_ID = "51515151515151515151515151515151"
 JAVA_TRACE_ID = "42424242424242424242424242424242"
+DOCUMENT_SENSITIVE_SENTINEL = "SENTINEL-document-observability-private"
 
 METRIC_IDENTITY = {
     "service_namespace": "insurance-hub",
@@ -449,12 +450,22 @@ class DockerHarness:
         timeout: float = 660,
     ) -> None:
         """Let the probe unwind, then reclaim its separately owned resources."""
+        environment = None
+        if service_domain == "document":
+            environment = dict(os.environ)
+            environment.update(
+                {
+                    "DOCUMENT_DATABASE_URL": DOCUMENT_SENSITIVE_SENTINEL,
+                    "MINIO_SECRET_KEY": DOCUMENT_SENSITIVE_SENTINEL,
+                }
+            )
         child = subprocess.Popen(
             [*arguments, "--ownership-file", str(ownership_file)],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            env=environment,
         )
         try:
             stdout, stderr = child.communicate(timeout=timeout)
@@ -1201,6 +1212,109 @@ def validate_dashboard_metrics(prometheus_port: int) -> None:
     validate_runtime_metrics("dashboard", prometheus_port)
 
 
+def validate_document_metrics(prometheus_port: int) -> None:
+    service_name = "document-service"
+    prefix = "insurance_hub_document_"
+    dependency_dimensions = [
+        {
+            f"{prefix}dependency": dependency,
+            f"{prefix}operation": operation,
+            f"{prefix}stage": stage,
+            f"{prefix}outcome": outcome,
+        }
+        for dependency, operation, stage, outcome in (
+            ("jsreport", "generate_document", "render", "success"),
+            ("jsreport", "generate_document", "render", "error"),
+            ("object_store", "generate_document", "upload", "success"),
+            ("object_store", "generate_document", "upload", "error"),
+            ("postgresql", "generate_document", "metadata", "success"),
+            ("postgresql", "generate_document", "metadata", "error"),
+            ("postgresql", "find_documents", "lookup", "success"),
+            ("object_store", "find_documents", "lookup", "success"),
+        )
+    ]
+    dependencies = metric_series(
+        prometheus_port,
+        f"{prefix}dependencies_total",
+        service_name,
+        dependency_dimensions,
+    )
+    expected_counts = {
+        ("jsreport", "generate_document", "success"): 3,
+        ("jsreport", "generate_document", "error"): 1,
+        ("object_store", "generate_document", "success"): 2,
+        ("object_store", "generate_document", "error"): 1,
+        ("postgresql", "generate_document", "success"): 1,
+        ("postgresql", "generate_document", "error"): 1,
+        ("postgresql", "find_documents", "success"): 1,
+        ("object_store", "find_documents", "success"): 1,
+    }
+    actual_counts = {
+        (
+            result["metric"][f"{prefix}dependency"],
+            result["metric"][f"{prefix}operation"],
+            result["metric"][f"{prefix}outcome"],
+        ): int(float(result["value"][1]))
+        for result in dependencies
+    }
+    if actual_counts != expected_counts:
+        raise HarnessError(f"Document dependency counts are {actual_counts}")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}dependency_duration_seconds",
+        service_name,
+        dependency_dimensions,
+    )
+
+    lookup_dimensions = [
+        {
+            f"{prefix}operation": "find_documents",
+            f"{prefix}lookup_outcome": "complete",
+        }
+    ]
+    lookups = metric_series(
+        prometheus_port,
+        f"{prefix}lookup_results_total",
+        service_name,
+        lookup_dimensions,
+    )
+    if float(lookups[0]["value"][1]) != 1:
+        raise HarnessError("Document complete lookup counter is not exactly one")
+
+    event_dimensions = [
+        {f"{prefix}event_type": "registered", f"{prefix}outcome": outcome}
+        for outcome in ("success", "error")
+    ]
+    events = metric_series(
+        prometheus_port,
+        f"{prefix}events_total",
+        service_name,
+        event_dimensions,
+    )
+    event_counts = {
+        result["metric"][f"{prefix}outcome"]: float(result["value"][1]) for result in events
+    }
+    if event_counts != {"success": 1, "error": 3}:
+        raise HarnessError(f"Document event counts are {event_counts}")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}event_duration_seconds",
+        service_name,
+        event_dimensions,
+    )
+    worker_dimensions = [{f"{prefix}event_type": "registered"}]
+    for metric_name, expected in (
+        (f"{prefix}event_worker_enabled", 1),
+        (f"{prefix}event_worker_in_flight_age_seconds", 0),
+        (f"{prefix}event_worker_failed", 1),
+        (f"{prefix}event_commit_failures_total", 1),
+    ):
+        results = metric_series(prometheus_port, metric_name, service_name, worker_dimensions)
+        if float(results[0]["value"][1]) != expected:
+            raise HarnessError(f"{metric_name} is not {expected}")
+    validate_runtime_metrics("document", prometheus_port)
+
+
 def start_prometheus(harness: DockerHarness, enabled: bool) -> tuple[str, int]:
     arguments = [
         "--config.file=/fixture/prometheus.yml",
@@ -1252,6 +1366,7 @@ def validate_service_backends(
     metric_domain = service_domain.replace("-", "_")
     operation = {
         "dashboard": "sales_trends",
+        "document": "find_documents",
         "policy-search": "search",
     }.get(service_domain, "list")
     if service_domain == "dashboard":
@@ -1311,6 +1426,8 @@ def validate_service_backends(
         validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
     elif service_domain == "dashboard":
         validate_dashboard_metrics(prometheus_port)
+    elif service_domain == "document":
+        validate_document_metrics(prometheus_port)
     elif service_domain == "policy-search":
         validate_policy_search_metrics(prometheus_port)
     else:
@@ -1336,7 +1453,7 @@ def validate_service_backends(
     url = f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
         {"query": query, "start": start, "end": end, "limit": 20}
     )
-    expected_completion_logs = 2 if service_domain == "dashboard" else 1
+    expected_completion_logs = 2 if service_domain in {"dashboard", "document"} else 1
     logs = wait_json(
         url,
         lambda value: (
@@ -1363,13 +1480,13 @@ def validate_service_backends(
             "end": end,
         }
     )
+    expected_levels = {"INFO", "WARN", "ERROR"} if service_domain == "document" else {"INFO"}
     series = wait_json(
         series_url,
-        lambda value: len(value.get("data", [])) == 1,
-        f"one {service_domain} Loki index series",
+        lambda value: len(value.get("data", [])) == len(expected_levels),
+        f"{len(expected_levels)} {service_domain} Loki index series",
     )
-    labels = series["data"][0]
-    if set(labels) != {
+    expected_label_names = {
         "service_namespace",
         "service_name",
         "deployment_environment_name",
@@ -1378,9 +1495,16 @@ def validate_service_backends(
         "k8s_namespace_name",
         "k8s_container_name",
         "level",
-    }:
+    }
+    if any(set(labels) != expected_label_names for labels in series["data"]):
         raise HarnessError(
-            f"{service_domain} Loki index labels differ from the eight-field contract: {labels}"
+            f"{service_domain} Loki index labels differ from the eight-field contract: "
+            f"{series['data']}"
+        )
+    actual_levels = {labels["level"] for labels in series["data"]}
+    if actual_levels != expected_levels:
+        raise HarnessError(
+            f"{service_domain} Loki levels are {actual_levels}, expected {expected_levels}"
         )
     for job in ("prometheus", "alloy"):
         up = prom_query(prometheus_port, f'up{{job="{job}"}}')
@@ -1615,6 +1739,8 @@ def execute(args: argparse.Namespace) -> None:
                 root / f"probe-{args.service_domain}-pgid",
                 service_domain=args.service_domain,
             )
+            if DOCUMENT_SENSITIVE_SENTINEL in (root / "service.log").read_text(encoding="utf-8"):
+                raise HarnessError("Document probe exposed the synthetic sensitive sentinel")
             validate_service_backends(
                 args.service_domain,
                 args.request_histogram_buckets,

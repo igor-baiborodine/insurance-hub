@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import probe_dashboard
+import probe_document
 import probe_product
 import pytest
 
@@ -264,6 +265,69 @@ def test_dashboard_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> 
         probe_dashboard.execute_in_root(args, tmp_path)
     assert len(observed) == 1
     assert 0 < observed[0] <= 15
+
+
+def test_document_probe_disables_workers_and_drops_inherited_credentials() -> None:
+    # given
+    args = type(
+        "Args",
+        (),
+        {
+            "version": "git-364000000000",
+            "instance_id": "document-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+    sentinel = "SENTINEL-document-observability-secret"
+
+    # when
+    with mock.patch.dict(
+        os.environ,
+        {
+            "DOCUMENT_DATABASE_URL": sentinel,
+            "MINIO_SECRET_KEY": sentinel,
+            "EVENT_WORKERS_ENABLED": "true",
+            "SERVICE_NAME": "foreign-service",
+        },
+    ):
+        values = probe_document.environment(args)
+
+    # then
+    assert values["SERVICE_NAME"] == "document-service"
+    assert values["EVENT_WORKERS_ENABLED"] == "false"
+    assert values["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://127.0.0.1:4317"
+    assert sentinel not in values.values()
+
+
+def test_document_probe_timeout_reclaims_owned_process(tmp_path: Path) -> None:
+    # given
+    ownership = tmp_path / "owned"
+    args = type(
+        "Args",
+        (),
+        {
+            "service_root": tmp_path,
+            "log_file": tmp_path / "service.log",
+            "ownership_file": ownership,
+            "trace_id": "a" * 32,
+            "version": "git-364000000000",
+            "instance_id": "document-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+    process = mock.Mock(pid=4364)
+    process.wait.side_effect = subprocess.TimeoutExpired("probe", 60)
+
+    # when / then
+    with (
+        mock.patch.object(probe_document, "run"),
+        mock.patch.object(probe_document.subprocess, "Popen", return_value=process),
+        mock.patch.object(probe_document.alloy_runtime, "terminate_process_group") as terminate,
+        pytest.raises(probe_document.ProbeError, match="timed out"),
+    ):
+        probe_document.execute_in_root(args, tmp_path)
+    assert terminate.call_count == 2
+    assert not ownership.exists()
 
 
 def test_forced_probe_recovery_reclaims_product_group_and_postgres(tmp_path: Path) -> None:

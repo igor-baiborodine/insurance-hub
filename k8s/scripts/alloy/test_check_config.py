@@ -240,7 +240,15 @@ class TestMetricPolicy:
                 {
                     "insurance_hub.alpha.dependency": "elasticsearch",
                     "insurance_hub.alpha.operation": "replace",
+                    "insurance_hub.alpha.stage": "projection",
                     "insurance_hub.alpha.outcome": "success",
+                },
+            ),
+            (
+                "insurance_hub.alpha.lookup.results",
+                {
+                    "insurance_hub.alpha.operation": "find_documents",
+                    "insurance_hub.alpha.lookup.outcome": "complete",
                 },
             ),
         ),
@@ -341,6 +349,8 @@ class TestSpanPolicy:
             {
                 "insurance_hub.alpha.event.type": "terminated",
                 "insurance_hub.alpha.dependency": "elasticsearch",
+                "insurance_hub.alpha.stage": "projection",
+                "insurance_hub.alpha.lookup.outcome": "complete",
                 "insurance_hub.alpha.outcome": "success",
                 "policy_number": "forbidden",
                 "customer_id": "forbidden",
@@ -349,6 +359,8 @@ class TestSpanPolicy:
         assert {
             "insurance_hub.alpha.event.type": "terminated",
             "insurance_hub.alpha.dependency": "elasticsearch",
+            "insurance_hub.alpha.stage": "projection",
+            "insurance_hub.alpha.lookup.outcome": "complete",
             "insurance_hub.alpha.outcome": "success",
         } == attributes
 
