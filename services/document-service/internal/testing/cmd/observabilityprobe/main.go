@@ -149,7 +149,11 @@ func run(traceIDValue string) error {
 		return fmt.Errorf("load probe configuration: %w", err)
 	}
 	log := logger.NewIdentity(os.Stdout, settings.Identity, slog.LevelInfo)
-	provider, err := telemetry.New(context.Background(), settings.ServiceName, settings.Telemetry)
+	provider, err := telemetry.New(
+		context.Background(),
+		settings.ServiceName,
+		settings.Telemetry,
+	)
 	if err != nil {
 		return fmt.Errorf("initialize probe telemetry: %w", err)
 	}
@@ -194,7 +198,14 @@ func run(traceIDValue string) error {
 	if err != nil {
 		return errors.Join(err, shutdown())
 	}
-	if err := generate(probeContext, eventObserver, dependencyObserver, metadata, store, registration); err != nil {
+	if err := generate(
+		probeContext,
+		eventObserver,
+		dependencyObserver,
+		metadata,
+		store,
+		registration,
+	); err != nil {
 		return errors.Join(errors.New("controlled generation path failed"), err, shutdown())
 	}
 	lookup, err := application.NewFindDocuments(
@@ -211,7 +222,11 @@ func run(traceIDValue string) error {
 	lookupObserver.Record(probeContext, len(result.Documents), result.Omitted, lookupErr)
 	if lookupErr != nil || len(result.Documents) != 1 ||
 		!strings.HasPrefix(string(result.Documents[0].Content), "%PDF-") {
-		return errors.Join(errors.New("controlled lookup path failed"), lookupErr, shutdown())
+		return errors.Join(
+			errors.New("controlled lookup path failed"),
+			lookupErr,
+			shutdown(),
+		)
 	}
 	request.FinishHTTP(probeContext, 200)
 
@@ -223,13 +238,24 @@ func run(traceIDValue string) error {
 			return errors.Join(registrationErr, shutdown())
 		}
 		generationErr := generate(
-			probeContext, eventObserver, dependencyObserver, metadata, store, failedRegistration,
+			probeContext,
+			eventObserver,
+			dependencyObserver,
+			metadata,
+			store,
+			failedRegistration,
 		)
 		if !errors.Is(generationErr, errControlledStage) {
-			return errors.Join(errors.New("controlled stage failure was not preserved"), shutdown())
+			return errors.Join(
+				errors.New("controlled stage failure was not preserved"),
+				shutdown(),
+			)
 		}
 		if len(store.metadata[policyNumber]) != 0 {
-			return errors.Join(errors.New("failed generation registered metadata"), shutdown())
+			return errors.Join(
+				errors.New("failed generation registered metadata"),
+				shutdown(),
+			)
 		}
 	}
 	if len(store.objects) != 2 {
@@ -252,7 +278,11 @@ func generate(
 ) error {
 	generation, err := application.NewGenerateDocument(
 		observedRenderer{observer: dependencies},
-		observedUploader{observer: dependencies, store: store, policy: registration.Number()},
+		observedUploader{
+			observer: dependencies,
+			store:    store,
+			policy:   registration.Number(),
+		},
 		metadata,
 	)
 	if err != nil {
