@@ -7,6 +7,7 @@
   - [Worker qualification boundary](#worker-qualification-boundary)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
+  - [Monitoring coordinates and guarded QA operation](#monitoring-coordinates-and-guarded-qa-operation)
   - [Explicit database, writer and template administration](#explicit-database-writer-and-template-administration)
     - [Fresh schema initialization and compatible adoption](#fresh-schema-initialization-and-compatible-adoption)
     - [Verification and focused disposable smoke](#verification-and-focused-disposable-smoke)
@@ -26,6 +27,11 @@ cluster, the Document MinIO namespace and, in QA, Alloy egress. The current depl
 `EVENT_WORKERS_ENABLED=false`, so the ordinary Deployment has no Kafka/JSReport egress, Kafka CA
 mount or PostgreSQL/MinIO writer credential. The separate
 `<environment>-document-api-legacy` resources remain active and authoritative for ordinary traffic.
+
+Use the companion [observability runbook](observability-runbook.md) for Document monitoring source
+validation, guarded QA provisioning/read-back, investigation and restoration. The two procedures
+share application and source identity, but workload reconciliation remains Flux-owned while the
+Document PrometheusRule and Grafana ConfigMap use their separate guarded monitoring owners.
 
 ## Source and candidate checks
 
@@ -95,18 +101,19 @@ is the current no-authority state: Java keeps ordinary registration and writes, 
 does not initialize or join group `document-service`. Worker activation requires a separate,
 explicitly reviewed authority handover.
 
-Following the Dashboard reference, C03 Kafka generation qualification exists only inside the owned
+Following the Dashboard reference, Kafka generation qualification exists only inside the owned
 disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
 MinIO and PostgreSQL fixtures, verifies that an event becomes a PDF retrievable through the real
 HTTP-to-RPC lookup, and removes the whole owned namespace/resources. Companion focused cases cover
 duplicate/restart, failures, disabled lifecycle, trust and least privilege.
 
-C03 defines no local-dev or QA qualification group, one-shot worker binary, Job or shared-effect
-cleanup procedure. The deployment status and verification owners check only the worker-disabled
+The disposable qualification defines no local-dev or QA qualification group, one-shot worker
+binary, Job or shared-effect cleanup procedure. The deployment status and verification owners
+check only the worker-disabled
 configuration, lookup/health/access and candidate identity; they must not publish an event, create
-or initialize a consumer group, mount writer credentials or add Kafka/JSReport egress. C06 owns the
-ordinary `document-service` group activation and the first shared-environment generation
-observation as part of the explicitly authorized direct authority transfer.
+or initialize a consumer group, mount writer credentials or add Kafka/JSReport egress. A separate,
+explicitly authorized authority transfer owns ordinary `document-service` group activation and the
+first shared-environment generation observation.
 
 Shared deployment verification is non-mutating. The lookup probe accepts the contractually valid
 empty `{"documents":[]}` result when no synthetic fixture is provisioned. If `SYN-362` exists, it
@@ -115,7 +122,7 @@ fails. Exact object/reader permission verification remains the separately author
 `resource-verify` path below and still requires its explicitly provisioned eight-byte fixture.
 
 Start troubleshooting with the Dashboard comparison in the
-[observability runbook](observability-runbook.md#kafka-and-generation-troubleshooting-order); do
+[observability runbook](observability-runbook.md#investigation-and-alert-response); do
 not inspect or mutate Dashboard runtime state.
 
 ## Local development
@@ -213,6 +220,121 @@ Record the image source commit separately from the later Flux release commit. St
 context, namespaces, source revision, digest, Pod image ID, runtime version, rendered inventory or
 legacy separation differs. Recovery uses a reviewed release commit or Flux reconciliation; never
 patch QA, suspend the shared owner or remove Java resources.
+
+## Monitoring coordinates and guarded QA operation
+
+The registered monitoring selection is environment `qa`, service `document`, context
+`qa-insurance-hub` and namespace `qa-monitoring`. It renders PrometheusRule
+`qa-document-service`, ConfigMap `qa-document-dashboard` and Grafana dashboard UID
+`insurance-hub-document-service`. The application remains Deployment `qa-document-api` in
+`qa-svc`, reconciled by `GitRepository/insurance-hub` and `Kustomization/qa-svc` in `flux-system`.
+Monitoring operations do not transfer workload ownership away from Flux.
+
+Validate the candidate without contacting QA before considering a live operation:
+
+```sh
+make monitoring-assets-check ENV_NAME=qa SVC_NAME=document
+make test-monitoring ENV_NAME=qa SVC_NAME=document
+make test-observability-backends OBSERVABILITY_SERVICE_DOMAIN=document
+```
+
+These owners validate source/rules, collected disposable Prometheus queries and actual disposable
+Alloy-to-backend delivery respectively. They do not apply QA resources or establish live QA
+behavior.
+
+Immediately before any separately authorized QA monitoring write or live-signal acceptance,
+perform a fresh read-only identity preflight. Read only the exact context/namespaces, Flux
+source/applied revision, Document Deployment/Pod/config/image identity, worker-disabled setting and
+the two monitoring objects or their verified absence. Record full application image source,
+semantic reference, registry digest,
+Pod image ID, runtime `service.version`, Pod UID and full monitoring source revision. Do not read
+Secret values. Partial, foreign, placeholder or mismatched state is a stop condition; repeat the
+preflight after any source, image, configuration, Flux or monitoring-object change.
+
+For a first installation, both monitoring objects must be absent. Run the selected-service
+read-only pre-provision check before creating either one:
+
+```sh
+: "${MONITORING_SOURCE_REVISION:?set the full reviewed monitoring source revision}"
+make verify-service-observability \
+  ENV_NAME=qa \
+  SVC_NAME=document \
+  VERIFY_MODE=pre-provision \
+  VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
+```
+
+Render the exact objects, retain their hashes and request server admission without persistence:
+
+```sh
+export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
+make --no-print-directory -C k8s \
+  prometheus-rules-render ENV_NAME=qa SVC_NAME=document \
+  > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+make --no-print-directory -C k8s \
+  grafana-dashboard-render ENV_NAME=qa SVC_NAME=document \
+  > "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+sha256sum \
+  "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" \
+  "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+```
+
+Confirm exact resource names, namespace, service/QA/Go filters, immutable dashboard setting,
+30-second intervals and the legacy Pod exclusion. Rendering is source evidence; server dry-run is
+admission evidence. Neither proves application, reconciliation or live delivery.
+
+Every write requires authorization for the exact resources. When granted, apply only through the
+guarded selected-service owners:
+
+```sh
+make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=document
+make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=document
+```
+
+Read back the PrometheusRule and ConfigMap, record their UIDs, and compare a fresh render with the
+retained candidate. Inspect the active `insurance-hub-document-service` Prometheus group and the
+Grafana dashboard by UID. Only then run the separately authorized read-only live verifier with the
+full reconciled monitoring source revision:
+
+```sh
+make verify-service-observability \
+  ENV_NAME=qa \
+  SVC_NAME=document \
+  VERIFY_MODE=enabled \
+  VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
+```
+
+`VERIFY_MODE=enabled` means OTel export is enabled; it does not enable the event worker. The
+verifier must still observe `EVENT_WORKERS_ENABLED=false`. Shared worker activation and generation
+require a separate authority transfer.
+
+Stop before or after a monitoring operation for an unexpected context, namespace, Flux/source,
+application identity, worker mode, resource name/UID/source, mutable dashboard, missing signal,
+unexplained alert, sensitive query or incomplete cleanup. Preserve the first failure and the
+sanitized identities before retrying. Do not weaken filters or thresholds to make the check pass.
+
+Application recovery and monitoring restoration are different procedures:
+
+- restore the QA workload only through a reviewed release/source change and Flux reconciliation;
+  never patch, scale or directly apply the Deployment;
+- restore monitoring from a captured accepted source through the same guarded selected-service
+  owners, after verifying the captured resource UIDs still match, under separate restore
+  authorization;
+- for a proven first installation, removal needs separate authorization for only
+  `qa-document-service` and `qa-document-dashboard`, followed by exact absence and shared-stack
+  health checks.
+
+Cleanup owns only the attempt's private evidence directory and local verifier processes. Do not
+delete shared monitoring releases/PVCs, workload or Java resources, dependency data, Kafka
+progress, Dashboard assets or another service's monitoring objects. Retain source/base/head,
+render hashes, admission/application/read-back results, UIDs, application/Flux identities, bounded
+signal results, restoration and owned cleanup. Keep source, disposable and live evidence distinct
+and retain no credentials, event bodies, policy/customer values, object keys, PDF bytes or raw
+dependency errors. The companion observability runbook contains the complete identity capture and
+investigation sequence.
 
 ## Explicit database, writer and template administration
 
@@ -313,7 +435,8 @@ export DOCUMENT_MIGRATOR="$PWD/services/document-service/.tools/document-migrate
 
 Using the protected operator Secret-export channel, place `target.json`, the migrator
 `database-url`, and `ca.crt` in separate private regular files under a mode-0700 directory. Do not
-print or retain these values as ticket evidence. Each file must be mode 0600. Export their paths:
+print or retain these values as ordinary operational evidence. Each file must be mode 0600. Export
+their paths:
 
 ```sh
 export DOCUMENT_MIGRATION_TARGET_FILE=/protected/document-migration/target.json
@@ -404,5 +527,6 @@ synthetic TLS/credential files; cleanup removes only those containers/files. It 
 Java-independent setup, compatible adoption/replay, byte/ID/sequence preservation, subsequent safe
 ID allocation, schema/history/target rejection, bounded contention, TLS hostname rejection and
 actual PostgreSQL/MinIO read and denied-write/admin behavior. It is not evidence of deployed
-permissions, QA CA distribution or live network policy. Retain bounded logs under the ticket's aux
-directory when recording a delivery result; do not copy temporary credentials or database contents.
+permissions, QA CA distribution or live network policy. Retain bounded logs in the operation's
+private evidence directory when recording a delivery result; do not copy temporary credentials or
+database contents.
