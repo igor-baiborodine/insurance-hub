@@ -87,9 +87,9 @@ QA remains on the Java `qa-document-api-legacy` Service.
 
 ## Candidate identity and caller proof
 
-The local overlay selects the committed lookup source `f50eeb5bd8f65bcf473c22060ec64166e6cb8224`
-as image `insurance-hub-document-api:1.0.0-local.f50eeb5bd8f6` with runtime version
-`git-f50eeb5bd8f6`. Qualification must independently record the OCI revision and local image ID;
+The local overlay selects the committed application source `0e53205ebf0ba43322e202e4485b4555fd59f9f5`
+as image `insurance-hub-document-api:1.0.0-local.0e53205ebf0b` with runtime version
+`git-0e53205ebf0b`. Qualification must independently record the OCI revision and local image ID;
 the ID is not a registry digest. Do not identify an image as a later dirty working tree or reuse
 this identity after runtime source changes. Ordinary local-dev and Flux-owned QA observations
 remain the live acceptance boundary.
