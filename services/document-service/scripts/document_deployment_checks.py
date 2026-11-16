@@ -791,6 +791,15 @@ class Target:
             if previous_image and not require_deployment
             else {}
         )
+        if previous:
+            config_name = f"{self.environment}-document-config"
+            desired_data = resource(items, "ConfigMap", config_name).get("data", {})
+            actual_config = self.json("get", "configmap", config_name, "--ignore-not-found")
+            actual_data = actual_config.get("data", {})
+            if {key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"} == {
+                key: value for key, value in desired_data.items() if key != "SERVICE_VERSION"
+            }:
+                previous = {}
         allowed_images = {desired_image}
         allowed_versions = {
             desired_deployment.get("metadata", {})
