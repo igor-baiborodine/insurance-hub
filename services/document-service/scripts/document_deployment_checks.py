@@ -184,11 +184,21 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
             archive.extractall(directory, filter="data")
         overlay = Path(directory) / f"k8s/overlays/{environment}/svc/document"
         text = run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
+
+    items = previous_render_resources(environment, text)
+    return {(str(item["kind"]), str(item["metadata"]["name"])): item for item in items}
+
+
+def previous_render_resources(environment: str, text: str) -> list[dict[str, Any]]:
     require(
-        not any(value in text.lower() for value in FORBIDDEN_TEXT + WORKER_TEXT),
+        not any(value in text.lower() for value in FORBIDDEN_TEXT),
         "previous deployment contains forbidden resources",
     )
-    items = documents(text)
+    items = (
+        validate_render(environment, text)
+        if any(value in text.lower() for value in WORKER_TEXT)
+        else documents(text)
+    )
     prefix = f"{environment}-document-"
     require(
         items
@@ -199,7 +209,7 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
         ),
         "previous deployment inventory differs",
     )
-    return {(str(item["kind"]), str(item["metadata"]["name"])): item for item in items}
+    return items
 
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:

@@ -234,6 +234,24 @@ def test_local_render_rejects_wrong_transfer_authority(mutation) -> None:
         checks.validate_render("local-dev", mutation(rendered))
 
 
+def test_previous_render_accepts_only_valid_final_worker_authority() -> None:
+    # given
+    rendered = checks.render("local-dev")
+
+    # when
+    resources = checks.previous_render_resources("local-dev", rendered)
+
+    # then
+    assert len(resources) == 5
+
+    # when / then
+    with pytest.raises(checks.DeploymentError):
+        checks.previous_render_resources(
+            "local-dev",
+            rendered.replace("KAFKA_GROUP: documents-service", "KAFKA_GROUP: foreign-group"),
+        )
+
+
 def test_qa_aggregate_preserves_java_before_and_after_release_activation() -> None:
     # when / then
     checks.validate_qa_aggregate(["./document/legacy", "./product"])
