@@ -51,8 +51,8 @@ Worker state is also explicit. Disabled means `enabled=0`; enabled idle means `e
 in-flight age; in-flight means the age grows; failed means `failed=1`. Missing samples are not an
 idle state. A failed handler may already be weakly committed, while a commit failure may replay the
 record. These signals do not prove exactly-once processing, backlog clearance or completeness.
-Shared local-dev and QA remain worker-disabled. Worker activation and the first shared generation
-observation require a separate, explicitly authorized authority transfer.
+The final local-dev and QA desired states require `enabled=1`. Source validation does not activate a
+shared worker, and the first shared generation observation requires a separately authorized event.
 
 Labels contain only fixed operations, stages, dependencies, transports, outcomes and event type.
 Do not query or retain request bodies, policy numbers, object keys, PDF bytes, event values,
@@ -89,7 +89,7 @@ A fresh read-only identity preflight is required immediately before a separately
 monitoring write or live-signal acceptance. Use the
 [deployment runbook](deployment-runbook.md#qa-release-and-verification) first to establish the
 exact Flux source/applied revision, image reference and digest, Pod image ID, runtime
-`service.version`, Pod UID and worker-disabled configuration. Do not read Secret values.
+`service.version`, Pod UID and worker-enabled configuration. Do not read Secret values.
 
 Capture the monitoring objects read-only. Keep the commands in one shell so the source revision
 and private evidence directory remain bound to the attempt:
@@ -144,7 +144,8 @@ make verify-service-observability \
 ```
 
 Stop for an unexpected context, namespace, Flux revision, Deployment/Pod/configuration/image
-identity, worker-enabled shared workload, monitoring name/UID/source, mutable Grafana provider,
+identity, a worker mode other than the final enabled state, monitoring name/UID/source, mutable
+Grafana provider,
 unexplained firing alert, missing Document signal, sensitive or unbounded query, or any operation
 that would modify shared Alloy, Prometheus, Loki, Tempo, Kafka, Java, Dashboard or another service.
 Repeat the preflight after any source, image, configuration, Flux or monitoring-object change.
@@ -219,10 +220,11 @@ make verify-service-observability \
   VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
 ```
 
-`VERIFY_MODE=enabled` means OTel export is enabled. It does not enable the event worker. The
-verifier remains read-only against QA but owns bounded local port-forwards and cleans them up. It
-must confirm worker-disabled mode, the exact monitoring objects and bounded application,
-Prometheus, Loki and Tempo identities. Keep render, admission, apply, Kubernetes read-back,
+`VERIFY_MODE=enabled` means the verifier expects OTel export and the final enabled worker state; it
+does not change either one. The verifier remains read-only against QA but owns bounded local
+port-forwards and cleans them up. It must confirm worker-enabled mode, the exact monitoring objects
+and bounded application, Prometheus, Loki and Tempo identities. Keep render, admission, apply,
+Kubernetes read-back,
 Grafana/Prometheus reconciliation and live-signal results as separate evidence.
 
 ## Investigation and alert response
@@ -252,8 +254,8 @@ For generation, follow the fixed path and stop at the first failed stage:
 For Kafka or worker symptoms, compare Dashboard's configuration/TLS/topic/group, connectivity and
 assignment, weak commit, readiness/cancellation and bounded worker-state patterns first. Then
 inspect Document's render, upload and metadata path. Do not join or reset Dashboard's group. Do not
-enable Document in local-dev or QA; shared activation and generation require a separate authority
-transfer.
+change Document worker state from this runbook; activation and generation remain separately
+authorized operations.
 
 Respond to alert families without changing thresholds to hide the symptom:
 
@@ -296,10 +298,10 @@ or Kubernetes selectors for cleanup.
 
 Retain reviewed base/head/source identities, rendered hashes, server admission and apply/read-back
 results, monitoring UIDs, full application image/source/digest/runtime/Pod chain, Flux
-source/applied revisions, worker-disabled mode, bounded query/alert results, recovery outcome and
+source/applied revisions, worker-enabled mode, bounded query/alert results, recovery outcome and
 owned cleanup. Record source, fixture, disposable and live evidence separately.
 
 Do not retain Secrets, credentials, raw errors, event bodies, policy/customer values, object keys
-or PDF bytes. A source check, image startup record, another service's pass or worker-disabled QA
-observation is not proof of live Document generation. Shared activation and generation require a
-separate authority transfer; this runbook grants no live authority.
+or PDF bytes. A source check, image startup record, another service's pass or an enabled-worker
+observation is not proof of live Document generation. A separately authorized synthetic event and
+bounded lookup proof are required; this runbook grants no live authority.

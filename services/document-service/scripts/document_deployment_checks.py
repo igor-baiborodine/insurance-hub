@@ -214,17 +214,13 @@ def previous_render_resources(environment: str, text: str) -> list[dict[str, Any
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
     namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
-    client_labels = (
-        {
-            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
-            "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
-            "app.kubernetes.io/component": "gateway",
-            "environment": "local-dev",
-            BUSINESS_CLIENT_LABEL: "true",
-        }
-        if environment == "local-dev"
-        else {QUALIFICATION_CLIENT_LABEL: "true"}
-    )
+    client_labels = {
+        "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+        "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+        "app.kubernetes.io/component": "gateway",
+        "environment": environment,
+        BUSINESS_CLIENT_LABEL: "true",
+    }
     return [
         {
             "from": [
@@ -305,38 +301,37 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
                 "ports": [{"port": 4317, "protocol": "TCP"}],
             }
         )
-    else:
-        result.extend(
-            [
-                {
-                    "to": [
-                        {
-                            "namespaceSelector": {
-                                "matchLabels": {"kubernetes.io/metadata.name": service_namespace}
-                            },
-                            "podSelector": {
-                                "matchLabels": {
-                                    "strimzi.io/cluster": "local-dev-kafka",
-                                    "strimzi.io/component-type": "kafka",
-                                }
-                            },
-                        }
-                    ],
-                    "ports": [{"port": 9093, "protocol": "TCP"}],
-                },
-                {
-                    "to": [
-                        {
-                            "namespaceSelector": {
-                                "matchLabels": {"kubernetes.io/metadata.name": service_namespace}
-                            },
-                            "podSelector": {"matchLabels": {"app": "jsreport"}},
-                        }
-                    ],
-                    "ports": [{"port": 5488, "protocol": "TCP"}],
-                },
-            ]
-        )
+    result.extend(
+        [
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": data_namespace}
+                        },
+                        "podSelector": {
+                            "matchLabels": {
+                                "strimzi.io/cluster": f"{environment}-kafka",
+                                "strimzi.io/component-type": "kafka",
+                            }
+                        },
+                    }
+                ],
+                "ports": [{"port": 9093, "protocol": "TCP"}],
+            },
+            {
+                "to": [
+                    {
+                        "namespaceSelector": {
+                            "matchLabels": {"kubernetes.io/metadata.name": service_namespace}
+                        },
+                        "podSelector": {"matchLabels": {"app": "jsreport"}},
+                    }
+                ],
+                "ports": [{"port": 5488, "protocol": "TCP"}],
+            },
+        ]
+    )
     require(bool(service_namespace), "service namespace is unresolved")
     return result
 
@@ -344,8 +339,7 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
 def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     lower = text.lower()
-    forbidden = FORBIDDEN_TEXT + (WORKER_TEXT if environment == "qa" else ())
-    require(not any(value in lower for value in forbidden), "forbidden dependency is present")
+    require(not any(value in lower for value in FORBIDDEN_TEXT), "forbidden dependency is present")
     items = documents(text)
     require(bool(items), "render produced no resources")
     require({item.get("kind") for item in items} == EXPECTED_KINDS, "resource kinds differ")
@@ -410,20 +404,27 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "DOCUMENT_MAX_CONCURRENT_LOOKUPS": "2",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
-        "EVENT_WORKERS_ENABLED": "true" if environment == "local-dev" else "false",
+        "EVENT_WORKERS_ENABLED": "true",
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
     }
-    if environment == "local-dev":
-        expected_config.update(
-            {
-                "KAFKA_BROKERS": "local-dev-kafka-kafka-bootstrap:9093",
-                "KAFKA_GROUP": "documents-service",
-                "KAFKA_REGISTERED_TOPIC": "policy-registered",
-                "KAFKA_CA_FILE": "/etc/document-service/kafka/ca.crt",
-                "JSREPORT_URL": ("http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"),
-            }
-        )
-    else:
+    expected_config.update(
+        {
+            "KAFKA_BROKERS": (
+                "local-dev-kafka-kafka-bootstrap:9093"
+                if environment == "local-dev"
+                else "qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local:9093"
+            ),
+            "KAFKA_GROUP": "documents-service",
+            "KAFKA_REGISTERED_TOPIC": "policy-registered",
+            "KAFKA_CA_FILE": "/etc/document-service/kafka/ca.crt",
+            "JSREPORT_URL": (
+                "http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"
+                if environment == "local-dev"
+                else "http://qa-jsreport.qa-svc.svc.cluster.local:5488"
+            ),
+        }
+    )
+    if environment == "qa":
         expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
@@ -441,15 +442,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         spec.get("replicas") == 1
         and spec.get("minReadySeconds") == 5
         and spec.get("progressDeadlineSeconds") == 180
-        and spec.get("strategy")
-        == (
-            {"type": "Recreate"}
-            if environment == "local-dev"
-            else {
-                "type": "RollingUpdate",
-                "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
-            }
-        ),
+        and spec.get("strategy") == {"type": "Recreate"},
         "rollout settings differ",
     )
     selector = {
@@ -485,27 +478,26 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             },
         },
     ]
-    if environment == "local-dev":
-        expected_volumes.extend(
-            [
-                {
-                    "name": "postgres-writer-ca",
-                    "secret": {
-                        "secretName": "local-dev-postgres-document-writer-creds",
-                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                        "defaultMode": 292,
-                    },
+    expected_volumes.extend(
+        [
+            {
+                "name": "postgres-writer-ca",
+                "secret": {
+                    "secretName": prefix + "postgres-document-writer-creds",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
                 },
-                {
-                    "name": "kafka-ca",
-                    "secret": {
-                        "secretName": "local-dev-document-kafka-ca",
-                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                        "defaultMode": 292,
-                    },
+            },
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": prefix + "document-kafka-ca",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
                 },
-            ]
-        )
+            },
+        ]
+    )
     require(
         pod.get("automountServiceAccountToken") is False
         and pod.get("enableServiceLinks") is False
@@ -546,20 +538,19 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "readOnly": True,
         },
     ]
-    if environment == "local-dev":
-        expected_mounts = [
-            {
-                "name": "postgres-writer-ca",
-                "mountPath": "/etc/document-service/postgres-writer",
-                "readOnly": True,
-            },
-            {
-                "name": "kafka-ca",
-                "mountPath": "/etc/document-service/kafka",
-                "readOnly": True,
-            },
-            *expected_mounts,
-        ]
+    expected_mounts = [
+        {
+            "name": "postgres-writer-ca",
+            "mountPath": "/etc/document-service/postgres-writer",
+            "readOnly": True,
+        },
+        {
+            "name": "kafka-ca",
+            "mountPath": "/etc/document-service/kafka",
+            "readOnly": True,
+        },
+        *expected_mounts,
+    ]
     require(
         container.get("name") == "document-api"
         and container.get("imagePullPolicy")
@@ -616,38 +607,37 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             },
         },
     ]
-    if environment == "local-dev":
-        expected_environment.extend(
-            [
-                {
-                    "name": "DOCUMENT_WRITER_DATABASE_URL",
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": "local-dev-postgres-document-writer-creds",
-                            "key": "database-url",
-                        }
-                    },
+    expected_environment.extend(
+        [
+            {
+                "name": "DOCUMENT_WRITER_DATABASE_URL",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "postgres-document-writer-creds",
+                        "key": "database-url",
+                    }
                 },
-                {
-                    "name": "MINIO_WRITER_ACCESS_KEY",
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": "local-dev-minio-document-writer-creds",
-                            "key": "access-key",
-                        }
-                    },
+            },
+            {
+                "name": "MINIO_WRITER_ACCESS_KEY",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "minio-document-writer-creds",
+                        "key": "access-key",
+                    }
                 },
-                {
-                    "name": "MINIO_WRITER_SECRET_KEY",
-                    "valueFrom": {
-                        "secretKeyRef": {
-                            "name": "local-dev-minio-document-writer-creds",
-                            "key": "secret-key",
-                        }
-                    },
+            },
+            {
+                "name": "MINIO_WRITER_SECRET_KEY",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": prefix + "minio-document-writer-creds",
+                        "key": "secret-key",
+                    }
                 },
-            ]
-        )
+            },
+        ]
+    )
     expected_environment.append(
         {
             "name": "SERVICE_INSTANCE_ID",
@@ -1168,17 +1158,13 @@ def verify_untrusted_access_denied(target: Target) -> None:
 
 def verify_qualification_access(target: Target) -> None:
     name = "document-qualified-http"
-    trusted_labels = (
-        {
-            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
-            "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
-            "app.kubernetes.io/component": "gateway",
-            "environment": "local-dev",
-            BUSINESS_CLIENT_LABEL: "true",
-        }
-        if target.environment == "local-dev"
-        else {QUALIFICATION_CLIENT_LABEL: "true"}
-    )
+    trusted_labels = {
+        "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+        "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+        "app.kubernetes.io/component": "gateway",
+        "environment": target.environment,
+        BUSINESS_CLIENT_LABEL: "true",
+    }
     encoded_labels = ",".join(f"{key}={value}" for key, value in trusted_labels.items())
     require(
         not target.json("get", "pod", name, "--ignore-not-found"),
@@ -1351,7 +1337,7 @@ def validate_ordinary_gateway_route(environment: str) -> None:
     template = deployment.get("spec", {}).get("template", {})
     labels = template.get("metadata", {}).get("labels", {})
     require(
-        labels.get(BUSINESS_CLIENT_LABEL) == ("true" if environment == "local-dev" else None),
+        labels.get(BUSINESS_CLIENT_LABEL) == "true",
         "Java gateway Document business-client phase differs",
     )
     config_maps = [
@@ -1391,11 +1377,8 @@ def validate_ordinary_gateway_route(environment: str) -> None:
         .get("document-service", {})
         .get("urls")
     )
-    expected_override = (
-        ["http://local-dev-document-api.local-dev-all.svc.cluster.local:80"]
-        if environment == "local-dev"
-        else None
-    )
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    expected_override = [f"http://{environment}-document-api.{namespace}.svc.cluster.local:80"]
     require(override_urls == expected_override, "Java gateway Document route phase differs")
 
 

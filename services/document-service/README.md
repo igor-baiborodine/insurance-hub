@@ -20,9 +20,10 @@
 # Document service
 
 This standalone module is the private Go Document service. It provides compatible
-PostgreSQL/MinIO lookup plus Kafka-driven document registration and rendering. The local-dev
-desired state selects Go for ordinary traffic and generation while QA remains on Java until its
-separately authorized transfer. Java source and legacy resources remain intact.
+PostgreSQL/MinIO lookup plus Kafka-driven document registration and rendering. The local-dev and QA
+desired states select Go for ordinary traffic and generation while retaining the quiesced Java
+Deployment and all Java source and legacy resources. Applying the QA state remains a separately
+authorized Flux operation.
 
 The module identity is
 `github.com/igor-baiborodine/insurance-hub/services/document-service`. It resolves published
@@ -436,23 +437,20 @@ guarded monitoring coordinates. Use the [observability runbook](observability-ru
 truthful state meaning, source/disposable checks, the fresh identity preflight, guarded
 provisioning and read-back, Dashboard-first investigation, alert response and restoration. The Go
 workload exposes
-separate private HTTP/gRPC and management Services. QA admits only an explicitly labeled
-disposable qualification caller and keeps the worker disabled. The local-dev final-state source
-admits the explicitly labeled gateway, enables group `documents-service`, adds bounded
-Kafka/JSReport egress and writer inputs, renders Java at zero replicas and selects the Go gateway
-destination.
+separate private HTTP/gRPC and management Services. Both final-state overlays admit only the
+explicitly labeled gateway, enable group `documents-service`, add bounded Kafka/JSReport egress and
+writer inputs, render Java at zero replicas and select the Go gateway destination.
 
-The runbook commands grant no live authority. Each QA monitoring write requires separate approval
-and a fresh identity preflight. `VERIFY_MODE=enabled` means OTel export is enabled; it does not
-enable the event worker. QA workload recovery remains Flux-owned, monitoring restoration uses the
-guarded selected-service owners, and shared worker activation and generation require a separate
-authority transfer.
+The runbook commands grant no live authority. Each QA workload or monitoring write requires its
+own approval and a fresh identity preflight. `VERIFY_MODE=enabled` means the verifier expects both
+OTel export and the final enabled worker state; it does not change either one. QA workload recovery
+remains Flux-owned and monitoring restoration uses the guarded selected-service owners.
 
-As in Dashboard, pre-transfer Kafka generation qualification is disposable. QA source remains
-worker-disabled and has no writer credentials or Kafka/JSReport egress. Local-dev source expresses
-the final Go authority state, but source checks do not activate the shared group or publish an
-event. Java quiescence, route activation and the first shared-environment generation observation
-require a separate, explicitly authorized handover.
+As in Dashboard, pre-transfer Kafka generation qualification is disposable. The final QA source
+expresses the Go worker, writer credentials, Kafka/JSReport egress and ordinary gateway route, but
+source checks and a draft pull request do not activate the shared group or publish an event. Flux
+activation and the first shared-environment generation observation require separate explicit
+authorization.
 
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
 `internal/postgres/administration.go` for connections, and `internal/administration` for migration

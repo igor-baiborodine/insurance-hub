@@ -23,12 +23,12 @@ The Go Deployment is `<environment>-document-api`. Its private business Service 
 and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The local-dev
 final-state source admits the explicitly labeled gateway, enables the worker with group
 `documents-service`, and permits only the required Kafka and JSReport egress in addition to DNS,
-Document PostgreSQL and Document MinIO. It also renders the Java Deployment at zero replicas and
-routes the gateway to Go. QA is in the stop-before-start transfer state: its Go worker is disabled,
-its NetworkPolicy admits only the disposable qualification client, its retained Java Deployment
-has zero replicas, and the gateway still points to the unavailable Java Service. This intentional
-downtime remains until the separately authorized Go activation and route change. These checked-in
-desired states grant no permission to mutate either environment.
+Document PostgreSQL and Document MinIO. Both overlays also render the Java Deployment at zero
+replicas and route the gateway to Go. The final QA source enables the ordinary
+`documents-service` worker, mounts separate writer and Kafka trust inputs, admits only the labeled
+gateway and permits the required Kafka/JSReport egress. These checked-in desired states grant no
+permission to mutate either environment; QA changes only when a separately authorized commit is
+merged and reconciled by Flux.
 
 Use the companion [observability runbook](observability-runbook.md) for Document monitoring source
 validation, guarded QA provisioning/read-back, investigation and restoration. The two procedures
@@ -84,9 +84,8 @@ export MAVEN_OPTS="${MAVEN_OPTS:-} \
 It starts a disposable gateway with a synthetic signing key and overrides only
 `micronaut.http.services.document-service.urls`. It checks authenticated exact bytes,
 unauthenticated denial and the existing retry/fallback result. The checked-in local-dev and QA
-destinations deliberately differ: local-dev selects the Go `local-dev-document-api` Service while
-QA still selects the retained `qa-document-api-legacy` Service. That QA destination is deliberately
-unavailable during the quiescent transfer interval.
+overrides select their private Go Document Services. The baked Java gateway defaults still select
+the retained legacy Services, but the rendered overlay configuration is the ordinary route.
 
 ## Candidate identity and caller proof
 
@@ -99,15 +98,12 @@ remain the live acceptance boundary.
 
 ## Worker qualification boundary
 
-The checked-in local-dev overlay is the final transfer state: it enables one Go worker in the
-existing `documents-service` group, mounts the dedicated writer and Kafka trust inputs, and adds
-only Kafka and JSReport egress. Its deployment owner rejects the obsolete singular group, reader
+The checked-in local-dev and QA overlays are the final transfer state: each enables one Go worker in
+the existing `documents-service` group, mounts dedicated writer and Kafka trust inputs, and adds
+only Kafka and JSReport egress. The deployment owner rejects the obsolete singular group, reader
 credentials in writer slots, foreign renderer destinations and non-gateway business ingress. The
-QA overlay deliberately remains worker-disabled and rejects all worker settings, writer
-credentials and Kafka/JSReport egress. Its retained Java Deployment is quiesced while the gateway
-route remains unchanged, so no Document implementation owns QA traffic or event processing during
-this bounded transfer interval. The source change does not itself activate local-dev; activation
-still requires a fresh preflight and separate authorization for the exact handover.
+source change does not itself activate either environment; activation still requires a fresh
+preflight and separate authorization for the exact handover.
 
 Following the Dashboard reference, Kafka generation qualification exists only inside the owned
 disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
@@ -116,11 +112,10 @@ HTTP-to-RPC lookup, and removes the whole owned namespace/resources. Companion f
 duplicate/restart, failures, disabled lifecycle, trust and least privilege.
 
 The disposable qualification defines no local-dev or QA qualification group, one-shot worker
-binary, Job or shared-effect cleanup procedure. QA status and verification remain strictly
-worker-disabled. Local-dev source validation checks the final worker configuration, but it must not
-publish an event, initialize shared progress or claim live authority. A separately authorized
-handover owns Java quiescence, ordinary `documents-service` activation, the route switch and the
-first bounded shared-environment generation observation.
+binary, Job or shared-effect cleanup procedure. Source validation checks the final worker
+configuration, but it must not publish an event, initialize shared progress or claim live
+authority. A separately authorized handover owns ordinary `documents-service` activation, the
+route switch and the first bounded shared-environment generation observation.
 
 Shared deployment verification is non-mutating. The lookup probe accepts the contractually valid
 empty `{"documents":[]}` result when no synthetic fixture is provisioned. If `SYN-362` exists, it
@@ -253,7 +248,7 @@ behavior.
 
 Immediately before any separately authorized QA monitoring write or live-signal acceptance,
 perform a fresh read-only identity preflight. Read only the exact context/namespaces, Flux
-source/applied revision, Document Deployment/Pod/config/image identity, worker-disabled setting and
+source/applied revision, Document Deployment/Pod/config/image identity, worker-enabled setting and
 the two monitoring objects or their verified absence. Record full application image source,
 semantic reference, registry digest,
 Pod image ID, runtime `service.version`, Pod UID and full monitoring source revision. Do not read
@@ -316,9 +311,9 @@ make verify-service-observability \
   VERIFY_SOURCE_REVISION="$MONITORING_SOURCE_REVISION"
 ```
 
-`VERIFY_MODE=enabled` means OTel export is enabled; it does not enable the event worker. The
-verifier must still observe `EVENT_WORKERS_ENABLED=false`. Shared worker activation and generation
-require a separate authority transfer.
+`VERIFY_MODE=enabled` means the verifier expects OTel export and the final
+`EVENT_WORKERS_ENABLED=true` state. It remains read-only and cannot enable the worker. Shared
+generation evidence requires a separately authorized synthetic event.
 
 Stop before or after a monitoring operation for an unexpected context, namespace, Flux/source,
 application identity, worker mode, resource name/UID/source, mutable dashboard, missing signal,
@@ -348,7 +343,8 @@ investigation sequence.
 ## Explicit database, writer and template administration
 
 The administrative executable and resource tooling are separate from API startup. Lookup uses the
-restricted reader identities only; Java retains ordinary routes and registration authority.
+restricted reader identities only; the final Go worker uses the separate writer identities and
+owns ordinary registration after the authorized handover.
 `document` owns both fresh and adopted tables/sequences/history. `go_document_migrator` is a
 NOINHERIT login that explicitly assumes `document`; `go_document_reader` has SELECT only.
 `go_document_writer` has INSERT plus sequence USAGE and no read, update, delete, DDL or owner

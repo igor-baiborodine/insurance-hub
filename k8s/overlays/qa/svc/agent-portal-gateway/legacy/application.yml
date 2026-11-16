@@ -10,3 +10,6 @@ micronaut:
       dashboard-service:
         urls:
           - http://qa-dashboard-api.qa-svc.svc.cluster.local:80
+      document-service:
+        urls:
+          - http://qa-document-api.qa-svc.svc.cluster.local:80
