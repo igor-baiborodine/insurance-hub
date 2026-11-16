@@ -209,10 +209,12 @@ def test_minio_credentials_use_child_environment_not_arguments(tmp_path):
     minio = resources.Minio(
         Fake(),
         tmp_path,
-        "http://localhost:9000",
+        "https://minio.qa-minio-document.svc.cluster.local:443",
         "synthetic-admin",
         sentinel,
-        b"",
+        b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n",
+        admin_endpoint="https://minio.qa-minio-document.svc.cluster.local:19443",
+        resolve="minio.qa-minio-document.svc.cluster.local:19443=127.0.0.1",
     )
 
     # when
@@ -221,9 +223,175 @@ def test_minio_credentials_use_child_environment_not_arguments(tmp_path):
     # then
     args, _text, environment = calls[0]
     assert sentinel not in json.dumps(args)
-    assert environment["MC_HOST_document"].startswith("http://synthetic-admin:")
-    assert environment["MC_HOST_document"].endswith("@localhost:9000")
+    assert args[4:6] == [
+        "--resolve",
+        "minio.qa-minio-document.svc.cluster.local:19443=127.0.0.1",
+    ]
+    assert environment["MC_HOST_document"].startswith("https://synthetic-admin:")
+    assert environment["MC_HOST_document"].endswith(
+        "@minio.qa-minio-document.svc.cluster.local:19443"
+    )
     assert "synthetic%20secret%2Fsentinel-365" in environment["MC_HOST_document"]
+
+
+def test_minio_rejects_foreign_administrative_forward(tmp_path):
+    # given
+    tmp_path.chmod(0o700)
+
+    # when / then
+    with pytest.raises(resources.ResourceError, match="forward differs"):
+        resources.Minio(
+            object(),
+            tmp_path,
+            "https://minio.qa-minio-document.svc.cluster.local:443",
+            "synthetic-admin",
+            "synthetic-secret-value",
+            b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n",
+            admin_endpoint="https://foreign.qa-minio-document.svc.cluster.local:19443",
+            resolve="foreign.qa-minio-document.svc.cluster.local:19443=127.0.0.1",
+        )
+    with pytest.raises(resources.ResourceError, match="forward differs"):
+        resources.Minio(
+            object(),
+            tmp_path,
+            "https://minio.qa-minio-document.svc.cluster.local:443",
+            "synthetic-admin",
+            "synthetic-secret-value",
+            b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n",
+            admin_endpoint="https://minio.qa-minio-document.svc.cluster.local:19443",
+        )
+
+
+def test_kubernetes_minio_owns_loopback_forward_and_cleanup(monkeypatch):
+    # given
+    calls = []
+    cleaned = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def bind(self, target):
+            assert target == ("127.0.0.1", 0)
+
+        def getsockname(self):
+            return ("127.0.0.1", 19443)
+
+        def settimeout(self, timeout):
+            assert timeout == 0.1
+
+        def connect_ex(self, target):
+            assert target == ("127.0.0.1", 19443)
+            return 0
+
+    class Process:
+        def poll(self):
+            return None
+
+    process = Process()
+
+    def popen(args, **kwargs):
+        calls.append((args, kwargs))
+        return process
+
+    monkeypatch.setattr(resources.socket, "socket", Socket)
+    monkeypatch.setattr(resources.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        resources,
+        "terminate_process_group",
+        lambda process, timeout: cleaned.append((process, timeout)) or True,
+    )
+    manager = object.__new__(resources.Kubernetes)
+    manager.commands = object()
+    manager.context = "qa-insurance-hub"
+    manager.minio_ns = "qa-minio-document"
+    manager.endpoint = "https://minio.qa-minio-document.svc.cluster.local:443"
+    manager.minio_admin = lambda: ("synthetic-admin", "synthetic-secret-value")
+    manager.minio_ca = lambda: (
+        b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    )
+
+    # when
+    with pytest.raises(KeyboardInterrupt):
+        with manager.minio() as minio:
+            observed = (minio.endpoint, minio.admin_endpoint, minio.resolve)
+            raise KeyboardInterrupt
+
+    # then
+    assert calls[0][0] == [
+        "kubectl",
+        "--context=qa-insurance-hub",
+        "-n",
+        "qa-minio-document",
+        "port-forward",
+        "service/minio",
+        "19443:443",
+        "--address=127.0.0.1",
+    ]
+    assert calls[0][1] == {
+        "stdout": resources.subprocess.DEVNULL,
+        "stderr": resources.subprocess.DEVNULL,
+        "start_new_session": True,
+    }
+    assert observed == (
+        manager.endpoint,
+        "https://minio.qa-minio-document.svc.cluster.local:19443",
+        "minio.qa-minio-document.svc.cluster.local:19443=127.0.0.1",
+    )
+    assert cleaned == [(process, 5)]
+
+
+def test_kubernetes_minio_forward_timeout_cleans_up(monkeypatch):
+    # given
+    cleaned = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def bind(self, _target):
+            return None
+
+        def getsockname(self):
+            return ("127.0.0.1", 19443)
+
+        def settimeout(self, _timeout):
+            return None
+
+        def connect_ex(self, _target):
+            return 1
+
+    class Process:
+        def poll(self):
+            return None
+
+    process = Process()
+    monkeypatch.setattr(resources.socket, "socket", Socket)
+    monkeypatch.setattr(resources.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(resources.time, "sleep", lambda _timeout: None)
+    monkeypatch.setattr(
+        resources,
+        "terminate_process_group",
+        lambda child, timeout: cleaned.append((child, timeout)) or True,
+    )
+    manager = object.__new__(resources.Kubernetes)
+    manager.commands = object()
+    manager.context = "qa-insurance-hub"
+    manager.minio_ns = "qa-minio-document"
+    manager.endpoint = "https://minio.qa-minio-document.svc.cluster.local:443"
+    manager.minio_admin = lambda: ("synthetic-admin", "synthetic-secret-value")
+
+    # when / then
+    with pytest.raises(resources.ResourceError, match="did not become ready"):
+        with manager.minio():
+            pytest.fail("unreachable")
+    assert cleaned == [(process, 5)]
 
 
 def test_minio_context_removes_temporary_public_trust():
