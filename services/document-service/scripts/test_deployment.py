@@ -113,6 +113,20 @@ def test_local_image_requires_exact_source_identity() -> None:
         checks.secret_and_image(target, image)
 
 
+def test_runbook_deploys_checked_in_local_candidate() -> None:
+    # given
+    items = checks.validate_render("local-dev", checks.render("local-dev"))
+    deployment = checks.resource(items, "Deployment", "local-dev-document-api")
+    expected_image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+    runbook = (checks.ROOT / "services/document-service/deployment-runbook.md").read_text()
+
+    # when
+    references = re.findall(r'^export DEPLOY_IMAGE_REF="([^"]+)"$', runbook, re.MULTILINE)
+
+    # then
+    assert references == [expected_image]
+
+
 @pytest.mark.parametrize(
     "image",
     [

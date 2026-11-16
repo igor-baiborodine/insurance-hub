@@ -140,7 +140,7 @@ export DEPLOY_ENV=local-dev
 export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
-export DEPLOY_IMAGE_REF="insurance-hub-document-api:1.0.0-local.$(git rev-parse --short=12 HEAD)"
+export DEPLOY_IMAGE_REF="insurance-hub-document-api:1.0.0-local.0e53205ebf0b"
 
 make go-svc-deploy-preflight SVC_NAME=document
 make go-svc-image-load SVC_NAME=document
