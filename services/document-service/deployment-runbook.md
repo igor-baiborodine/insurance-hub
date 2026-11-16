@@ -5,6 +5,7 @@
   - [Source and candidate checks](#source-and-candidate-checks)
   - [Candidate identity and caller proof](#candidate-identity-and-caller-proof)
   - [Worker qualification boundary](#worker-qualification-boundary)
+  - [Manual Java workload retirement](#manual-java-workload-retirement)
   - [Local development](#local-development)
   - [QA release and verification](#qa-release-and-verification)
   - [Monitoring coordinates and guarded QA operation](#monitoring-coordinates-and-guarded-qa-operation)
@@ -23,8 +24,9 @@ The Go Deployment is `<environment>-document-api`. Its private business Service 
 and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The local-dev
 final-state source admits the explicitly labeled gateway, enables the worker with group
 `documents-service`, and permits only the required Kafka and JSReport egress in addition to DNS,
-Document PostgreSQL and Document MinIO. Both overlays also render the Java Deployment at zero
-replicas and route the gateway to Go. The final QA source enables the ordinary
+Document PostgreSQL and Document MinIO. The active local-dev and QA owners include only Go and
+route the gateway to Go. Retained historical legacy overlays still render the Java Deployment at
+zero replicas but are not part of either ordinary owner. The final QA source enables the ordinary
 `documents-service` worker, mounts separate writer and Kafka trust inputs, admits only the labeled
 gateway and permits the required Kafka/JSReport egress. These checked-in desired states grant no
 permission to mutate either environment; QA changes only when a separately authorized commit is
@@ -98,12 +100,12 @@ remain the live acceptance boundary.
 
 ## Worker qualification boundary
 
-The checked-in local-dev and QA overlays are the final transfer state: each enables one Go worker in
+The checked-in local-dev and QA overlays are the final Go-only state: each enables one Go worker in
 the existing `documents-service` group, mounts dedicated writer and Kafka trust inputs, and adds
 only Kafka and JSReport egress. The deployment owner rejects the obsolete singular group, reader
-credentials in writer slots, foreign renderer destinations and non-gateway business ingress. The
-source change does not itself activate either environment; activation still requires a fresh
-preflight and separate authorization for the exact handover.
+credentials in writer slots, foreign renderer destinations, non-gateway business ingress and any
+active QA Document legacy entry. Retained legacy overlays remain separately renderable at zero
+replicas as historical/rebuild assets; their presence does not authorize deployment or reversal.
 
 Following the Dashboard reference, Kafka generation qualification exists only inside the owned
 disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
@@ -114,8 +116,8 @@ duplicate/restart, failures, disabled lifecycle, trust and least privilege.
 The disposable qualification defines no local-dev or QA qualification group, one-shot worker
 binary, Job or shared-effect cleanup procedure. Source validation checks the final worker
 configuration, but it must not publish an event, initialize shared progress or claim live
-authority. A separately authorized handover owns ordinary `documents-service` activation, the
-route switch and the first bounded shared-environment generation observation.
+authority. A separately authorized live operation owns any bounded shared-environment generation
+observation.
 
 Shared deployment verification is non-mutating. The lookup probe accepts the contractually valid
 empty `{"documents":[]}` result when no synthetic fixture is provisioned. If `SYN-362` exists, it
@@ -126,6 +128,41 @@ fails. Exact object/reader permission verification remains the separately author
 Start troubleshooting with the Dashboard comparison in the
 [observability runbook](observability-runbook.md#investigation-and-alert-response); do
 not inspect or mutate Dashboard runtime state.
+
+## Manual Java workload retirement
+
+Java retirement is a one-time manual operation, not a deployment target or automation feature.
+Keep every file under `legacy/`, `k8s/apps/svc/document/base/legacy/` and both environment legacy
+overlays intact. The exact retirement candidate in each environment is one zero-replica Java
+Deployment, its Java Service and its generated legacy ConfigMap. PostgreSQL, MinIO, Kafka,
+JSReport, gateway, Go, credentials, trust, monitoring and other shared resources are never part of
+that candidate.
+
+Before each environment, refresh the context, namespace, Go source/image/runtime identity, route,
+worker progress, retained lookup, Java zero/no-Pod state and every candidate kind/name/UID/resource
+version/owner/reference. Present that exact inventory and obtain explicit authorization before
+manual deletion. Stop for drift, a remaining caller/reference, a shared or foreign owner,
+incomplete progress, stale Go identity or any broader selector. Inspect actual postconditions
+before retrying an uncertain or partial result; never use a broad label deletion.
+
+Local-dev's ordinary direct owner already excludes the isolated legacy overlay. Under its separate
+authorization, delete only the refreshed three-object candidate and verify absence, Go health,
+retained authenticated lookup, unauthenticated denial, one bounded synthetic generation and
+nondecreasing complete Kafka progress. Do not reset offsets or remove the retained synthetic
+effect without a separate cleanup owner.
+
+QA is reconciled by `Kustomization/qa-svc` with pruning enabled, so normal reconciliation must not
+perform retirement. Qualify and review a source revision that removes only `./document/legacy`
+from the active QA aggregate. After separate action-specific authorization, verify and suspend
+only `qa-svc`, publish that exact revision while it remains suspended, and require the shared Git
+source to observe it. Manually delete only the refreshed three-object candidate, verify absence,
+resume `qa-svc`, require Ready at the exact revision and observe a successful reconciliation that
+does not recreate Java. Never leave the owner suspended.
+
+Recovery is forward through the accepted Go workload and reviewed source. Do not re-add the
+active legacy entry, start Java, rehearse reversal or let Flux pruning stand in for manual
+retirement evidence. On interruption or timeout, inspect the source, owner suspension, exact
+objects and reconciliation state before deciding the next separately authorized forward action.
 
 ## Local development
 
@@ -187,12 +224,12 @@ make go-svc-deploy-status SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
-After an authorized transfer, recovery must return one ready `local-dev-document-api` Pod with the
-accepted image/version, `EVENT_WORKERS_ENABLED=true` and group `documents-service`; Java must stay
-quiesced and the gateway must stay routed to Go. Do not reset or seed Kafka progress or improvise
+Recovery must return one ready `local-dev-document-api` Pod with the accepted image/version,
+`EVENT_WORKERS_ENABLED=true` and group `documents-service`; the gateway must stay routed to Go and
+a retired Java workload must remain absent. Do not reset or seed Kafka progress or improvise
 credentials, routes or dependency destinations as recovery actions. A different context,
-namespace, image or live inventory is a stop condition; do not mutate shared or Java resources
-outside the separately authorized handover owner.
+namespace, image or live inventory is a stop condition; do not mutate shared resources or restore
+Java.
 
 ## QA release and verification
 
@@ -222,8 +259,9 @@ make go-svc-deploy-verify SVC_NAME=document
 
 Record the image source commit separately from the later Flux release commit. Stop if the selected
 context, namespaces, source revision, digest, Pod image ID, runtime version, rendered inventory or
-legacy separation differs. Recovery uses a reviewed release commit or Flux reconciliation; never
-patch QA, suspend the shared owner or remove Java resources.
+legacy separation differs. Normal recovery uses a reviewed release commit or Flux reconciliation;
+never patch QA or restore Java. Suspending the shared owner and removing the exact Java retirement
+candidate are allowed only inside the separately authorized bounded retirement sequence above.
 
 ## Monitoring coordinates and guarded QA operation
 
