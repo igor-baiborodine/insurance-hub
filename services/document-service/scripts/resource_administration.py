@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import secrets
-import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -379,9 +379,17 @@ class Kubernetes:
             )
         )
         expected_image = "cgr.dev/chainguard/minio@sha256:7ad2a5efd83f0ca1b8e00af9f7ec7fc3ff977c38ed29b942b0c47460ad2f8f3e"
+        self.minio_admin_secret = f"{self.minio_ns}-storage-config"
+        tenant_metadata = tenant.get("metadata", {})
+        configuration = tenant.get("spec", {}).get("configuration", {})
         require(
-            tenant["spec"].get("image") == expected_image,
-            "MinIO selected image differs from accepted security disposition",
+            tenant.get("kind") == "Tenant"
+            and tenant_metadata.get("name") == f"{environment}-minio-document"
+            and tenant_metadata.get("namespace") == self.minio_ns
+            and isinstance(configuration, dict)
+            and configuration.get("name") == self.minio_admin_secret
+            and tenant.get("spec", {}).get("image") == expected_image,
+            "MinIO selected target differs from accepted security disposition",
         )
         pods = json.loads(
             self.kube(
@@ -522,6 +530,98 @@ class Kubernetes:
         require(ca.startswith(b"-----BEGIN CERTIFICATE-----"), "CNPG CA is missing")
         return ca
 
+    def minio_admin(self) -> tuple[str, str]:
+        raw = json.loads(
+            self.kube(
+                "-n",
+                self.minio_ns,
+                "get",
+                "secret",
+                self.minio_admin_secret,
+                "-o",
+                "json",
+            )
+        )
+        metadata = raw.get("metadata", {})
+        require(
+            raw.get("kind") == "Secret"
+            and raw.get("type", "Opaque") == "Opaque"
+            and metadata.get("name") == self.minio_admin_secret
+            and metadata.get("namespace") == self.minio_ns
+            and set(raw.get("data", {})) == {"config.env"},
+            "MinIO administrator Secret identity or keys differ",
+        )
+        try:
+            config = base64.b64decode(raw["data"]["config.env"], validate=True).decode()
+        except (TypeError, ValueError, UnicodeDecodeError) as error:
+            raise ResourceError("MinIO administrator Secret data is malformed") from error
+        require(len(config) <= 65536, "MinIO administrator Secret data is too large")
+        entries: dict[str, str] = {}
+        for line in config.splitlines():
+            require(line.startswith("export ") and "=" in line, "invalid MinIO configuration")
+            try:
+                assignment = shlex.split(line[7:])
+            except ValueError as error:
+                raise ResourceError("invalid MinIO configuration") from error
+            require(
+                len(assignment) == 1 and "=" in assignment[0],
+                "invalid MinIO configuration",
+            )
+            key, value = assignment[0].split("=", 1)
+            require(key not in entries, "duplicate MinIO configuration entry")
+            entries[key] = value
+        require(
+            set(entries) == {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_PROMETHEUS_AUTH_TYPE"}
+            and entries["MINIO_PROMETHEUS_AUTH_TYPE"] == "public"
+            and 1 <= len(entries["MINIO_ROOT_USER"]) <= 128
+            and 16 <= len(entries["MINIO_ROOT_PASSWORD"]) <= 256,
+            "MinIO administrator configuration differs",
+        )
+        return entries["MINIO_ROOT_USER"], entries["MINIO_ROOT_PASSWORD"]
+
+    def minio_ca(self) -> bytes:
+        if self.environment == "local-dev":
+            return b""
+        raw = json.loads(
+            self.kube(
+                "-n",
+                self.minio_ns,
+                "get",
+                "configmap",
+                "kube-root-ca.crt",
+                "-o",
+                "json",
+            )
+        )
+        metadata = raw.get("metadata", {})
+        require(
+            raw.get("kind") == "ConfigMap"
+            and metadata.get("name") == "kube-root-ca.crt"
+            and metadata.get("namespace") == self.minio_ns
+            and set(raw.get("data", {})) == {"ca.crt"},
+            "MinIO public CA source identity or keys differ",
+        )
+        value = raw["data"]["ca.crt"]
+        require(isinstance(value, str), "MinIO public CA source is invalid")
+        ca = value.encode()
+        require(
+            0 < len(ca) <= 65536 and ca.startswith(b"-----BEGIN CERTIFICATE-----"),
+            "MinIO public CA source is invalid",
+        )
+        return ca
+
+    @contextmanager
+    def minio(self):
+        access_key, secret_key = self.minio_admin()
+        with Minio.create(
+            self.commands,
+            self.endpoint,
+            access_key,
+            secret_key,
+            self.minio_ca(),
+        ) as minio:
+            yield minio
+
     @contextmanager
     def jsreport(self):
         with socket.socket() as listener:
@@ -645,37 +745,80 @@ def authorization_denied(output: str) -> bool:
 
 
 class Minio:
-    def __init__(self, commands: Commands, config: Path, endpoint: str):
-        data = json.loads(protected_file(config))
+    def __init__(
+        self,
+        commands: Commands,
+        config_directory: Path,
+        endpoint: str,
+        access_key: str,
+        secret_key: str,
+        trust: bytes,
+    ):
+        parsed = urlsplit(endpoint)
         require(
-            config.name == "config.json" and config.parent.stat().st_mode & 0o077 == 0,
-            "mc config needs a private directory and config.json filename",
+            parsed.scheme in {"http", "https"}
+            and parsed.netloc
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment,
+            "MinIO endpoint differs from explicit target",
         )
         require(
-            data.get("aliases", {}).get("document", {}).get("url") == endpoint,
-            "MinIO alias endpoint differs from explicit target",
+            config_directory.is_dir() and config_directory.stat().st_mode & 0o077 == 0,
+            "mc configuration directory must be private",
         )
+        require(access_key and secret_key, "MinIO administrator credentials are missing")
         require(not os.environ.get("MC_INSECURE"), "insecure MinIO transport rejected")
-        self.commands, self.config, self.endpoint = commands, config, endpoint
+        self.commands = commands
+        self.config_directory = config_directory
+        self.endpoint = endpoint
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.trust_data = trust
         if endpoint.startswith("https:"):
-            require(bool(self.trust()), "QA MinIO requires an explicitly provisioned CA bundle")
+            require(bool(trust), "QA MinIO requires an explicitly provisioned CA bundle")
+
+    @classmethod
+    @contextmanager
+    def create(
+        cls,
+        commands: Commands,
+        endpoint: str,
+        access_key: str,
+        secret_key: str,
+        trust: bytes,
+    ):
+        with tempfile.TemporaryDirectory(prefix="document-minio-admin-") as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            if trust:
+                ca_directory = root / "certs" / "CAs"
+                ca_directory.mkdir(parents=True, mode=0o700)
+                certificate = ca_directory / "platform-ca.crt"
+                certificate.write_bytes(trust)
+                certificate.chmod(0o600)
+            yield cls(commands, root, endpoint, access_key, secret_key, trust)
 
     def trust(self) -> bytes:
-        directory = self.config.parent / "certs" / "CAs"
-        if not directory.is_dir():
-            return b""
-        files = sorted(path for path in directory.iterdir() if path.is_file())
-        values = [path.read_bytes() for path in files]
-        require(
-            all(value.startswith(b"-----BEGIN CERTIFICATE-----") for value in values),
-            "invalid MinIO trust input",
-        )
-        return b"\n".join(values)
+        return self.trust_data
 
     def mc(self, *args: str, text: str | None = None, missing: tuple[str, ...] = ()) -> str:
+        authority = (
+            f"{quote(self.access_key, safe='')}:{quote(self.secret_key, safe='')}@"
+            f"{urlsplit(self.endpoint).netloc}"
+        )
         return self.commands.run(
-            [os.environ.get("MC", "mc"), "--json", "--config-dir", str(self.config.parent), *args],
+            [
+                os.environ.get("MC", "mc"),
+                "--json",
+                "--config-dir",
+                str(self.config_directory),
+                *args,
+            ],
             text,
+            env=child_environment(
+                {"MC_HOST_document": f"{urlsplit(self.endpoint).scheme}://{authority}"}
+            ),
             missing=missing,
         )
 
@@ -738,27 +881,14 @@ class Minio:
     def identity(self, credential: str, kind: str = "reader"):
         require(kind in MINIO_RESOURCES, "unsupported MinIO identity")
         user_name = MINIO_RESOURCES[kind][0]
-        with tempfile.TemporaryDirectory(prefix=f"document-minio-{kind}-") as directory:
-            path = Path(directory) / "config.json"
-            value = {
-                "version": "10",
-                "aliases": {
-                    "document": {
-                        "url": self.endpoint,
-                        "accessKey": user_name,
-                        "secretKey": credential,
-                        "api": "S3v4",
-                        "path": "auto",
-                    }
-                },
-            }
-            path.write_text(json.dumps(value))
-            path.chmod(0o600)
-            source = self.config.parent / "certs" / "CAs"
-            if source.is_dir():
-                (path.parent / "certs").mkdir(mode=0o700)
-                shutil.copytree(source, path.parent / "certs" / "CAs")
-            yield Minio(self.commands, path, self.endpoint)
+        with Minio.create(
+            self.commands,
+            self.endpoint,
+            user_name,
+            credential,
+            self.trust(),
+        ) as identity:
+            yield identity
 
     def reader(self, credential: str):
         return self.identity(credential, "reader")
@@ -1351,10 +1481,7 @@ def main(argv: list[str] | None = None) -> int:
                     "resource mutation confirmation missing",
                 )
             manager = Kubernetes(env, commands)
-            minio = Minio(
-                commands, Path(os.environ.get("DOCUMENT_MINIO_ADMIN_CONFIG", "")), manager.endpoint
-            )
-            with manager.jsreport() as jsreport:
+            with manager.minio() as minio, manager.jsreport() as jsreport:
                 execute_action(args.action, manager, minio, jsreport)
         return 0
     except ResourceError, OSError, ValueError, KeyError, TypeError:
