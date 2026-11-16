@@ -3,10 +3,14 @@ kind: Deployment
 metadata:
   name: document-api
 spec:
+  strategy:
+    type: Recreate
+    rollingUpdate: null
   template:
     metadata:
       annotations:
         insurance-hub.io/document-reader-credential-revision: "1"
+        insurance-hub.io/document-writer-credential-revision: "1"
     spec:
       containers:
         - name: document-api
@@ -32,6 +36,28 @@ spec:
                 secretKeyRef:
                   name: local-dev-minio-document-reader-creds
                   key: secret-key
+            - name: DOCUMENT_WRITER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-document-writer-creds
+                  key: database-url
+            - name: MINIO_WRITER_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-document-writer-creds
+                  key: access-key
+            - name: MINIO_WRITER_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-document-writer-creds
+                  key: secret-key
+          volumeMounts:
+            - name: postgres-writer-ca
+              mountPath: /etc/document-service/postgres-writer
+              readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/document-service/kafka
+              readOnly: true
       volumes:
         - name: postgres-ca
           secret:
@@ -47,3 +73,17 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 420
+        - name: postgres-writer-ca
+          secret:
+            secretName: local-dev-postgres-document-writer-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292
+        - name: kafka-ca
+          secret:
+            secretName: local-dev-document-kafka-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292

@@ -19,10 +19,10 @@
 
 # Document service
 
-This standalone module is the private Go Document lookup candidate. It runs beside the
-authoritative Java Document service; ordinary traffic and registration/rendering authority remain
-with Java. Issue #362 replaces temporary Echo with compatible PostgreSQL/MinIO lookup. Issue #363
-adds registration and rendering. Java source and legacy resources remain intact.
+This standalone module is the private Go Document service. It provides compatible
+PostgreSQL/MinIO lookup plus Kafka-driven document registration and rendering. The local-dev
+desired state selects Go for ordinary traffic and generation while QA remains on Java until its
+separately authorized transfer. Java source and legacy resources remain intact.
 
 The module identity is
 `github.com/igor-baiborodine/insurance-hub/services/document-service`. It resolves published
@@ -200,7 +200,7 @@ do not repeat its supplied value.
 | `MINIO_FETCH_TIMEOUT` | `3s` | Positive per-object fetch duration. |
 | `EVENT_WORKERS_ENABLED` | `false` | Enables registration consumption. Disabled mode requires every Kafka, renderer and writer-only setting below to be unset and constructs none of those resources. |
 | `KAFKA_BROKERS` | required when workers are enabled | Comma-separated TLS `host:port` bootstrap addresses. |
-| `KAFKA_GROUP` | `document-service` when enabled | Must select the ordinary Document group exactly. Qualification overrides belong only to owned fixture inputs, not serving configuration. |
+| `KAFKA_GROUP` | `documents-service` when enabled | Reuses the Java Document application's ordinary group so committed progress survives the direct handover. Qualification overrides belong only to owned fixture inputs, not serving configuration. |
 | `KAFKA_REGISTERED_TOPIC` | `policy-registered` when enabled | Must select the registration topic exactly. |
 | `KAFKA_CA_FILE` | required when enabled | Bounded CA bundle for TLS 1.2+ with hostname verification; plaintext and reset fallback are unavailable. |
 | `JSREPORT_URL` | required when enabled | Private HTTP origin on port `5488`; credentials, another scheme/port, path, query or fragment are rejected. Runtime calls only fixed `/api/report`. |
@@ -436,9 +436,10 @@ guarded monitoring coordinates. Use the [observability runbook](observability-ru
 truthful state meaning, source/disposable checks, the fresh identity preflight, guarded
 provisioning and read-back, Dashboard-first investigation, alert response and restoration. The Go
 workload exposes
-separate private HTTP/gRPC and management Services. Its NetworkPolicy admits business traffic only
-from an explicitly labeled disposable qualification caller, allows only DNS, PostgreSQL, MinIO and
-QA telemetry egress, and preserves the separate Java Document workload and ordinary gateway
+separate private HTTP/gRPC and management Services. QA admits only an explicitly labeled
+disposable qualification caller and keeps the worker disabled. The local-dev final-state source
+admits the explicitly labeled gateway, enables group `documents-service`, adds bounded
+Kafka/JSReport egress and writer inputs, renders Java at zero replicas and selects the Go gateway
 destination.
 
 The runbook commands grant no live authority. Each QA monitoring write requires separate approval
@@ -447,11 +448,11 @@ enable the event worker. QA workload recovery remains Flux-owned, monitoring res
 guarded selected-service owners, and shared worker activation and generation require a separate
 authority transfer.
 
-As in Dashboard, Kafka generation qualification is disposable. Local-dev and QA sources keep the
-worker disabled and do not mount writer credentials or add Kafka/JSReport egress; their deployment
-checks do not create an isolated live consumer group. Ordinary worker activation and the first
-shared-environment generation observation require a separate, explicitly authorized authority
-transfer.
+As in Dashboard, pre-transfer Kafka generation qualification is disposable. QA source remains
+worker-disabled and has no writer credentials or Kafka/JSReport egress. Local-dev source expresses
+the final Go authority state, but source checks do not activate the shared group or publish an
+event. Java quiescence, route activation and the first shared-environment generation observation
+require a separate, explicitly authorized handover.
 
 The standalone `cmd/migrate` uses `internal/service/administration.go` for command lifecycle,
 `internal/postgres/administration.go` for connections, and `internal/administration` for migration

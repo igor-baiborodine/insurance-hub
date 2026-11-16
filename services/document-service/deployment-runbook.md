@@ -20,13 +20,13 @@ The private Go lookup uses catalog key `document`. Local development is directly
 context `kind-local-dev-insurance-hub`, namespace `local-dev-all`; QA is reconciled by
 `GitRepository/insurance-hub` and `Kustomization/qa-svc` in `flux-system` into namespace `qa-svc`.
 The Go Deployment is `<environment>-document-api`. Its private business Service exposes HTTP 80
-and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The NetworkPolicy
-admits business traffic only from a same-environment Pod carrying
-`insurance-hub.io/document-qualification-client=true`. It permits DNS, the Document PostgreSQL
-cluster, the Document MinIO namespace and, in QA, Alloy egress. The current deployment keeps
-`EVENT_WORKERS_ENABLED=false`, so the ordinary Deployment has no Kafka/JSReport egress, Kafka CA
-mount or PostgreSQL/MinIO writer credential. The separate
-`<environment>-document-api-legacy` resources remain active and authoritative for ordinary traffic.
+and gRPC 9090; `<environment>-document-api-management` exposes management 8081. The local-dev
+final-state source admits the explicitly labeled gateway, enables the worker with group
+`documents-service`, and permits only the required Kafka and JSReport egress in addition to DNS,
+Document PostgreSQL and Document MinIO. It also renders the Java Deployment at zero replicas and
+routes the gateway to Go. QA remains in the pre-transfer state: its Go worker is disabled, its
+NetworkPolicy admits only the disposable qualification client, and Java remains authoritative.
+These checked-in desired states grant no permission to mutate either environment.
 
 Use the companion [observability runbook](observability-runbook.md) for Document monitoring source
 validation, guarded QA provisioning/read-back, investigation and restoration. The two procedures
@@ -82,7 +82,8 @@ export MAVEN_OPTS="${MAVEN_OPTS:-} \
 It starts a disposable gateway with a synthetic signing key and overrides only
 `micronaut.http.services.document-service.urls`. It checks authenticated exact bytes,
 unauthenticated denial and the existing retry/fallback result. The checked-in local-dev and QA
-destinations remain the Java `*-document-api-legacy` Service.
+destinations deliberately differ: local-dev selects the Go `local-dev-document-api` Service while
+QA remains on the Java `qa-document-api-legacy` Service.
 
 ## Candidate identity and caller proof
 
@@ -95,11 +96,13 @@ remain the live acceptance boundary.
 
 ## Worker qualification boundary
 
-The checked-in local-dev and QA overlays deliberately render the worker disabled. Their deployment
-owner rejects enabling it, adding any Kafka/renderer setting, or mounting writer credentials. That
-is the current no-authority state: Java keeps ordinary registration and writes, and the Go process
-does not initialize or join group `document-service`. Worker activation requires a separate,
-explicitly reviewed authority handover.
+The checked-in local-dev overlay is the final transfer state: it enables one Go worker in the
+existing `documents-service` group, mounts the dedicated writer and Kafka trust inputs, and adds
+only Kafka and JSReport egress. Its deployment owner rejects the obsolete singular group, reader
+credentials in writer slots, foreign renderer destinations and non-gateway business ingress. The
+QA overlay deliberately remains worker-disabled and rejects all worker settings, writer
+credentials and Kafka/JSReport egress. The source change does not itself activate local-dev;
+activation still requires a fresh preflight and separate authorization for the exact handover.
 
 Following the Dashboard reference, Kafka generation qualification exists only inside the owned
 disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
@@ -108,12 +111,11 @@ HTTP-to-RPC lookup, and removes the whole owned namespace/resources. Companion f
 duplicate/restart, failures, disabled lifecycle, trust and least privilege.
 
 The disposable qualification defines no local-dev or QA qualification group, one-shot worker
-binary, Job or shared-effect cleanup procedure. The deployment status and verification owners
-check only the worker-disabled
-configuration, lookup/health/access and candidate identity; they must not publish an event, create
-or initialize a consumer group, mount writer credentials or add Kafka/JSReport egress. A separate,
-explicitly authorized authority transfer owns ordinary `document-service` group activation and the
-first shared-environment generation observation.
+binary, Job or shared-effect cleanup procedure. QA status and verification remain strictly
+worker-disabled. Local-dev source validation checks the final worker configuration, but it must not
+publish an event, initialize shared progress or claim live authority. A separately authorized
+handover owns Java quiescence, ordinary `documents-service` activation, the route switch and the
+first bounded shared-environment generation observation.
 
 Shared deployment verification is non-mutating. The lookup probe accepts the contractually valid
 empty `{"documents":[]}` result when no synthetic fixture is provisioned. If `SYN-362` exists, it
@@ -127,10 +129,11 @@ not inspect or mutate Dashboard runtime state.
 
 ## Local development
 
-Keep the following coordinates and exact candidate identity in one shell. These operations load
-the image, apply the ConfigMap, Deployment, two Services and NetworkPolicy, wait for rollout and
-verify private access. Reader Secrets and the explicit migration/resource sequence must already
-exist:
+Keep the following coordinates and exact candidate identity in one shell. The Go deployment owner
+loads the image and applies only the Go ConfigMap, Deployment, two Services and NetworkPolicy. It
+does not quiesce Java or reconcile the gateway and therefore is not, by itself, an authority
+handover. Reader and writer Secrets, Kafka trust and the explicit migration/resource sequence must
+already exist:
 
 ```sh
 export DEPLOY_ENV=local-dev
@@ -184,11 +187,12 @@ make go-svc-deploy-status SVC_NAME=document
 make go-svc-deploy-verify SVC_NAME=document
 ```
 
-Recovery must return one ready `local-dev-document-api` Pod with the accepted image/version and
-`EVENT_WORKERS_ENABLED=false` while `local-dev-document-api-legacy` remains available. Do not add
-Kafka/JSReport settings, writer Secrets or a consumer group as recovery actions. A different
-context, namespace, image or live inventory is a stop condition; do not scale or patch shared or
-Java resources.
+After an authorized transfer, recovery must return one ready `local-dev-document-api` Pod with the
+accepted image/version, `EVENT_WORKERS_ENABLED=true` and group `documents-service`; Java must stay
+quiesced and the gateway must stay routed to Go. Do not reset or seed Kafka progress or improvise
+credentials, routes or dependency destinations as recovery actions. A different context,
+namespace, image or live inventory is a stop condition; do not mutate shared or Java resources
+outside the separately authorized handover owner.
 
 ## QA release and verification
 

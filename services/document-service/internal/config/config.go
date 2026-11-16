@@ -47,7 +47,7 @@ const (
 	defaultMaximumDocumentBytes    = 8 * 1024 * 1024
 	defaultMaximumResponseBytes    = 16 * 1024 * 1024
 	defaultMaximumHTTPResponse     = 24 * 1024 * 1024
-	defaultKafkaGroup              = "document-service"
+	defaultKafkaGroup              = "documents-service"
 	defaultRegisteredTopic         = "policy-registered"
 	defaultRendererConnectTimeout  = 2 * time.Second
 	defaultRendererRequestTimeout  = 8 * time.Second

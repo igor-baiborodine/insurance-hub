@@ -540,7 +540,7 @@ func TestLoad_EventWorkersUseDocumentOwnedCoordinatesAndWriterCredentials(t *tes
 	}
 	if !got.Events.Enabled || len(got.Events.Brokers) != 1 ||
 		got.Events.Brokers[0] != "local-dev-kafka-kafka-bootstrap:9093" ||
-		got.Events.Group != "document-service" ||
+		got.Events.Group != "documents-service" ||
 		got.Events.RegisteredTopic != "policy-registered" ||
 		got.Events.JSReportOrigin.String() !=
 			"http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488" {

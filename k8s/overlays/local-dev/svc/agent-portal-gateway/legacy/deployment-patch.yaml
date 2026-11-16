@@ -9,6 +9,7 @@ spec:
     metadata:
       labels:
         environment: local-dev
+        insurance-hub.io/document-business-client: "true"
     spec:
       containers:
         - name: agent-portal-gateway-legacy
