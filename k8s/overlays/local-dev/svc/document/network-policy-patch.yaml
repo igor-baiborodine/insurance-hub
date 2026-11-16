@@ -10,7 +10,11 @@ spec:
               kubernetes.io/metadata.name: local-dev-all
           podSelector:
             matchLabels:
-              insurance-hub.io/document-qualification-client: "true"
+              app.kubernetes.io/name: agent-portal-gateway-legacy
+              app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+              app.kubernetes.io/component: gateway
+              environment: local-dev
+              insurance-hub.io/document-business-client: "true"
       ports:
         - port: 8080
           protocol: TCP
@@ -45,4 +49,25 @@ spec:
               kubernetes.io/metadata.name: local-dev-minio-document
       ports:
         - port: 9000
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              strimzi.io/cluster: local-dev-kafka
+              strimzi.io/component-type: kafka
+      ports:
+        - port: 9093
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app: jsreport
+      ports:
+        - port: 5488
           protocol: TCP

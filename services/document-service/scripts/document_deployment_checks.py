@@ -38,6 +38,7 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 SERVICE = "document"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 QUALIFICATION_CLIENT_LABEL = "insurance-hub.io/document-qualification-client"
+BUSINESS_CLIENT_LABEL = "insurance-hub.io/document-business-client"
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -45,13 +46,11 @@ PROBE_IMAGE = (
 FORBIDDEN_TEXT = (
     "persistentvolumeclaim",
     "elasticsearch",
-    "kafka",
-    "jsreport",
-    "renderer",
     "insecure_skip_verify",
     "migrator-creds",
     "admin-target",
 )
+WORKER_TEXT = ("kafka", "jsreport", "renderer", "writer-creds")
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
 NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 EXPECTED_SYNTHETIC_LOOKUP = sorted(
@@ -186,7 +185,7 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
         overlay = Path(directory) / f"k8s/overlays/{environment}/svc/document"
         text = run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
     require(
-        not any(value in text.lower() for value in FORBIDDEN_TEXT),
+        not any(value in text.lower() for value in FORBIDDEN_TEXT + WORKER_TEXT),
         "previous deployment contains forbidden resources",
     )
     items = documents(text)
@@ -205,6 +204,17 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
     namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    client_labels = (
+        {
+            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+            "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+            "app.kubernetes.io/component": "gateway",
+            "environment": "local-dev",
+            BUSINESS_CLIENT_LABEL: "true",
+        }
+        if environment == "local-dev"
+        else {QUALIFICATION_CLIENT_LABEL: "true"}
+    )
     return [
         {
             "from": [
@@ -212,7 +222,7 @@ def expected_ingress(environment: str) -> list[dict[str, Any]]:
                     "namespaceSelector": {
                         "matchLabels": {"kubernetes.io/metadata.name": namespace}
                     },
-                    "podSelector": {"matchLabels": {QUALIFICATION_CLIENT_LABEL: "true"}},
+                    "podSelector": {"matchLabels": client_labels},
                 }
             ],
             "ports": [
@@ -285,6 +295,38 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
                 "ports": [{"port": 4317, "protocol": "TCP"}],
             }
         )
+    else:
+        result.extend(
+            [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {"kubernetes.io/metadata.name": service_namespace}
+                            },
+                            "podSelector": {
+                                "matchLabels": {
+                                    "strimzi.io/cluster": "local-dev-kafka",
+                                    "strimzi.io/component-type": "kafka",
+                                }
+                            },
+                        }
+                    ],
+                    "ports": [{"port": 9093, "protocol": "TCP"}],
+                },
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {"kubernetes.io/metadata.name": service_namespace}
+                            },
+                            "podSelector": {"matchLabels": {"app": "jsreport"}},
+                        }
+                    ],
+                    "ports": [{"port": 5488, "protocol": "TCP"}],
+                },
+            ]
+        )
     require(bool(service_namespace), "service namespace is unresolved")
     return result
 
@@ -292,7 +334,8 @@ def expected_egress(environment: str) -> list[dict[str, Any]]:
 def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
     lower = text.lower()
-    require(not any(value in lower for value in FORBIDDEN_TEXT), "forbidden dependency is present")
+    forbidden = FORBIDDEN_TEXT + (WORKER_TEXT if environment == "qa" else ())
+    require(not any(value in lower for value in forbidden), "forbidden dependency is present")
     items = documents(text)
     require(bool(items), "render produced no resources")
     require({item.get("kind") for item in items} == EXPECTED_KINDS, "resource kinds differ")
@@ -357,10 +400,20 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "DOCUMENT_MAX_CONCURRENT_LOOKUPS": "2",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
-        "EVENT_WORKERS_ENABLED": "false",
+        "EVENT_WORKERS_ENABLED": "true" if environment == "local-dev" else "false",
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
     }
-    if environment == "qa":
+    if environment == "local-dev":
+        expected_config.update(
+            {
+                "KAFKA_BROKERS": "local-dev-kafka-kafka-bootstrap:9093",
+                "KAFKA_GROUP": "documents-service",
+                "KAFKA_REGISTERED_TOPIC": "policy-registered",
+                "KAFKA_CA_FILE": "/etc/document-service/kafka/ca.crt",
+                "JSREPORT_URL": ("http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488"),
+            }
+        )
+    else:
         expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
@@ -379,7 +432,14 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         and spec.get("minReadySeconds") == 5
         and spec.get("progressDeadlineSeconds") == 180
         and spec.get("strategy")
-        == {"type": "RollingUpdate", "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0}},
+        == (
+            {"type": "Recreate"}
+            if environment == "local-dev"
+            else {
+                "type": "RollingUpdate",
+                "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0},
+            }
+        ),
         "rollout settings differ",
     )
     selector = {
@@ -397,6 +457,45 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "workload identity or version differs",
     )
     pod = template.get("spec", {})
+    expected_volumes = [
+        {
+            "name": "postgres-ca",
+            "secret": {
+                "secretName": prefix + "postgres-document-reader-creds",
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                "defaultMode": 420,
+            },
+        },
+        {
+            "name": "minio-ca",
+            "secret": {
+                "secretName": prefix + "minio-document-reader-creds",
+                "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                "defaultMode": 420,
+            },
+        },
+    ]
+    if environment == "local-dev":
+        expected_volumes.extend(
+            [
+                {
+                    "name": "postgres-writer-ca",
+                    "secret": {
+                        "secretName": "local-dev-postgres-document-writer-creds",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                        "defaultMode": 292,
+                    },
+                },
+                {
+                    "name": "kafka-ca",
+                    "secret": {
+                        "secretName": "local-dev-document-kafka-ca",
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                        "defaultMode": 292,
+                    },
+                },
+            ]
+        )
     require(
         pod.get("automountServiceAccountToken") is False
         and pod.get("enableServiceLinks") is False
@@ -409,25 +508,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "fsGroup": 65532,
             "seccompProfile": {"type": "RuntimeDefault"},
         }
-        and pod.get("volumes")
-        == [
-            {
-                "name": "postgres-ca",
-                "secret": {
-                    "secretName": prefix + "postgres-document-reader-creds",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 420,
-                },
-            },
-            {
-                "name": "minio-ca",
-                "secret": {
-                    "secretName": prefix + "minio-document-reader-creds",
-                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    "defaultMode": 420,
-                },
-            },
-        ]
+        and pod.get("volumes") == expected_volumes
         and not pod.get("initContainers")
         and pod.get("serviceAccountName") in (None, "default"),
         "Pod security or data boundary differs",
@@ -443,6 +524,32 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(
         bool(re.fullmatch(expected_image, container.get("image", ""))), "image identity differs"
     )
+    expected_mounts = [
+        {
+            "name": "postgres-ca",
+            "mountPath": "/etc/document-service/postgres",
+            "readOnly": True,
+        },
+        {
+            "name": "minio-ca",
+            "mountPath": "/etc/document-service/minio",
+            "readOnly": True,
+        },
+    ]
+    if environment == "local-dev":
+        expected_mounts = [
+            {
+                "name": "postgres-writer-ca",
+                "mountPath": "/etc/document-service/postgres-writer",
+                "readOnly": True,
+            },
+            {
+                "name": "kafka-ca",
+                "mountPath": "/etc/document-service/kafka",
+                "readOnly": True,
+            },
+            *expected_mounts,
+        ]
     require(
         container.get("name") == "document-api"
         and container.get("imagePullPolicy")
@@ -458,65 +565,87 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "requests": {"cpu": "100m", "memory": "64Mi"},
             "limits": {"cpu": "300m", "memory": "256Mi"},
         }
-        and container.get("volumeMounts")
-        == [
-            {
-                "name": "postgres-ca",
-                "mountPath": "/etc/document-service/postgres",
-                "readOnly": True,
-            },
-            {
-                "name": "minio-ca",
-                "mountPath": "/etc/document-service/minio",
-                "readOnly": True,
-            },
-        ],
+        and container.get("volumeMounts") == expected_mounts,
         "container security or resources differ",
     )
+    expected_environment = [
+        {
+            "name": "DOCUMENT_DATABASE_URL",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": prefix + "postgres-document-reader-creds",
+                    "key": "database-url",
+                }
+            },
+        },
+        {
+            "name": "MINIO_ENDPOINT",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": prefix + "minio-document-reader-creds",
+                    "key": "endpoint",
+                }
+            },
+        },
+        {
+            "name": "MINIO_ACCESS_KEY",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": prefix + "minio-document-reader-creds",
+                    "key": "access-key",
+                }
+            },
+        },
+        {
+            "name": "MINIO_SECRET_KEY",
+            "valueFrom": {
+                "secretKeyRef": {
+                    "name": prefix + "minio-document-reader-creds",
+                    "key": "secret-key",
+                }
+            },
+        },
+    ]
+    if environment == "local-dev":
+        expected_environment.extend(
+            [
+                {
+                    "name": "DOCUMENT_WRITER_DATABASE_URL",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": "local-dev-postgres-document-writer-creds",
+                            "key": "database-url",
+                        }
+                    },
+                },
+                {
+                    "name": "MINIO_WRITER_ACCESS_KEY",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": "local-dev-minio-document-writer-creds",
+                            "key": "access-key",
+                        }
+                    },
+                },
+                {
+                    "name": "MINIO_WRITER_SECRET_KEY",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": "local-dev-minio-document-writer-creds",
+                            "key": "secret-key",
+                        }
+                    },
+                },
+            ]
+        )
+    expected_environment.append(
+        {
+            "name": "SERVICE_INSTANCE_ID",
+            "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
+        }
+    )
     require(
-        container.get("env")
-        == [
-            {
-                "name": "DOCUMENT_DATABASE_URL",
-                "valueFrom": {
-                    "secretKeyRef": {
-                        "name": prefix + "postgres-document-reader-creds",
-                        "key": "database-url",
-                    }
-                },
-            },
-            {
-                "name": "MINIO_ENDPOINT",
-                "valueFrom": {
-                    "secretKeyRef": {
-                        "name": prefix + "minio-document-reader-creds",
-                        "key": "endpoint",
-                    }
-                },
-            },
-            {
-                "name": "MINIO_ACCESS_KEY",
-                "valueFrom": {
-                    "secretKeyRef": {
-                        "name": prefix + "minio-document-reader-creds",
-                        "key": "access-key",
-                    }
-                },
-            },
-            {
-                "name": "MINIO_SECRET_KEY",
-                "valueFrom": {
-                    "secretKeyRef": {
-                        "name": prefix + "minio-document-reader-creds",
-                        "key": "secret-key",
-                    }
-                },
-            },
-            {
-                "name": "SERVICE_INSTANCE_ID",
-                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            },
-        ]
+        container.get("env") == expected_environment
         and container.get("envFrom") == [{"configMapRef": {"name": prefix + "document-config"}}],
         "runtime identity or configuration linkage differs",
     )
@@ -1020,6 +1149,18 @@ def verify_untrusted_access_denied(target: Target) -> None:
 
 def verify_qualification_access(target: Target) -> None:
     name = "document-qualified-http"
+    trusted_labels = (
+        {
+            "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+            "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+            "app.kubernetes.io/component": "gateway",
+            "environment": "local-dev",
+            BUSINESS_CLIENT_LABEL: "true",
+        }
+        if target.environment == "local-dev"
+        else {QUALIFICATION_CLIENT_LABEL: "true"}
+    )
+    encoded_labels = ",".join(f"{key}={value}" for key, value in trusted_labels.items())
     require(
         not target.json("get", "pod", name, "--ignore-not-found"),
         f"unowned Pod/{name} already exists",
@@ -1031,7 +1172,7 @@ def verify_qualification_access(target: Target) -> None:
             name,
             "--restart=Never",
             f"--image={PROBE_IMAGE}",
-            f"--labels={QUALIFICATION_CLIENT_LABEL}=true",
+            f"--labels={encoded_labels}",
             "--command",
             "--",
             "/bin/sh",
@@ -1154,6 +1295,10 @@ def validate_legacy_identity(environment: str) -> None:
         and selector.get("app.kubernetes.io/name") != "document-api",
         "Java Document selector is not disjoint",
     )
+    require(
+        deployment.get("spec", {}).get("replicas") == (0 if environment == "local-dev" else 1),
+        "Java Document transfer phase differs",
+    )
 
 
 def validate_ordinary_gateway_route(environment: str) -> None:
@@ -1162,8 +1307,8 @@ def validate_ordinary_gateway_route(environment: str) -> None:
     )
     labels = gateway.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
     require(
-        QUALIFICATION_CLIENT_LABEL not in labels,
-        "ordinary Java gateway has Document qualification access",
+        QUALIFICATION_CLIENT_LABEL not in labels and BUSINESS_CLIENT_LABEL not in labels,
+        "base Java gateway has Document access labels",
     )
     configuration = yaml.safe_load(
         (
@@ -1179,8 +1324,60 @@ def validate_ordinary_gateway_route(environment: str) -> None:
     )
     require(
         urls == [f"http://{environment}-document-api-legacy:80"],
-        "ordinary Java gateway Document destination differs",
+        "baked Java gateway Document destination differs",
     )
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/agent-portal-gateway/legacy"
+    rendered = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
+    deployment = resource(rendered, "Deployment", f"{environment}-agent-portal-gateway-legacy")
+    template = deployment.get("spec", {}).get("template", {})
+    labels = template.get("metadata", {}).get("labels", {})
+    require(
+        labels.get(BUSINESS_CLIENT_LABEL) == ("true" if environment == "local-dev" else None),
+        "Java gateway Document business-client phase differs",
+    )
+    config_maps = [
+        item
+        for item in rendered
+        if item.get("kind") == "ConfigMap"
+        and str(item.get("metadata", {}).get("name", "")).startswith(
+            f"{environment}-gateway-product-route-config-"
+        )
+    ]
+    require(len(config_maps) == 1, "Java gateway route ConfigMap identity differs")
+    volumes = template.get("spec", {}).get("volumes", [])
+    mounts = template.get("spec", {}).get("containers", [{}])[0].get("volumeMounts", [])
+    require(
+        volumes
+        == [
+            {
+                "name": "product-route-config",
+                "configMap": {"name": config_maps[0]["metadata"]["name"]},
+            }
+        ]
+        and mounts
+        == [
+            {
+                "name": "product-route-config",
+                "mountPath": "/etc/product-route",
+                "readOnly": True,
+            }
+        ],
+        "Java gateway route mount differs",
+    )
+    override = yaml.safe_load(config_maps[0].get("data", {}).get("application.yml", ""))
+    override_urls = (
+        override.get("micronaut", {})
+        .get("http", {})
+        .get("services", {})
+        .get("document-service", {})
+        .get("urls")
+    )
+    expected_override = (
+        ["http://local-dev-document-api.local-dev-all.svc.cluster.local:80"]
+        if environment == "local-dev"
+        else None
+    )
+    require(override_urls == expected_override, "Java gateway Document route phase differs")
 
 
 def main(argv: list[str] | None = None) -> int:

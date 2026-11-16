@@ -161,7 +161,7 @@ func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *te
 	}
 	settings := config.Events{
 		Enabled: true, Brokers: []string{"kafka.example:9093"},
-		Group: "document-service", RegisteredTopic: "policy-registered", CAFile: caFile,
+		Group: "documents-service", RegisteredTopic: "policy-registered", CAFile: caFile,
 	}
 	generation := &fakeGenerationRuntime{}
 	worker := &fakeEventWorker{}
@@ -173,7 +173,7 @@ func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *te
 		maximumBytes int,
 		gotObserver *telemetry.DependencyObserver,
 	) (generationRuntime, error) {
-		if got.Group != "document-service" || maximumBytes != 8*1024*1024 ||
+		if got.Group != "documents-service" || maximumBytes != 8*1024*1024 ||
 			gotObserver != dependencyObserver {
 			t.Fatalf("generation settings = (%+v, %d)", got, maximumBytes)
 		}
@@ -185,7 +185,7 @@ func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *te
 		_ *slog.Logger,
 	) (eventWorker, error) {
 		if got.ClientID != "policy-registered-document-listener" ||
-			got.Group != "document-service" || got.Topic != "policy-registered" ||
+			got.Group != "documents-service" || got.Topic != "policy-registered" ||
 			got.EventType != "registered" || got.Propagator == nil || got.Observe == nil ||
 			got.CommitFailure == nil || string(got.CACert) != "test CA" || owned != generation {
 			t.Fatalf("worker settings = %+v", got)

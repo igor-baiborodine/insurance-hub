@@ -12,13 +12,19 @@ resources:
 images:
   - name: insurance-hub-document-api
     newName: insurance-hub-document-api
-    newTag: 1.0.0-local.f50eeb5bd8f6
+    newTag: 1.0.0-local.0e53205ebf0b
 configMapGenerator:
   - name: document-config
     behavior: merge
     literals:
       - DEPLOYMENT_ENVIRONMENT=local-dev
-      - SERVICE_VERSION=git-f50eeb5bd8f6
+      - SERVICE_VERSION=git-0e53205ebf0b
+      - EVENT_WORKERS_ENABLED=true
+      - KAFKA_BROKERS=local-dev-kafka-kafka-bootstrap:9093
+      - KAFKA_GROUP=documents-service
+      - KAFKA_REGISTERED_TOPIC=policy-registered
+      - KAFKA_CA_FILE=/etc/document-service/kafka/ca.crt
+      - JSREPORT_URL=http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488
 patches:
   - path: deployment-patch.yaml
     target:

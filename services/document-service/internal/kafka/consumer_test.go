@@ -415,7 +415,7 @@ func TestNewWorker_DefersConsumerAndRejectsInvalidCA(t *testing.T) {
 	)
 	server.Close()
 	settings := Settings{
-		Brokers: []string{"kafka.example:9093"}, Group: "document-service",
+		Brokers: []string{"kafka.example:9093"}, Group: "documents-service",
 		Topic: "policy-registered", ClientID: "policy-registered-document-listener",
 		CACert: certificate, EventType: "registered",
 	}
@@ -509,7 +509,7 @@ func TestVerifyCommittedProgress_RequiresStableCompleteInRangeSnapshot(t *testin
 				context.Background(),
 				&client,
 				"policy-registered",
-				"document-service",
+				"documents-service",
 			)
 
 			// then
@@ -605,7 +605,7 @@ func TestCommittedProgressReaders_ValidateBrokerResponseShape(t *testing.T) {
 		}}
 		// when
 		got, err := readCommittedOffsets(
-			context.Background(), client, topic, "document-service", []int32{0},
+			context.Background(), client, topic, "documents-service", []int32{0},
 		)
 
 		// then
@@ -738,7 +738,7 @@ func (client *progressRequestClient) Request(
 		}}}, nil
 	case *kmsg.OffsetFetchRequest:
 		return &kmsg.OffsetFetchResponse{Groups: []kmsg.OffsetFetchResponseGroup{{
-			Group: "document-service",
+			Group: "documents-service",
 			Topics: []kmsg.OffsetFetchResponseGroupTopic{{
 				Topic: topic,
 				Partitions: []kmsg.OffsetFetchResponseGroupTopicPartition{{

@@ -113,6 +113,20 @@ def test_local_image_requires_exact_source_identity() -> None:
         checks.secret_and_image(target, image)
 
 
+def test_runbook_deploys_checked_in_local_candidate() -> None:
+    # given
+    items = checks.validate_render("local-dev", checks.render("local-dev"))
+    deployment = checks.resource(items, "Deployment", "local-dev-document-api")
+    expected_image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+    runbook = (checks.ROOT / "services/document-service/deployment-runbook.md").read_text()
+
+    # when
+    references = re.findall(r'^export DEPLOY_IMAGE_REF="([^"]+)"$', runbook, re.MULTILINE)
+
+    # then
+    assert references == [expected_image]
+
+
 @pytest.mark.parametrize(
     "image",
     [
@@ -172,22 +186,50 @@ def test_render_rejects_weakened_target_security() -> None:
         ),
         lambda rendered: rendered.replace(
             'EVENT_WORKERS_ENABLED: "false"',
-            'EVENT_WORKERS_ENABLED: "false"\n  KAFKA_GROUP: document-service',
+            'EVENT_WORKERS_ENABLED: "false"\n  KAFKA_GROUP: documents-service',
         ),
         lambda rendered: rendered.replace(
             "name: SERVICE_INSTANCE_ID",
             "name: DOCUMENT_WRITER_DATABASE_URL\n          valueFrom:\n"
             "            secretKeyRef:\n"
-            "              name: local-dev-postgres-document-writer-creds\n"
+            "              name: qa-postgres-document-writer-creds\n"
             "              key: database-url\n        - name: SERVICE_INSTANCE_ID",
         ),
     ],
 )
-def test_render_rejects_disabled_worker_authority(mutation) -> None:
-    # Owned fixtures qualify the worker; ordinary manifests stay disabled and cannot mount
-    # consumer or writer authority before the later handover.
+def test_qa_render_rejects_disabled_worker_authority(mutation) -> None:
+    # QA stays disabled and cannot mount consumer or writer authority.
+    rendered = checks.render("qa")
+
+    with pytest.raises(checks.DeploymentError):
+        checks.validate_render("qa", mutation(rendered))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda rendered: rendered.replace(
+            "KAFKA_GROUP: documents-service", "KAFKA_GROUP: document-service"
+        ),
+        lambda rendered: rendered.replace(
+            "name: local-dev-postgres-document-writer-creds",
+            "name: local-dev-postgres-document-reader-creds",
+        ),
+        lambda rendered: rendered.replace(
+            "http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488",
+            "http://foreign-jsreport.local-dev-all.svc.cluster.local:5488",
+        ),
+        lambda rendered: rendered.replace(
+            'insurance-hub.io/document-business-client: "true"',
+            'insurance-hub.io/document-qualification-client: "true"',
+        ),
+    ],
+)
+def test_local_render_rejects_wrong_transfer_authority(mutation) -> None:
+    # given
     rendered = checks.render("local-dev")
 
+    # when / then
     with pytest.raises(checks.DeploymentError):
         checks.validate_render("local-dev", mutation(rendered))
 
@@ -396,6 +438,22 @@ def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
 
 
 @pytest.mark.parametrize(
+    ("environment", "business", "expected_labels"),
+    [
+        (
+            "local-dev",
+            "local-dev-document-api",
+            (
+                "app.kubernetes.io/name=agent-portal-gateway-legacy,"
+                "app.kubernetes.io/instance=insurance-hub-agent-portal-gateway-legacy,"
+                "app.kubernetes.io/component=gateway,environment=local-dev,"
+                "insurance-hub.io/document-business-client=true"
+            ),
+        ),
+        ("qa", "qa-document-api", "insurance-hub.io/document-qualification-client=true"),
+    ],
+)
+@pytest.mark.parametrize(
     "payload",
     [
         {"documents": []},
@@ -409,11 +467,15 @@ def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
     ],
 )
 def test_qualified_access_probe_accepts_empty_or_owned_fixture_and_waits_for_policy(
+    environment: str,
+    business: str,
+    expected_labels: str,
     payload: dict,
 ) -> None:
     # given
     target = Mock()
-    target.business = "qa-document-api"
+    target.environment = environment
+    target.business = business
     target.json.side_effect = [
         {},
         {"status": {"containerStatuses": [{"state": {"terminated": {"exitCode": 0}}}]}},
@@ -428,6 +490,7 @@ def test_qualified_access_probe_accepts_empty_or_owned_fixture_and_waits_for_pol
     checks.verify_qualification_access(target)
 
     # then
+    assert target.kubectl.call_args_list[0].args[4] == f"--labels={expected_labels}"
     assert target.kubectl.call_args_list[0].args[-5:] == (
         "/bin/sh",
         "-ec",
@@ -436,7 +499,7 @@ def test_qualified_access_probe_accepts_empty_or_owned_fixture_and_waits_for_pol
             'exec curl --fail --silent --max-time 5 "$1"'
         ),
         "document-qualified-http",
-        "http://qa-document-api:80/documents/SYN-362",
+        f"http://{business}:80/documents/SYN-362",
     )
     assert target.kubectl.call_args_list[-1].args[:3] == (
         "delete",
