@@ -23,7 +23,7 @@ configMapGenerator:
       - SERVICE_VERSION=git-31dd2ccdbbb0
       - MINIO_CA_FILE=/etc/document-service/minio/ca.crt
       - EVENT_WORKERS_ENABLED=true
-      - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local:9093
+      - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc:9093
       - KAFKA_GROUP=documents-service
       - KAFKA_REGISTERED_TOPIC=policy-registered
       - KAFKA_CA_FILE=/etc/document-service/kafka/ca.crt
