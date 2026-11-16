@@ -391,6 +391,29 @@ class Kubernetes:
             and tenant.get("spec", {}).get("image") == expected_image,
             "MinIO selected target differs from accepted security disposition",
         )
+        service = json.loads(
+            self.kube("-n", self.minio_ns, "get", "service", "minio", "-o", "json")
+        )
+        service_metadata = service.get("metadata", {})
+        service_spec = service.get("spec", {})
+        expected_port = 443 if environment == "qa" else 80
+        expected_port_name = "https-minio" if environment == "qa" else "http-minio"
+        require(
+            service.get("kind") == "Service"
+            and service_metadata.get("name") == "minio"
+            and service_metadata.get("namespace") == self.minio_ns
+            and service_spec.get("type") == "ClusterIP"
+            and service_spec.get("selector")
+            == {"v1.min.io/tenant": f"{environment}-minio-document"}
+            and any(
+                item.get("name") == expected_port_name
+                and item.get("protocol", "TCP") == "TCP"
+                and item.get("port") == expected_port
+                and item.get("targetPort") == 9000
+                for item in service_spec.get("ports", [])
+            ),
+            "MinIO Service identity differs from accepted target",
+        )
         pods = json.loads(
             self.kube(
                 "-n",
@@ -613,14 +636,50 @@ class Kubernetes:
     @contextmanager
     def minio(self):
         access_key, secret_key = self.minio_admin()
-        with Minio.create(
-            self.commands,
-            self.endpoint,
-            access_key,
-            secret_key,
-            self.minio_ca(),
-        ) as minio:
-            yield minio
+        endpoint = urlsplit(self.endpoint)
+        require(endpoint.hostname and endpoint.port, "MinIO endpoint is incomplete")
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        process = subprocess.Popen(
+            [
+                os.environ.get("KUBECTL", "kubectl"),
+                f"--context={self.context}",
+                "-n",
+                self.minio_ns,
+                "port-forward",
+                "service/minio",
+                f"{port}:{endpoint.port}",
+                "--address=127.0.0.1",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(40):
+                require(process.poll() is None, "MinIO forward ended early")
+                with socket.socket() as check:
+                    check.settimeout(0.1)
+                    if check.connect_ex(("127.0.0.1", port)) == 0:
+                        break
+                time.sleep(0.1)
+            else:
+                raise ResourceError("MinIO forward did not become ready")
+            admin_endpoint = urlunsplit(endpoint._replace(netloc=f"{endpoint.hostname}:{port}"))
+            resolve = f"{endpoint.hostname}:{port}=127.0.0.1"
+            with Minio.create(
+                self.commands,
+                self.endpoint,
+                access_key,
+                secret_key,
+                self.minio_ca(),
+                admin_endpoint=admin_endpoint,
+                resolve=resolve,
+            ) as minio:
+                yield minio
+        finally:
+            require(terminate_process_group(process, 5), "MinIO forward cleanup failed")
 
     @contextmanager
     def jsreport(self):
@@ -753,8 +812,12 @@ class Minio:
         access_key: str,
         secret_key: str,
         trust: bytes,
+        *,
+        admin_endpoint: str | None = None,
+        resolve: str = "",
     ):
         parsed = urlsplit(endpoint)
+        admin = urlsplit(admin_endpoint or endpoint)
         require(
             parsed.scheme in {"http", "https"}
             and parsed.netloc
@@ -762,6 +825,22 @@ class Minio:
             and not parsed.query
             and not parsed.fragment,
             "MinIO endpoint differs from explicit target",
+        )
+        require(
+            admin.scheme == parsed.scheme
+            and admin.hostname == parsed.hostname
+            and admin.port
+            and not admin.path
+            and not admin.query
+            and not admin.fragment
+            and (
+                (admin.geturl() == parsed.geturl() and not resolve)
+                or (
+                    admin.geturl() != parsed.geturl()
+                    and resolve == f"{admin.hostname}:{admin.port}=127.0.0.1"
+                )
+            ),
+            "MinIO administrative forward differs from explicit target",
         )
         require(
             config_directory.is_dir() and config_directory.stat().st_mode & 0o077 == 0,
@@ -772,6 +851,8 @@ class Minio:
         self.commands = commands
         self.config_directory = config_directory
         self.endpoint = endpoint
+        self.admin_endpoint = admin_endpoint or endpoint
+        self.resolve = resolve
         self.access_key = access_key
         self.secret_key = secret_key
         self.trust_data = trust
@@ -787,6 +868,9 @@ class Minio:
         access_key: str,
         secret_key: str,
         trust: bytes,
+        *,
+        admin_endpoint: str | None = None,
+        resolve: str = "",
     ):
         with tempfile.TemporaryDirectory(prefix="document-minio-admin-") as directory:
             root = Path(directory)
@@ -797,15 +881,24 @@ class Minio:
                 certificate = ca_directory / "platform-ca.crt"
                 certificate.write_bytes(trust)
                 certificate.chmod(0o600)
-            yield cls(commands, root, endpoint, access_key, secret_key, trust)
+            yield cls(
+                commands,
+                root,
+                endpoint,
+                access_key,
+                secret_key,
+                trust,
+                admin_endpoint=admin_endpoint,
+                resolve=resolve,
+            )
 
     def trust(self) -> bytes:
         return self.trust_data
 
     def mc(self, *args: str, text: str | None = None, missing: tuple[str, ...] = ()) -> str:
+        admin = urlsplit(self.admin_endpoint)
         authority = (
-            f"{quote(self.access_key, safe='')}:{quote(self.secret_key, safe='')}@"
-            f"{urlsplit(self.endpoint).netloc}"
+            f"{quote(self.access_key, safe='')}:{quote(self.secret_key, safe='')}@{admin.netloc}"
         )
         return self.commands.run(
             [
@@ -813,12 +906,11 @@ class Minio:
                 "--json",
                 "--config-dir",
                 str(self.config_directory),
+                *(("--resolve", self.resolve) if self.resolve else ()),
                 *args,
             ],
             text,
-            env=child_environment(
-                {"MC_HOST_document": f"{urlsplit(self.endpoint).scheme}://{authority}"}
-            ),
+            env=child_environment({"MC_HOST_document": f"{admin.scheme}://{authority}"}),
             missing=missing,
         )
 
@@ -887,6 +979,8 @@ class Minio:
             user_name,
             credential,
             self.trust(),
+            admin_endpoint=self.admin_endpoint,
+            resolve=self.resolve,
         ) as identity:
             yield identity
 

@@ -353,15 +353,17 @@ limited to PutObject, AbortMultipartUpload and ListMultipartUploadParts on `poli
 explicit interface creates the fixed jsreport `POLICY` Handlebars/chrome-pdf template only when it
 is absent; any existing content, engine or recipe difference blocks without replacement.
 
-Use an independently verified administrative runner with Kubernetes access, psql, mc and network
-reachability to the enrolled MinIO DNS endpoint. As with Dashboard administration, the owner reads
-the exact platform administrator Secret from Kubernetes only in process memory, supplies the
-credential to the child process environment rather than arguments, and sends owned workload Secret
-values through Kubernetes API stdin. It reads QA public trust from the target namespace's exact
-`kube-root-ca.crt` ConfigMap into a private temporary mc directory and removes that directory after
-the operation. Do not supply a separate mc configuration or use `MC_INSECURE`. The tools validate
-the selected Tenant configuration Secret and selected/running accepted MinIO digest before resource
-setup. A changed image or administrator source needs a new security disposition first.
+Use an independently verified administrative runner with Kubernetes access, psql and mc. As with
+Dashboard administration, the owner reads the exact platform administrator Secret from Kubernetes
+only in process memory, supplies the credential to the child process environment rather than
+arguments, and sends owned workload Secret values through Kubernetes API stdin. It owns a
+loopback-only Kubernetes port-forward to the enrolled MinIO Service and uses mc's exact `--resolve`
+mapping to retain TLS hostname verification; direct host resolution or reachability to cluster DNS
+is not required. It reads QA public trust from the target namespace's exact `kube-root-ca.crt`
+ConfigMap into a private temporary mc directory and removes that directory after the operation. Do
+not supply a separate mc configuration or use `MC_INSECURE`. The tools validate the selected Tenant
+configuration Secret and selected/running accepted MinIO digest before resource setup. A changed
+image or administrator source needs a new security disposition first.
 
 All coordinates are required explicitly. For local-dev:
 
