@@ -385,8 +385,8 @@ def document_reads(
     ports: Mapping[str, int], trace_id: str, deployment_settings: Mapping[str, str]
 ) -> int:
     require(
-        deployment_settings.get("EVENT_WORKERS_ENABLED") == "false",
-        "Document QA verification requires EVENT_WORKERS_ENABLED=false",
+        deployment_settings.get("EVENT_WORKERS_ENABLED") == "true",
+        "Document QA verification requires EVENT_WORKERS_ENABLED=true",
     )
     require(
         request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
@@ -753,8 +753,8 @@ def verify_document_enabled_signals(
         "Document expected signal inventory differs from its registered probe",
     )
     require(
-        deployment_settings.get("EVENT_WORKERS_ENABLED") == "false",
-        "Document QA verification requires EVENT_WORKERS_ENABLED=false",
+        deployment_settings.get("EVENT_WORKERS_ENABLED") == "true",
+        "Document QA verification requires EVENT_WORKERS_ENABLED=true",
     )
     common = (
         f'service_name="{assets.contract.service_name}",'
@@ -798,7 +798,7 @@ def verify_document_enabled_signals(
         worker_value = float(worker_sample[1])
     except (TypeError, ValueError) as error:
         raise VerificationError("Document registration worker value is malformed") from error
-    require(worker_value == 0, "Document QA registration worker is unexpectedly enabled")
+    require(worker_value == 1, "Document QA registration worker is not enabled")
 
     now = time.time_ns()
     loki_query = (

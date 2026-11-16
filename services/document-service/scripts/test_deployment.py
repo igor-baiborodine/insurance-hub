@@ -182,23 +182,27 @@ def test_render_rejects_weakened_target_security() -> None:
     "mutation",
     [
         lambda rendered: rendered.replace(
-            'EVENT_WORKERS_ENABLED: "false"', 'EVENT_WORKERS_ENABLED: "true"'
+            'EVENT_WORKERS_ENABLED: "true"', 'EVENT_WORKERS_ENABLED: "false"'
         ),
         lambda rendered: rendered.replace(
-            'EVENT_WORKERS_ENABLED: "false"',
-            'EVENT_WORKERS_ENABLED: "false"\n  KAFKA_GROUP: documents-service',
+            "KAFKA_GROUP: documents-service", "KAFKA_GROUP: document-service"
         ),
         lambda rendered: rendered.replace(
-            "name: SERVICE_INSTANCE_ID",
-            "name: DOCUMENT_WRITER_DATABASE_URL\n          valueFrom:\n"
-            "            secretKeyRef:\n"
-            "              name: qa-postgres-document-writer-creds\n"
-            "              key: database-url\n        - name: SERVICE_INSTANCE_ID",
+            "name: qa-postgres-document-writer-creds",
+            "name: qa-postgres-document-reader-creds",
+        ),
+        lambda rendered: rendered.replace(
+            "http://qa-jsreport.qa-svc.svc.cluster.local:5488",
+            "http://foreign-jsreport.qa-svc.svc.cluster.local:5488",
+        ),
+        lambda rendered: rendered.replace(
+            'insurance-hub.io/document-business-client: "true"',
+            'insurance-hub.io/document-qualification-client: "true"',
         ),
     ],
 )
-def test_qa_render_rejects_disabled_worker_authority(mutation) -> None:
-    # QA stays disabled and cannot mount consumer or writer authority.
+def test_qa_render_rejects_wrong_transfer_authority(mutation) -> None:
+    # QA final state requires the same single worker and writer authority as local-dev.
     rendered = checks.render("qa")
 
     with pytest.raises(checks.DeploymentError):
@@ -208,6 +212,9 @@ def test_qa_render_rejects_disabled_worker_authority(mutation) -> None:
 @pytest.mark.parametrize(
     "mutation",
     [
+        lambda rendered: rendered.replace(
+            'EVENT_WORKERS_ENABLED: "true"', 'EVENT_WORKERS_ENABLED: "false"'
+        ),
         lambda rendered: rendered.replace(
             "KAFKA_GROUP: documents-service", "KAFKA_GROUP: document-service"
         ),
@@ -511,7 +518,16 @@ def test_untrusted_access_probe_never_deletes_preexisting_pod() -> None:
                 "insurance-hub.io/document-business-client=true"
             ),
         ),
-        ("qa", "qa-document-api", "insurance-hub.io/document-qualification-client=true"),
+        (
+            "qa",
+            "qa-document-api",
+            (
+                "app.kubernetes.io/name=agent-portal-gateway-legacy,"
+                "app.kubernetes.io/instance=insurance-hub-agent-portal-gateway-legacy,"
+                "app.kubernetes.io/component=gateway,environment=qa,"
+                "insurance-hub.io/document-business-client=true"
+            ),
+        ),
     ],
 )
 @pytest.mark.parametrize(

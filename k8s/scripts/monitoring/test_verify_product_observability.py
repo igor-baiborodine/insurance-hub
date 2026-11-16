@@ -417,7 +417,7 @@ class TestProductObservabilityVerification:
             "traceparent": "00-" + "b" * 32 + "-0123456789abcdef-01"
         }
 
-    def test_document_probe_uses_exact_target_and_worker_disabled_safe_read(self) -> None:
+    def test_document_probe_uses_exact_target_and_worker_enabled_safe_read(self) -> None:
         # given
         assets = verifier.load_assets(ASSETS_ROOT, "qa", "document")
         target = verifier.KubernetesTarget(assets, "a" * 40)
@@ -430,7 +430,7 @@ class TestProductObservabilityVerification:
             lookups = probe.workload(
                 {"health": 1001, "document": 1002},
                 "d" * 32,
-                {"EVENT_WORKERS_ENABLED": "false"},
+                {"EVENT_WORKERS_ENABLED": "true"},
             )
 
         # then
@@ -445,16 +445,14 @@ class TestProductObservabilityVerification:
             "traceparent": "00-" + "d" * 32 + "-0123456789abcdef-01"
         }
 
-    @pytest.mark.parametrize("configured", ("true", "", "unexpected"))
-    def test_document_probe_rejects_non_disabled_workers_before_reads(
-        self, configured: str
-    ) -> None:
+    @pytest.mark.parametrize("configured", ("false", "", "unexpected"))
+    def test_document_probe_rejects_non_enabled_workers_before_reads(self, configured: str) -> None:
         # when / then
         with (
             mock.patch.object(verifier, "request_text") as request,
             pytest.raises(
                 verifier.VerificationError,
-                match="requires EVENT_WORKERS_ENABLED=false",
+                match="requires EVENT_WORKERS_ENABLED=true",
             ),
         ):
             verifier.document_reads(
@@ -661,13 +659,13 @@ class TestProductObservabilityVerification:
                 {"EVENT_WORKERS_ENABLED": configured},
             )
 
-    def test_document_enabled_signals_require_disabled_worker_metric(self) -> None:
+    def test_document_enabled_signals_require_enabled_worker_metric(self) -> None:
         # given
         assets = verifier.load_assets(ASSETS_ROOT, "qa", "document")
         worker_results = [
             {
                 "metric": {"insurance_hub_document_event_type": "registered"},
-                "value": [0, "0"],
+                "value": [0, "1"],
             }
         ]
 
@@ -692,7 +690,7 @@ class TestProductObservabilityVerification:
                 {"prometheus": 1001, "loki": 1002, "tempo": 1003},
                 "a" * 32,
                 "pod-uid",
-                {"EVENT_WORKERS_ENABLED": "false"},
+                {"EVENT_WORKERS_ENABLED": "true"},
             )
 
         # then

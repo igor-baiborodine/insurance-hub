@@ -11,6 +11,7 @@ spec:
       labels:
         environment: qa
         app.kubernetes.io/version: "1.3.0"
+        insurance-hub.io/document-business-client: "true"
     spec:
       containers:
         - name: agent-portal-gateway-legacy
