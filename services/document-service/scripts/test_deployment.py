@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 
 import document_deployment_checks as checks
 import pytest
-from scripts.go.service import deployment as lifecycle
 
 import deployment
+from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
@@ -273,6 +273,30 @@ def test_qa_aggregate_rejects_ambiguous_document_ownership(
     # when / then
     with pytest.raises(checks.DeploymentError, match=message):
         checks.validate_qa_aggregate(resources)
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_legacy_document_deployment_remains_declared_but_quiesced(environment: str) -> None:
+    # given
+    overlay = checks.ROOT / f"k8s/overlays/{environment}/svc/document/legacy"
+    rendered = checks.run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
+    deployment = checks.resource(
+        checks.documents(rendered), "Deployment", f"{environment}-document-api-legacy"
+    )
+
+    # when
+    checks.validate_legacy_identity(environment)
+
+    # then
+    assert deployment["spec"]["replicas"] == 0
+
+    # when / then
+    active_render = rendered.replace("replicas: 0", "replicas: 1", 1)
+    with (
+        patch.object(checks, "run", return_value=active_render),
+        pytest.raises(checks.DeploymentError, match="transfer phase"),
+    ):
+        checks.validate_legacy_identity(environment)
 
 
 def rendered_resources() -> list[dict[str, object]]:

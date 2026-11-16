@@ -1299,7 +1299,7 @@ def validate_qa_aggregate(resources: Any) -> None:
         all(isinstance(resource, str) for resource in resources),
         "QA service aggregate resources are invalid",
     )
-    require(resources.count("./document/legacy") == 1, "Java Document must remain active once")
+    require(resources.count("./document/legacy") == 1, "Java Document must remain declared once")
     require(resources.count("./document") <= 1, "Go Document must be activated at most once")
 
 
@@ -1315,7 +1315,7 @@ def validate_legacy_identity(environment: str) -> None:
         "Java Document selector is not disjoint",
     )
     require(
-        deployment.get("spec", {}).get("replicas") == (0 if environment == "local-dev" else 1),
+        deployment.get("spec", {}).get("replicas") == 0,
         "Java Document transfer phase differs",
     )
 
