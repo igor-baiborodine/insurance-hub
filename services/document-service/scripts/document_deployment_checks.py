@@ -412,7 +412,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
             "KAFKA_BROKERS": (
                 "local-dev-kafka-kafka-bootstrap:9093"
                 if environment == "local-dev"
-                else "qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local:9093"
+                else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
             ),
             "KAFKA_GROUP": "documents-service",
             "KAFKA_REGISTERED_TOPIC": "policy-registered",
