@@ -153,6 +153,107 @@ func TestRun_ComposesHTTPToActualRPCAndTracksDependencyReadiness(t *testing.T) {
 	}
 }
 
+func TestRun_UsesStartupBudgetForInitialWorkerAssignment(t *testing.T) {
+	// given
+	settings := testConfig()
+	settings.ProbeTimeout = 25 * time.Millisecond
+	settings.StartupTimeout = time.Second
+	caFile := t.TempDir() + "/ca.crt"
+	if err := os.WriteFile(caFile, []byte("test CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings.Events = config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"}, Group: "documents-service",
+		RegisteredTopic: "policy-registered", CAFile: caFile,
+	}
+	deps := productionDependencies()
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ready := &atomic.Bool{}
+	ready.Store(true)
+	dependency := &fakeManagedDependency{ready: ready, failure: errors.New("unavailable")}
+	deps.newDatabase = func(
+		context.Context,
+		config.Database,
+		int,
+		int,
+	) (application.MetadataReader, managedDependency, error) {
+		return metadataReaderFunc(func(
+			context.Context,
+			string,
+		) ([]domain.StoredDocument, error) {
+			return nil, nil
+		}), dependency, nil
+	}
+	deps.newObjectStore = func(
+		config.ObjectStore,
+		int,
+	) (application.ContentReader, managedDependency, error) {
+		return contentReaderFunc(func(
+			context.Context,
+			[]byte,
+		) ([]byte, bool, error) {
+			return nil, false, nil
+		}), dependency, nil
+	}
+	generation := &fakeGenerationRuntime{}
+	deps.newGeneration = func(
+		context.Context,
+		config.Events,
+		int,
+		*telemetry.DependencyObserver,
+	) (generationRuntime, error) {
+		return generation, nil
+	}
+	worker := &delayedAssignmentWorker{delay: 100 * time.Millisecond}
+	deps.newWorker = func(
+		documentkafka.Settings,
+		generationRuntime,
+		*slog.Logger,
+	) (eventWorker, error) {
+		return worker, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	started := time.Now()
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_ = receiveString(t, addresses)
+	_ = receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+
+	// when
+	waitForHTTPStatus(
+		t,
+		&http.Client{Timeout: time.Second},
+		"http://"+healthAddress+"/readyz",
+		http.StatusOK,
+	)
+
+	// then
+	if elapsed := time.Since(started); elapsed < worker.delay {
+		t.Fatalf(
+			"service became ready after %s, before assignment delay %s",
+			elapsed,
+			worker.delay,
+		)
+	}
+	cancel()
+	select {
+	case err := <-runResult:
+		if err != nil {
+			t.Fatalf("run service: %v", err)
+		}
+	case <-time.After(12 * time.Second):
+		t.Fatal("service did not stop")
+	}
+}
+
 func TestRunningService_ConfiguresExactWorkerCoordinatesAndClosesLifecycle(t *testing.T) {
 	// given
 	caFile := t.TempDir() + "/ca.crt"
@@ -445,6 +546,35 @@ type fakeEventWorker struct {
 	started     atomic.Bool
 	shutdown    atomic.Bool
 }
+
+type delayedAssignmentWorker struct {
+	delay    time.Duration
+	assigned atomic.Bool
+}
+
+func (*delayedAssignmentWorker) Preflight(context.Context) error { return nil }
+
+func (worker *delayedAssignmentWorker) Check(ctx context.Context) error {
+	if worker.assigned.Load() {
+		return nil
+	}
+	timer := time.NewTimer(worker.delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		worker.assigned.Store(true)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (*delayedAssignmentWorker) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (*delayedAssignmentWorker) Shutdown(context.Context) error { return nil }
 
 func (worker *fakeEventWorker) Preflight(context.Context) error {
 	worker.preflighted.Store(true)
