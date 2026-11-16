@@ -24,9 +24,11 @@ and gRPC 9090; `<environment>-document-api-management` exposes management 8081. 
 final-state source admits the explicitly labeled gateway, enables the worker with group
 `documents-service`, and permits only the required Kafka and JSReport egress in addition to DNS,
 Document PostgreSQL and Document MinIO. It also renders the Java Deployment at zero replicas and
-routes the gateway to Go. QA remains in the pre-transfer state: its Go worker is disabled, its
-NetworkPolicy admits only the disposable qualification client, and Java remains authoritative.
-These checked-in desired states grant no permission to mutate either environment.
+routes the gateway to Go. QA is in the stop-before-start transfer state: its Go worker is disabled,
+its NetworkPolicy admits only the disposable qualification client, its retained Java Deployment
+has zero replicas, and the gateway still points to the unavailable Java Service. This intentional
+downtime remains until the separately authorized Go activation and route change. These checked-in
+desired states grant no permission to mutate either environment.
 
 Use the companion [observability runbook](observability-runbook.md) for Document monitoring source
 validation, guarded QA provisioning/read-back, investigation and restoration. The two procedures
@@ -83,7 +85,8 @@ It starts a disposable gateway with a synthetic signing key and overrides only
 `micronaut.http.services.document-service.urls`. It checks authenticated exact bytes,
 unauthenticated denial and the existing retry/fallback result. The checked-in local-dev and QA
 destinations deliberately differ: local-dev selects the Go `local-dev-document-api` Service while
-QA remains on the Java `qa-document-api-legacy` Service.
+QA still selects the retained `qa-document-api-legacy` Service. That QA destination is deliberately
+unavailable during the quiescent transfer interval.
 
 ## Candidate identity and caller proof
 
@@ -101,8 +104,10 @@ existing `documents-service` group, mounts the dedicated writer and Kafka trust 
 only Kafka and JSReport egress. Its deployment owner rejects the obsolete singular group, reader
 credentials in writer slots, foreign renderer destinations and non-gateway business ingress. The
 QA overlay deliberately remains worker-disabled and rejects all worker settings, writer
-credentials and Kafka/JSReport egress. The source change does not itself activate local-dev;
-activation still requires a fresh preflight and separate authorization for the exact handover.
+credentials and Kafka/JSReport egress. Its retained Java Deployment is quiesced while the gateway
+route remains unchanged, so no Document implementation owns QA traffic or event processing during
+this bounded transfer interval. The source change does not itself activate local-dev; activation
+still requires a fresh preflight and separate authorization for the exact handover.
 
 Following the Dashboard reference, Kafka generation qualification exists only inside the owned
 disposable boundary. The source-level smoke creates an isolated group and real TLS Kafka, JSReport,
