@@ -296,3 +296,27 @@ def test_unavailable_dependency_is_not_missing_resource(monkeypatch):
     # when / then
     with pytest.raises(resources.ResourceError):
         resources.Commands().run(["synthetic-mc"], missing=("NoSuchBucket",))
+
+
+def test_expected_missing_object_without_code_is_accepted(monkeypatch):
+    # given
+    output = json.dumps(
+        {
+            "status": "error",
+            "error": {
+                "message": "Unable to stat `document/policies/probe.pdf`.",
+                "cause": {"message": "Object does not exist", "error": {}},
+            },
+        }
+    )
+
+    def missing_object(*_args, **_kwargs):
+        raise resources.CommandError("missing", stdout=output)
+
+    monkeypatch.setattr(resources, "run_command", missing_object)
+
+    # when
+    result = resources.Commands().run(["synthetic-mc"], missing=("NoSuchKey",))
+
+    # then
+    assert result == ""

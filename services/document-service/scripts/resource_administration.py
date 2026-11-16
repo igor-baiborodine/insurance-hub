@@ -252,6 +252,12 @@ class Commands:
                         if code in missing:
                             return ""
                         if (
+                            "NoSuchKey" in missing
+                            and not detail
+                            and cause.get("message") == "Object does not exist"
+                        ):
+                            return ""
+                        if (
                             "NoSuchBucket" in missing
                             and detail.get("Bucket") == "policies"
                             and cause.get("message") == "Bucket `policies` does not exist."
