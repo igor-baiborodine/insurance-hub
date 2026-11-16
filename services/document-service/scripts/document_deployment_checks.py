@@ -184,11 +184,21 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
             archive.extractall(directory, filter="data")
         overlay = Path(directory) / f"k8s/overlays/{environment}/svc/document"
         text = run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
+
+    items = previous_render_resources(environment, text)
+    return {(str(item["kind"]), str(item["metadata"]["name"])): item for item in items}
+
+
+def previous_render_resources(environment: str, text: str) -> list[dict[str, Any]]:
     require(
-        not any(value in text.lower() for value in FORBIDDEN_TEXT + WORKER_TEXT),
+        not any(value in text.lower() for value in FORBIDDEN_TEXT),
         "previous deployment contains forbidden resources",
     )
-    items = documents(text)
+    items = (
+        validate_render(environment, text)
+        if any(value in text.lower() for value in WORKER_TEXT)
+        else documents(text)
+    )
     prefix = f"{environment}-document-"
     require(
         items
@@ -199,7 +209,7 @@ def predecessor_resources(environment: str, image: str) -> dict[tuple[str, str],
         ),
         "previous deployment inventory differs",
     )
-    return {(str(item["kind"]), str(item["metadata"]["name"])): item for item in items}
+    return items
 
 
 def expected_ingress(environment: str) -> list[dict[str, Any]]:
@@ -791,6 +801,15 @@ class Target:
             if previous_image and not require_deployment
             else {}
         )
+        if previous:
+            config_name = f"{self.environment}-document-config"
+            desired_data = resource(items, "ConfigMap", config_name).get("data", {})
+            actual_config = self.json("get", "configmap", config_name, "--ignore-not-found")
+            actual_data = actual_config.get("data", {})
+            if {key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"} == {
+                key: value for key, value in desired_data.items() if key != "SERVICE_VERSION"
+            }:
+                previous = {}
         allowed_images = {desired_image}
         allowed_versions = {
             desired_deployment.get("metadata", {})

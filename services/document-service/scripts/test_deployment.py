@@ -234,6 +234,24 @@ def test_local_render_rejects_wrong_transfer_authority(mutation) -> None:
         checks.validate_render("local-dev", mutation(rendered))
 
 
+def test_previous_render_accepts_only_valid_final_worker_authority() -> None:
+    # given
+    rendered = checks.render("local-dev")
+
+    # when
+    resources = checks.previous_render_resources("local-dev", rendered)
+
+    # then
+    assert len(resources) == 5
+
+    # when / then
+    with pytest.raises(checks.DeploymentError):
+        checks.previous_render_resources(
+            "local-dev",
+            rendered.replace("KAFKA_GROUP: documents-service", "KAFKA_GROUP: foreign-group"),
+        )
+
+
 def test_qa_aggregate_preserves_java_before_and_after_release_activation() -> None:
     # when / then
     checks.validate_qa_aggregate(["./document/legacy", "./product"])
@@ -323,6 +341,25 @@ def test_preflight_accepts_source_verified_previous_configuration() -> None:
     previous_config["data"]["REQUEST_TIMEOUT"] = "8s"
     target, actual = target_with_live_resources(previous)
     previous_image = "insurance-hub-document-api:1.0.0-local.abcdef123456"
+    use_previous_identity(actual, previous_image)
+    indexed = {(str(item["kind"]), str(item["metadata"]["name"])): item for item in previous}
+
+    # when / then
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        patch.object(checks, "predecessor_resources", return_value=indexed),
+    ):
+        target.live(items, require_deployment=False)
+
+
+def test_preflight_accepts_previous_image_with_final_configuration() -> None:
+    # given
+    items = rendered_resources()
+    previous = deepcopy(items)
+    previous_config = next(item for item in previous if item["kind"] == "ConfigMap")
+    previous_config["data"]["EVENT_WORKERS_ENABLED"] = "false"
+    target, actual = target_with_live_resources(items)
+    previous_image = "insurance-hub-document-api:1.4.0-local.abcdef123456"
     use_previous_identity(actual, previous_image)
     indexed = {(str(item["kind"]), str(item["metadata"]["name"])): item for item in previous}
 

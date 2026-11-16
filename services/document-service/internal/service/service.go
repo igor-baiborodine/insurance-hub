@@ -406,7 +406,7 @@ func run(
 	}
 	if err == nil {
 		runtime.startWorker(ctx)
-		err = runtime.checkWorker(readyContext)
+		err = runtime.checkWorker(startupCtx)
 	}
 	cancelReady()
 	if err != nil {
