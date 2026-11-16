@@ -104,9 +104,6 @@ def test_local_migration_url_rejects_noncanonical_secret_ca_mount(tmp_path):
 def test_minio_foreign_policy_rejected_before_writes(tmp_path):
     # given
     tmp_path.chmod(0o700)
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"aliases": {"document": {"url": "http://localhost:9000"}}}))
-    path.chmod(0o600)
 
     class Fake:
         def run(self, args, text=None, **_kwargs):
@@ -116,10 +113,140 @@ def test_minio_foreign_policy_rejected_before_writes(tmp_path):
                 return ""
             return json.dumps({"policy": {"Version": "2012-10-17", "Statement": []}})
 
-    minio = resources.Minio(Fake(), path, "http://localhost:9000")
+    minio = resources.Minio(
+        Fake(),
+        tmp_path,
+        "http://localhost:9000",
+        "synthetic-admin",
+        "synthetic-secret",
+        b"",
+    )
     # when / then
     with pytest.raises(resources.ResourceError, match="policy"):
         minio.inspect()
+
+
+def test_minio_admin_uses_exact_kubernetes_secret_and_public_ca():
+    # given
+    ca = "-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+    config = "\n".join(
+        (
+            "export MINIO_ROOT_USER=synthetic-admin",
+            "export MINIO_ROOT_PASSWORD='synthetic password value'",
+            'export MINIO_PROMETHEUS_AUTH_TYPE="public"',
+        )
+    )
+    manager = object.__new__(resources.Kubernetes)
+    manager.environment = "qa"
+    manager.minio_ns = "qa-minio-document"
+    manager.minio_admin_secret = "qa-minio-document-storage-config"
+
+    def kube(*args, **_kwargs):
+        if "secret" in args:
+            return json.dumps(
+                {
+                    "kind": "Secret",
+                    "type": "Opaque",
+                    "metadata": {
+                        "name": manager.minio_admin_secret,
+                        "namespace": manager.minio_ns,
+                    },
+                    "data": {"config.env": resources.base64.b64encode(config.encode()).decode()},
+                }
+            )
+        return json.dumps(
+            {
+                "kind": "ConfigMap",
+                "metadata": {"name": "kube-root-ca.crt", "namespace": manager.minio_ns},
+                "data": {"ca.crt": ca},
+            }
+        )
+
+    manager.kube = kube
+
+    # when
+    access_key, secret_key = manager.minio_admin()
+    observed_ca = manager.minio_ca()
+
+    # then
+    assert access_key == "synthetic-admin"
+    assert secret_key == "synthetic password value"
+    assert observed_ca == ca.encode()
+
+
+def test_minio_admin_rejects_foreign_secret_without_exposing_data():
+    # given
+    sentinel = "synthetic-secret-sentinel-365"
+    manager = object.__new__(resources.Kubernetes)
+    manager.minio_ns = "qa-minio-document"
+    manager.minio_admin_secret = "qa-minio-document-storage-config"
+    manager.kube = lambda *_args, **_kwargs: json.dumps(
+        {
+            "kind": "Secret",
+            "type": "Opaque",
+            "metadata": {"name": "foreign", "namespace": manager.minio_ns},
+            "data": {"config.env": resources.base64.b64encode(sentinel.encode()).decode()},
+        }
+    )
+
+    # when / then
+    with pytest.raises(resources.ResourceError) as observed:
+        manager.minio_admin()
+    assert sentinel not in str(observed.value)
+
+
+def test_minio_credentials_use_child_environment_not_arguments(tmp_path):
+    # given
+    tmp_path.chmod(0o700)
+    sentinel = "synthetic secret/sentinel-365"
+    calls = []
+
+    class Fake:
+        def run(self, args, text=None, env=None, **_kwargs):
+            calls.append((args, text, env))
+            return "{}"
+
+    minio = resources.Minio(
+        Fake(),
+        tmp_path,
+        "http://localhost:9000",
+        "synthetic-admin",
+        sentinel,
+        b"",
+    )
+
+    # when
+    minio.mc("stat", "document/policies")
+
+    # then
+    args, _text, environment = calls[0]
+    assert sentinel not in json.dumps(args)
+    assert environment["MC_HOST_document"].startswith("http://synthetic-admin:")
+    assert environment["MC_HOST_document"].endswith("@localhost:9000")
+    assert "synthetic%20secret%2Fsentinel-365" in environment["MC_HOST_document"]
+
+
+def test_minio_context_removes_temporary_public_trust():
+    # given
+    ca = b"-----BEGIN CERTIFICATE-----\nsynthetic\n-----END CERTIFICATE-----\n"
+
+    # when
+    with resources.Minio.create(
+        object(),
+        "https://minio.qa-minio-document.svc.cluster.local:443",
+        "synthetic-admin",
+        "synthetic-secret-value",
+        ca,
+    ) as minio:
+        directory = minio.config_directory
+        certificate = directory / "certs" / "CAs" / "platform-ca.crt"
+        observed = certificate.read_bytes()
+        mode = certificate.stat().st_mode & 0o777
+
+    # then
+    assert observed == ca
+    assert mode == 0o600
+    assert not directory.exists()
 
 
 def test_import_has_no_command_effects(monkeypatch):

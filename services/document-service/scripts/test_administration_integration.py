@@ -201,6 +201,11 @@ def private(path, value):
     return path
 
 
+def minio_client(commands, directory, endpoint, access_key, secret_key):
+    directory.mkdir(mode=0o700)
+    return resources.Minio(commands, directory, endpoint, access_key, secret_key, b"")
+
+
 def loopback_port():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -438,6 +443,9 @@ class ContainerizedMinioCommands(resources.Commands):
         mount_args = []
         for source in sorted(mounts):
             mount_args.extend(("--mount", f"type=bind,src={source},dst={source}"))
+        environment_args = (
+            ["--env", "MC_HOST_document"] if env and "MC_HOST_document" in env else []
+        )
         return super().run(
             [
                 DOCKER,
@@ -450,6 +458,7 @@ class ContainerizedMinioCommands(resources.Commands):
                 "--user",
                 f"{os.getuid()}:{os.getgid()}",
                 *mount_args,
+                *environment_args,
                 MINIO_CLIENT_IMAGE,
                 *args[1:],
             ],
@@ -1012,35 +1021,8 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
         ][0]["HostPort"]
         endpoint = f"http://127.0.0.1:{port}"
         config_dir = tmp_path / "admin"
-        config_dir.mkdir(mode=0o700)
-        config = private(
-            config_dir / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": endpoint,
-                            "accessKey": "fixture-admin",
-                            "secretKey": password,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
-        )
-        minio = resources.Minio(resources.Commands(), config, endpoint)
-        wait_for(
-            lambda: (
-                subprocess.run(
-                    ["mc", "--config-dir", str(config_dir), "ready", "document"],
-                    capture_output=True,
-                    timeout=5,
-                ).returncode
-                == 0
-            )
-        )
+        minio = minio_client(resources.Commands(), config_dir, endpoint, "fixture-admin", password)
+        wait_for(lambda: minio_ready(minio))
         try:
             before = minio.inspect()
         except resources.ResourceError as error:
@@ -1070,25 +1052,7 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
         monkeypatch.setenv("DOCUMENT_RESOURCE_PROBE_KEY", "2026/02/SYN-362.pdf")
         minio.verify("a" * 64, object_probe=True)
         reader_dir = tmp_path / "reader"
-        reader_dir.mkdir(mode=0o700)
-        reader_config = private(
-            reader_dir / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": endpoint,
-                            "accessKey": resources.USER,
-                            "secretKey": "a" * 64,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
-        )
-        reader = resources.Minio(resources.Commands(), reader_config, endpoint)
+        reader = minio_client(resources.Commands(), reader_dir, endpoint, resources.USER, "a" * 64)
         assert reader.mc("cat", "document/policies/2026/02/SYN-362.pdf") == "%PDF-362"
         # Actual server denials, not a mock or client-side error.
         for args in [
@@ -1097,14 +1061,9 @@ def test_minio_reader_preserves_credentials_and_denies_writes(tmp_path, monkeypa
             ("admin", "user", "list", "document"),
             ("stat", "document/unrelated-362"),
         ]:
-            result = subprocess.run(
-                ["mc", "--json", "--config-dir", str(reader_dir), *args],
-                text=True,
-                capture_output=True,
-                timeout=10,
-            )
-            assert result.returncode != 0
-            assert resources.authorization_denied(result.stdout), result.stdout
+            with pytest.raises(resources.ResourceError) as observed:
+                reader.mc(*args)
+            assert resources.authorization_denied(observed.value.__cause__.stdout)
         assert minio.mc("cat", "document/policies/2026/02/SYN-362.pdf") == "%PDF-362"
 
 
@@ -1143,25 +1102,9 @@ def test_lookup_traverses_real_rpc_postgres_and_minio(postgres, tmp_path):
         ][0]["HostPort"]
         endpoint = f"http://127.0.0.1:{minio_port}"
         config_dir = tmp_path / "lookup-admin"
-        config_dir.mkdir(mode=0o700)
-        config = private(
-            config_dir / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": endpoint,
-                            "accessKey": "fixture-admin",
-                            "secretKey": password,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
+        minio = minio_client(
+            ContainerizedMinioCommands(), config_dir, endpoint, "fixture-admin", password
         )
-        minio = resources.Minio(ContainerizedMinioCommands(), config, endpoint)
         wait_for(lambda: minio_ready(minio))
         minio.ensure(minio.inspect(), "a" * 64)
         fixture = private(tmp_path / "lookup.pdf", "%PDF-OBJECT-362")
@@ -1273,25 +1216,13 @@ def test_generation_traverses_real_dependencies(postgres, tmp_path):
         ][0]["HostPort"]
         minio_endpoint = f"http://127.0.0.1:{minio_port}"
         config_dir = tmp_path / "generation-admin"
-        config_dir.mkdir(mode=0o700)
-        config = private(
-            config_dir / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": minio_endpoint,
-                            "accessKey": "fixture-admin",
-                            "secretKey": minio_password,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
+        minio = minio_client(
+            ContainerizedMinioCommands(),
+            config_dir,
+            minio_endpoint,
+            "fixture-admin",
+            minio_password,
         )
-        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
         wait_for(lambda: minio_ready(minio))
         minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
 
@@ -1475,25 +1406,13 @@ def test_event_to_http_lookup_traverses_real_dependencies(postgres, tmp_path):
         ][0]["HostPort"]
         minio_endpoint = f"http://127.0.0.1:{minio_port}"
         config_dir = tmp_path / "event-to-lookup-admin"
-        config_dir.mkdir(mode=0o700)
-        config = private(
-            config_dir / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": minio_endpoint,
-                            "accessKey": "fixture-admin",
-                            "secretKey": minio_password,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
+        minio = minio_client(
+            ContainerizedMinioCommands(),
+            config_dir,
+            minio_endpoint,
+            "fixture-admin",
+            minio_password,
         )
-        minio = resources.Minio(ContainerizedMinioCommands(), config, minio_endpoint)
         wait_for(lambda: minio_ready(minio))
         minio.ensure(minio.inspect(), "a" * 64)
         minio.ensure(minio.inspect("writer"), "a" * 64, "writer")
@@ -1617,35 +1536,8 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
         ][0]["HostPort"]
         endpoint = f"http://127.0.0.1:{port}"
         directory = tmp_path / "mc-admin"
-        directory.mkdir(mode=0o700)
-        config = private(
-            directory / "config.json",
-            json.dumps(
-                {
-                    "version": "10",
-                    "aliases": {
-                        "document": {
-                            "url": endpoint,
-                            "accessKey": "fixture-admin",
-                            "secretKey": password,
-                            "api": "S3v4",
-                            "path": "auto",
-                        }
-                    },
-                }
-            ),
-        )
-        minio = resources.Minio(resources.Commands(), config, endpoint)
-        wait_for(
-            lambda: (
-                subprocess.run(
-                    ["mc", "--config-dir", str(directory), "ready", "document"],
-                    capture_output=True,
-                    timeout=5,
-                ).returncode
-                == 0
-            )
-        )
+        minio = minio_client(resources.Commands(), directory, endpoint, "fixture-admin", password)
+        wait_for(lambda: minio_ready(minio))
         manager = object.__new__(resources.Kubernetes)
         manager.environment = target["environment"]
         manager.context = target["context"]
@@ -1656,9 +1548,11 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
         manager.host = "localhost"
         manager.endpoint = endpoint
         manager.target_secret = "disposable-postgres-document-admin-target"
+        manager.kafka_ca_secret = "disposable-document-kafka-ca"
         manager.admin = admin
         ca = (root / "ca.crt").read_bytes()
         manager.ca = lambda: ca
+        manager.kafka_ca = lambda: ca
         stored = {
             manager.target_secret: {"target.json": json.dumps(target, sort_keys=True).encode()}
         }
@@ -1729,14 +1623,19 @@ def test_resource_orchestration_replays_pending_credentials(postgres, tmp_path, 
 
         # then
         assert stored == snapshot
-        assert len(writes) == 2  # only the absent MinIO reader/writer credentials were created
+        assert writes == [
+            manager.kafka_ca_secret,
+            manager.secret_name("minio-reader"),
+            manager.secret_name("minio-writer"),
+        ]
         with manager.connection("go_document_migrator", "a" * 64, ca) as execute:
             assert execute("SET ROLE document; SELECT current_user;") == "document"
         # Unrecoverable external credentials are rejected before any new writes.
         saved = stored.pop(manager.secret_name("reader"))
+        completed_writes = list(writes)
 
         # when / then
         with pytest.raises(resources.ResourceError, match="without recoverable Secret"):
             resources.execute_action("ensure", manager, minio, templates)
         stored[manager.secret_name("reader")] = saved
-        assert len(writes) == 2
+        assert writes == completed_writes

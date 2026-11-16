@@ -354,11 +354,14 @@ explicit interface creates the fixed jsreport `POLICY` Handlebars/chrome-pdf tem
 is absent; any existing content, engine or recipe difference blocks without replacement.
 
 Use an independently verified administrative runner with Kubernetes access, psql, mc and network
-reachability to the enrolled MinIO DNS endpoint. Supply mc's private `config.json` with alias
-`document`; never put credentials in flags or shell history. The containing directory must be
-mode 0700 and the file 0600. For QA, provision the verified public issuing CA under its
-`certs/CAs/` directory; do not use `MC_INSECURE`. The tools validate the selected/running accepted
-MinIO digest before resource setup. A changed image needs a new security disposition first.
+reachability to the enrolled MinIO DNS endpoint. As with Dashboard administration, the owner reads
+the exact platform administrator Secret from Kubernetes only in process memory, supplies the
+credential to the child process environment rather than arguments, and sends owned workload Secret
+values through Kubernetes API stdin. It reads QA public trust from the target namespace's exact
+`kube-root-ca.crt` ConfigMap into a private temporary mc directory and removes that directory after
+the operation. Do not supply a separate mc configuration or use `MC_INSECURE`. The tools validate
+the selected Tenant configuration Secret and selected/running accepted MinIO digest before resource
+setup. A changed image or administrator source needs a new security disposition first.
 
 All coordinates are required explicitly. For local-dev:
 
@@ -372,7 +375,6 @@ export DOCUMENT_RESOURCE_DB_HOST=local-dev-postgres-document-rw.local-dev-all.sv
 export DOCUMENT_RESOURCE_MINIO_NS=local-dev-minio-document
 export DOCUMENT_RESOURCE_MINIO_ENDPOINT=http://minio.local-dev-minio-document.svc.cluster.local:80
 export DOCUMENT_RESOURCE_JSREPORT_ENDPOINT=http://local-dev-jsreport.local-dev-all.svc.cluster.local:5488
-export DOCUMENT_MINIO_ADMIN_CONFIG=/protected/document-minio/config.json
 make -C services/document-service resource-inspect
 ```
 
@@ -388,7 +390,6 @@ export DOCUMENT_RESOURCE_DB_HOST=qa-postgres-document-rw.qa-data.svc.cluster.loc
 export DOCUMENT_RESOURCE_MINIO_NS=qa-minio-document
 export DOCUMENT_RESOURCE_MINIO_ENDPOINT=https://minio.qa-minio-document.svc.cluster.local:443
 export DOCUMENT_RESOURCE_JSREPORT_ENDPOINT=http://qa-jsreport.qa-svc.svc.cluster.local:5488
-export DOCUMENT_MINIO_ADMIN_CONFIG=/protected/qa-document-minio/config.json
 make -C services/document-service resource-inspect
 ```
 
