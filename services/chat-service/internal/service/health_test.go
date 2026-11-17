@@ -34,7 +34,13 @@ func TestManagementHealthBoundsDependencyCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.SetReady(true)
-	assertHealth(t, health.NewHandler(state), "/readyz", http.StatusServiceUnavailable, "not ready\n")
+	assertHealth(
+		t,
+		health.NewHandler(state),
+		"/readyz",
+		http.StatusServiceUnavailable,
+		"not ready\n",
+	)
 }
 
 func assertHealth(t *testing.T, handler http.Handler, path string, status int, body string) {
@@ -42,6 +48,13 @@ func assertHealth(t *testing.T, handler http.Handler, path string, status int, b
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 	if recorder.Code != status || recorder.Body.String() != body {
-		t.Errorf("%s = (%d, %q), want (%d, %q)", path, recorder.Code, recorder.Body.String(), status, body)
+		t.Errorf(
+			"%s = (%d, %q), want (%d, %q)",
+			path,
+			recorder.Code,
+			recorder.Body.String(),
+			status,
+			body,
+		)
 	}
 }

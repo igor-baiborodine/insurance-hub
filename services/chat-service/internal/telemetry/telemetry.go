@@ -17,12 +17,16 @@ type Provider struct{ *kittelemetry.Provider }
 func New(ctx context.Context, serviceName string, settings config.Telemetry) (*Provider, error) {
 	if settings.Enabled {
 		if serviceName == "" {
-			return nil, errors.New("initialize telemetry: service name must not be empty")
+			return nil, errors.New(
+				"initialize telemetry: service name must not be empty",
+			)
 		}
 		if settings.Identity.ServiceName != serviceName {
 			return nil, errors.New("initialize telemetry: service identity mismatch")
 		}
-		if err := (config.Identity{Identity: settings.Identity}).Validate(true); err != nil {
+		if err := (config.Identity{Identity: settings.Identity}).Validate(
+			true,
+		); err != nil {
 			return nil, errors.New("initialize telemetry: invalid resource identity")
 		}
 	}

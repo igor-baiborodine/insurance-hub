@@ -22,10 +22,20 @@ func TestLoadDefaults(t *testing.T) {
 		t.Errorf("addresses = (%s, %s)", settings.HTTPAddress, settings.HealthAddress)
 	}
 	if settings.ProbeTimeout != 2*time.Second || settings.ShutdownTimeout != 10*time.Second {
-		t.Errorf("lifecycle budgets = (%s, %s)", settings.ProbeTimeout, settings.ShutdownTimeout)
+		t.Errorf(
+			"lifecycle budgets = (%s, %s)",
+			settings.ProbeTimeout,
+			settings.ShutdownTimeout,
+		)
 	}
-	if settings.LogLevel != slog.LevelInfo || settings.Enabled || settings.ExporterTimeout != 2*time.Second {
-		t.Errorf("logging/telemetry defaults = (%s, %t, %s)", settings.LogLevel, settings.Enabled, settings.ExporterTimeout)
+	if settings.LogLevel != slog.LevelInfo || settings.Enabled ||
+		settings.ExporterTimeout != 2*time.Second {
+		t.Errorf(
+			"logging/telemetry defaults = (%s, %t, %s)",
+			settings.LogLevel,
+			settings.Enabled,
+			settings.ExporterTimeout,
+		)
 	}
 	if settings.HTTPMaxHeaderBytes != 16384 || settings.ReadHeaderTimeout != 5*time.Second ||
 		settings.ReadTimeout != 10*time.Second || settings.WriteTimeout != 10*time.Second ||
@@ -41,24 +51,52 @@ func TestLoadRejectsInvalidSettingsWithoutDisclosingValues(t *testing.T) {
 		values  map[string]string
 		setting string
 	}{
-		{"foreign service", map[string]string{kitconfig.EnvServiceName: private}, kitconfig.EnvServiceName},
-		{"colliding listeners", map[string]string{kitconfig.EnvHTTPAddress: "127.0.0.1:8081"}, kitconfig.EnvHealthAddress},
-		{"small header bound", map[string]string{kitconfig.EnvHTTPMaxHeaderBytes: "1023"}, kitconfig.EnvHTTPMaxHeaderBytes},
-		{"header after read", map[string]string{kitconfig.EnvHTTPReadHeaderTimeout: "11s"}, kitconfig.EnvHTTPReadHeaderTimeout},
-		{"read after write", map[string]string{kitconfig.EnvHTTPReadTimeout: "11s"}, kitconfig.EnvHTTPReadTimeout},
-		{"shutdown has no exporter reserve", map[string]string{kitconfig.EnvShutdownTimeout: "2s"}, kitconfig.EnvShutdownTimeout},
+		{
+			"foreign service",
+			map[string]string{kitconfig.EnvServiceName: private},
+			kitconfig.EnvServiceName,
+		},
+		{
+			"colliding listeners",
+			map[string]string{kitconfig.EnvHTTPAddress: "127.0.0.1:8081"},
+			kitconfig.EnvHealthAddress,
+		},
+		{
+			"small header bound",
+			map[string]string{kitconfig.EnvHTTPMaxHeaderBytes: "1023"},
+			kitconfig.EnvHTTPMaxHeaderBytes,
+		},
+		{
+			"header after read",
+			map[string]string{kitconfig.EnvHTTPReadHeaderTimeout: "11s"},
+			kitconfig.EnvHTTPReadHeaderTimeout,
+		},
+		{
+			"read after write",
+			map[string]string{kitconfig.EnvHTTPReadTimeout: "11s"},
+			kitconfig.EnvHTTPReadTimeout,
+		},
+		{
+			"shutdown has no exporter reserve",
+			map[string]string{kitconfig.EnvShutdownTimeout: "2s"},
+			kitconfig.EnvShutdownTimeout,
+		},
 		{"zero version outside development", map[string]string{
 			kitconfig.EnvDeploymentEnvironment: "qa",
 			kitconfig.EnvServiceVersion:        "git-000000000000",
 			kitconfig.EnvServiceInstanceID:     "chat-test",
 		}, kitconfig.EnvServiceVersion},
-		{"unsafe endpoint", map[string]string{
-			kitconfig.EnvOTELEnabled:              "true",
-			kitconfig.EnvDeploymentEnvironment:    "qa",
-			kitconfig.EnvServiceVersion:           "git-000000000001",
-			kitconfig.EnvServiceInstanceID:        "chat-test",
-			kitconfig.EnvOTELExporterOTLPEndpoint: "http://user:" + private + "@127.0.0.1:4317",
-		}, kitconfig.EnvOTELExporterOTLPEndpoint},
+		{
+			"unsafe endpoint",
+			map[string]string{
+				kitconfig.EnvOTELEnabled:              "true",
+				kitconfig.EnvDeploymentEnvironment:    "qa",
+				kitconfig.EnvServiceVersion:           "git-000000000001",
+				kitconfig.EnvServiceInstanceID:        "chat-test",
+				kitconfig.EnvOTELExporterOTLPEndpoint: "http://user:" + private + "@127.0.0.1:4317",
+			},
+			kitconfig.EnvOTELExporterOTLPEndpoint,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

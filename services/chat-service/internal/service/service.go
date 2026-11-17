@@ -71,12 +71,20 @@ func Run(ctx context.Context, settings config.Config, logger *slog.Logger) error
 	return run(ctx, settings, logger, productionDependencies())
 }
 
-func run(ctx context.Context, settings config.Config, logger *slog.Logger, deps dependencies) error {
+func run(
+	ctx context.Context,
+	settings config.Config,
+	logger *slog.Logger,
+	deps dependencies,
+) error {
 	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: initialize telemetry: %w", err)
 	}
-	state, err := deps.newHealth(settings.ProbeTimeout, func(context.Context) error { return nil })
+	state, err := deps.newHealth(
+		settings.ProbeTimeout,
+		func(context.Context) error { return nil },
+	)
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("run service: initialize health: %w", err),

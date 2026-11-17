@@ -46,7 +46,11 @@ func TestRunServesManagementAndExactBusinessNotFound(t *testing.T) {
 		http.StatusNotFound,
 		"404 page not found\n",
 	)
-	request, err := http.NewRequest(http.MethodGet, "http://"+businessAddress+"/ws/chat/main/test", nil)
+	request, err := http.NewRequest(
+		http.MethodGet,
+		"http://"+businessAddress+"/ws/chat/main/test",
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +95,11 @@ func TestRunCleansUpBusinessListenerWhenManagementAcquisitionFails(t *testing.T)
 		t.Fatalf("run error = %v", err)
 	}
 	if listener.closed.Load() != 1 || provider.shutdowns.Load() != 1 {
-		t.Errorf("cleanup = listener %d, telemetry %d", listener.closed.Load(), provider.shutdowns.Load())
+		t.Errorf(
+			"cleanup = listener %d, telemetry %d",
+			listener.closed.Load(),
+			provider.shutdowns.Load(),
+		)
 	}
 }
 
@@ -123,21 +131,32 @@ func TestRunPreservesServeAndCleanupErrorsAndWithdrawsReadiness(t *testing.T) {
 	if state == nil || state.Ready() {
 		t.Errorf("readiness not withdrawn: %v", state)
 	}
-	if business.shutdowns.Load() != 1 || management.shutdowns.Load() != 1 || provider.shutdowns.Load() != 1 {
-		t.Errorf("shutdown counts = (%d, %d, %d)", business.shutdowns.Load(), management.shutdowns.Load(), provider.shutdowns.Load())
+	if business.shutdowns.Load() != 1 || management.shutdowns.Load() != 1 ||
+		provider.shutdowns.Load() != 1 {
+		t.Errorf(
+			"shutdown counts = (%d, %d, %d)",
+			business.shutdowns.Load(),
+			management.shutdowns.Load(),
+			provider.shutdowns.Load(),
+		)
 	}
 }
 
 func TestBusinessHandlerRejectsNewWorkAfterDrain(t *testing.T) {
 	handler := newBusinessHandler()
 	handler.beginDrain()
-	request, err := http.NewRequest(http.MethodGet, "http://chat.invalid/ws/chat/main/test", nil)
+	request, err := http.NewRequest(
+		http.MethodGet,
+		"http://chat.invalid/ws/chat/main/test",
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recorder := &responseRecorder{header: make(http.Header)}
 	handler.ServeHTTP(recorder, request)
-	if recorder.status != http.StatusServiceUnavailable || recorder.body.String() != "service unavailable\n" {
+	if recorder.status != http.StatusServiceUnavailable ||
+		recorder.body.String() != "service unavailable\n" {
 		t.Errorf("response = (%d, %q)", recorder.status, recorder.body.String())
 	}
 }
@@ -161,7 +180,9 @@ func testConfig(t *testing.T) config.Config {
 		ProbeTimeout:       100 * time.Millisecond,
 		ShutdownTimeout:    time.Second,
 		Telemetry: config.Telemetry{
-			Identity:        config.DevelopmentIdentity(config.DefaultServiceName).Identity,
+			Identity: config.DevelopmentIdentity(
+				config.DefaultServiceName,
+			).Identity,
 			ExporterTimeout: 100 * time.Millisecond,
 		},
 	}
@@ -188,7 +209,8 @@ func waitForResponse(t *testing.T, client *http.Client, url string, status int, 
 		if err == nil {
 			actual, readErr := io.ReadAll(response.Body)
 			_ = response.Body.Close()
-			if readErr == nil && response.StatusCode == status && string(actual) == body {
+			if readErr == nil && response.StatusCode == status &&
+				string(actual) == body {
 				return
 			}
 		}
@@ -205,7 +227,13 @@ func assertResponse(t *testing.T, response *http.Response, status int, body stri
 		t.Fatal(err)
 	}
 	if response.StatusCode != status || string(actual) != body {
-		t.Errorf("response = (%d, %q), want (%d, %q)", response.StatusCode, actual, status, body)
+		t.Errorf(
+			"response = (%d, %q), want (%d, %q)",
+			response.StatusCode,
+			actual,
+			status,
+			body,
+		)
 	}
 }
 

@@ -262,7 +262,8 @@ func (identity Identity) Validate(enabled bool) error {
 			)
 		}
 	}
-	if identity.Environment != "development" && !validCanonicalVersion(identity.ServiceVersion) {
+	if identity.Environment != "development" &&
+		!validCanonicalVersion(identity.ServiceVersion) {
 		return kitconfig.Invalid(kitconfig.EnvServiceVersion, canonicalVersionReason)
 	}
 	if enabled && (identity.Environment == "development" ||

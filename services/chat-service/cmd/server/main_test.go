@@ -50,7 +50,9 @@ func TestRunWithPreservesServiceFailure(t *testing.T) {
 	settings := config.Config{
 		ServiceName: config.DefaultServiceName,
 		Telemetry: config.Telemetry{
-			Identity:        config.DevelopmentIdentity(config.DefaultServiceName).Identity,
+			Identity: config.DevelopmentIdentity(
+				config.DefaultServiceName,
+			).Identity,
 			ExporterTimeout: 1,
 		},
 	}
