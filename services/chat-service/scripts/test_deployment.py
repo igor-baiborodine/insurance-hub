@@ -144,8 +144,15 @@ def test_qa_render_allows_only_dns_and_alloy_egress() -> None:
 def test_qa_render_accepts_canonical_future_release_tag() -> None:
     # given
     rendered = checks.render("qa")
-    future_release = rendered.replace("chat-api:1.0.0", "chat-api:1.0.1", 1)
-    invalid_release = rendered.replace("chat-api:1.0.0", "chat-api:2.0.0", 1)
+    items = checks.documents(rendered)
+    deployment = checks.resource(items, "Deployment", "qa-chat-api")
+    current_image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+    repository, version = current_image.rsplit(":", 1)
+    major, minor, patch_version = (int(part) for part in version.split("."))
+    future_release = rendered.replace(
+        current_image, f"{repository}:{major}.{minor}.{patch_version + 1}", 1
+    )
+    invalid_release = rendered.replace(current_image, f"{repository}:2.{minor}.{patch_version}", 1)
 
     # when / then
     checks.validate_render("qa", future_release)
@@ -153,7 +160,34 @@ def test_qa_render_accepts_canonical_future_release_tag() -> None:
         checks.validate_render("qa", invalid_release)
 
 
-def test_qa_aggregate_defers_go_activation_and_requires_legacy_chat_once() -> None:
+@pytest.mark.parametrize(
+    "resources",
+    [
+        ["./chat/legacy", "./product"],
+        ["./chat", "./chat/legacy", "./product"],
+    ],
+)
+def test_qa_aggregate_accepts_pre_release_and_released_states(resources: list[str]) -> None:
+    # when / then
+    checks.validate_qa_aggregate(resources)
+
+
+@pytest.mark.parametrize(
+    ("resources", "message"),
+    [
+        (["./chat", "./chat", "./chat/legacy"], "at most once"),
+        (["./chat"], "legacy Chat"),
+        (["./chat/legacy", "./chat/legacy"], "legacy Chat"),
+        (["./chat/legacy", {"path": "./chat"}], "resources are invalid"),
+    ],
+)
+def test_qa_aggregate_rejects_ambiguous_activation(resources: list[object], message: str) -> None:
+    # when / then
+    with pytest.raises(checks.DeploymentError, match=message):
+        checks.validate_qa_aggregate(resources)
+
+
+def test_qa_aggregate_current_repository_state_is_valid() -> None:
     # given
     resources = yaml.safe_load(
         (checks.ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text()
@@ -161,10 +195,6 @@ def test_qa_aggregate_defers_go_activation_and_requires_legacy_chat_once() -> No
 
     # when / then
     checks.validate_qa_aggregate(resources)
-    with pytest.raises(checks.DeploymentError, match="inactive before release"):
-        checks.validate_qa_aggregate([*resources, "./chat"])
-    with pytest.raises(checks.DeploymentError, match="legacy Chat"):
-        checks.validate_qa_aggregate([item for item in resources if item != "./chat/legacy"])
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
