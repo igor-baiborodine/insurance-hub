@@ -1,0 +1,120 @@
+groups:
+  - interval: 30s
+    name: insurance-hub-chat-service
+    rules:
+      - alert: ChatHandshakeFailureRate
+        annotations:
+          summary: Chat handshake failure rate exceeds the pilot threshold
+          description: More than 10% of at least 20 Chat handshakes failed in five minutes.
+          runbook_action: Split failures by capacity rejection and upgrade failure, then inspect safe correlated logs and traces.
+        expr: >-
+          sum(rate(insurance_hub_chat_handshakes_total{service_name="chat-service",insurance_hub_chat_handshake_outcome=~"capacity_rejected|upgrade_failed"}[5m]))
+          / sum(rate(insurance_hub_chat_handshakes_total{service_name="chat-service"}[5m])) > 0.1
+          and sum(increase(insurance_hub_chat_handshakes_total{service_name="chat-service"}[5m])) >= 20
+        for: 2m
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatBroadcastDeliveryFailure
+        annotations:
+          summary: Chat dropped a room delivery for a slow peer
+          description: At least one bounded Chat delivery queue filled during the last five minutes.
+          runbook_action: Inspect active sessions, queue-full outcomes and slow-peer closes without exposing room, user or message values.
+        expr: >-
+          sum(increase(insurance_hub_chat_broadcast_deliveries_total{service_name="chat-service",insurance_hub_chat_broadcast_outcome="queue_full"}[5m])) > 0
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatSlowPeerCloses
+        annotations:
+          summary: Chat closed a slow WebSocket peer
+          description: At least one Chat connection was closed as a bounded slow-peer outcome in five minutes.
+          runbook_action: Correlate delivery pressure with close outcomes and Pod resources; do not inspect payload or client identity.
+        expr: >-
+          sum(increase(insurance_hub_chat_connection_closes_total{service_name="chat-service",insurance_hub_chat_connection_close_reason="slow_peer"}[5m])) > 0
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatShutdownFailure
+        annotations:
+          summary: Chat reported a shutdown failure
+          description: A Chat listener, connection drain or telemetry shutdown failure occurred in five minutes.
+          runbook_action: Inspect the bounded shutdown log, Pod termination state and rollout identity before retrying replacement.
+        expr: >-
+          sum(increase(insurance_hub_chat_shutdown_failures_total{service_name="chat-service"}[5m])) > 0
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatResourcePressure
+        annotations:
+          summary: Chat Pod resource use exceeds 80 percent of its limit
+          description: Chat memory exceeded 102.4MiB or CPU exceeded 160 millicores.
+          runbook_action: Inspect active sessions, runtime memory, throttling, Pod events and recent rollout changes.
+        expr: >-
+          sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}) > 107374182.4
+          or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}[5m])) > 0.16
+        for: 5m
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatUnavailable
+        annotations:
+          summary: Chat has fewer available replicas than desired
+          description: The QA Chat Deployment has been unavailable or under-replicated for two minutes.
+          runbook_action: Check the Recreate rollout, readiness, image, configuration and Pod events before rollback.
+        expr: >-
+          sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-chat-api"})
+          > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-chat-api"})
+        for: 2m
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatTelemetryMissing
+        annotations:
+          summary: Chat is available but its idle-safe telemetry is missing
+          description: A Chat replica is available, but no active-connection gauge sample arrived for two minutes.
+          runbook_action: Verify Chat telemetry configuration, Alloy receiver and remote-write health; distinguish a present zero from an absent series.
+        expr: >-
+          sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-chat-api"}) > 0
+          and on() absent_over_time(insurance_hub_chat_connections_active{service_name="chat-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+        for: 1m
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatTelemetryDeliveryFailure
+        annotations:
+          summary: The shared Chat telemetry path dropped or failed data
+          description: Alloy reported a Loki drop, Prometheus remote-write failure or OTLP span export failure in five minutes.
+          runbook_action: Identify the failing signal and backend, inspect bounded retry/drop counters and preserve Chat availability.
+        expr: >-
+          sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m])) > 0
+          or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m])) > 0
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatTelemetryBacklog
+        annotations:
+          summary: The shared Chat telemetry path has a sustained backlog
+          description: Remote-write lag exceeded 30 seconds while samples were pending, or an OTLP exporter queue exceeded 80%.
+          runbook_action: Check backend reachability and Alloy queue or WAL metrics, then verify recovery within two minutes.
+        expr: |-
+          (sum(prometheus_remote_storage_samples_pending{job=~".*alloy.*"}) > 0
+            and time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~".*alloy.*"}) or vector(0)) > 30)
+          or sum(otelcol_exporter_queue_size{job=~".*alloy.*"})
+            / clamp_min(sum(otelcol_exporter_queue_capacity{job=~".*alloy.*"}), 1) > 0.8
+        for: 2m
+        labels:
+          service: chat-service
+          severity: warning
+      - alert: ChatUnexpectedRestart
+        annotations:
+          summary: Chat restarted unexpectedly
+          description: A Go Chat container restarted during the last 15 minutes.
+          runbook_action: Inspect prior state, safe lifecycle logs, Pod events, resource pressure and rollout identity.
+        expr: >-
+          sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}[15m])) > 0
+        labels:
+          service: chat-service
+          severity: warning

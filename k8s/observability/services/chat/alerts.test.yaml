@@ -1,0 +1,207 @@
+rule_files:
+  - /fixture/alerts.yaml
+
+evaluation_interval: 30s
+
+tests:
+  - name: handshake failure ratio fires with traffic and recovers
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_chat_handshakes_total{service_name="chat-service",insurance_hub_chat_handshake_outcome="accepted"}'
+        values: '0+8x18 144+10x20'
+      - series: 'insurance_hub_chat_handshakes_total{service_name="chat-service",insurance_hub_chat_handshake_outcome="capacity_rejected"}'
+        values: '0+2x18 36+0x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatHandshakeFailureRate",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatHandshakeFailureRate",alertstate="firing"}) or vector(0)'
+        eval_time: 17m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: handshake failure stays inactive below minimum traffic
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_chat_handshakes_total{service_name="chat-service",insurance_hub_chat_handshake_outcome="accepted"}'
+        values: '0+0.4x20'
+      - series: 'insurance_hub_chat_handshakes_total{service_name="chat-service",insurance_hub_chat_handshake_outcome="upgrade_failed"}'
+        values: '0+0.1x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatHandshakeFailureRate",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: healthy idle zero is present and keeps missing telemetry inactive
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-chat-api"}'
+        values: '1x20'
+      - series: 'insurance_hub_chat_connections_active{service_name="chat-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '0x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: available deployment with absent idle series fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-chat-api"}'
+        values: '1x20'
+      - series: 'insurance_hub_chat_connections_active{service_name="chat-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '_x10 0x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unavailable deployment fires independently and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-chat-api"}'
+        values: '1x20'
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-chat-api"}'
+        values: '0x10 1x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'count(ALERTS{alertname="ChatUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: chat bounded failures fire and age out
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_chat_broadcast_deliveries_total{service_name="chat-service",insurance_hub_chat_broadcast_outcome="queue_full"}'
+        values: '0+1x4 4+0x20'
+      - series: 'insurance_hub_chat_connection_closes_total{service_name="chat-service",insurance_hub_chat_connection_close_reason="slow_peer"}'
+        values: '0+1x4 4+0x20'
+      - series: 'insurance_hub_chat_shutdown_failures_total{service_name="chat-service"}'
+        values: '0+1x4 4+0x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"ChatBroadcastDeliveryFailure|ChatSlowPeerCloses|ChatShutdownFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 3
+      - expr: 'count(ALERTS{alertname=~"ChatBroadcastDeliveryFailure|ChatSlowPeerCloses|ChatShutdownFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: memory pressure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="qa-svc",pod="qa-chat-api-fixture",container="chat-api"}'
+        values: '110000000x14 50000000x10'
+      - series: 'container_cpu_usage_seconds_total{namespace="qa-svc",pod="qa-chat-api-fixture",container="chat-api"}'
+        values: '0+0.01x24'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry delivery failure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_failed_total{job="qa-alloy"}'
+        values: '0+1x10 10+0x24'
+      - series: 'loki_write_dropped_entries_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'prometheus_remote_storage_samples_dropped_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'otelcol_exporter_send_failed_spans_total{job="qa-alloy"}'
+        values: '0+0x34'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry backlog fires on lag and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_pending{job="qa-alloy"}'
+        values: '1x10 0x12'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_size{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_capacity{job="qa-alloy"}'
+        values: '2048x22'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: absent exporter series do not fabricate delivery alerts
+    interval: 30s
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"ChatTelemetryDeliveryFailure|ChatTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unexpected restart fires and ages out
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="qa-svc",pod="qa-chat-api-fixture",container="chat-api"}'
+        values: '0+1x4 4+0x42'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="ChatUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="ChatUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 20m
+        exp_samples:
+          - labels: '{}'
+            value: 0

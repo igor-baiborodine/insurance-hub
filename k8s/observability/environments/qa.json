@@ -5,6 +5,18 @@
   "prometheus_release": "qa-prometheus",
   "prometheus_values_path": "overlays/qa/infra/prometheus/values.yaml",
   "service_verification": {
+    "chat": {
+      "business_service": "qa-chat-api",
+      "deployment": "qa-chat-api",
+      "flux_kustomization": "qa-svc",
+      "flux_namespace": "flux-system",
+      "flux_source": "insurance-hub",
+      "loki_service": "qa-loki",
+      "management_service": "qa-chat-api-management",
+      "prometheus_service": "qa-prometheus-kube-prometh-prometheus",
+      "service_namespace": "qa-svc",
+      "tempo_service": "qa-tempo"
+    },
     "dashboard": {
       "business_service": "qa-dashboard-api",
       "deployment": "qa-dashboard-api",

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "decision": "issue-390-chat-observability",
+  "status": "specified",
+  "evidence": {
+    "basis": "Issue 390 bounded Chat transport and deployment contracts",
+    "limitation": "These warning thresholds support source and disposable validation. They are not production SLOs, load capacity evidence or shared-environment qualification."
+  },
+  "resource_budget": {
+    "cpu_limit_cores": 0.2,
+    "memory_limit_bytes": 134217728,
+    "cpu_alert_cores": 0.16,
+    "memory_alert_bytes": 107374182.4
+  },
+  "rules": {
+    "handshake_failure_ratio": 0.1,
+    "handshake_minimum_attempts": 20,
+    "failure_window": "5m",
+    "telemetry_absence_window": "2m",
+    "telemetry_recovery_for": "1m",
+    "remote_write_lag_seconds": 30,
+    "exporter_queue_ratio": 0.8,
+    "restart_window": "15m"
+  },
+  "delivery": {
+    "metric_export_interval_seconds": 10,
+    "rule_evaluation_interval_seconds": 30,
+    "expected_signal_seconds": 30,
+    "expected_recovery_seconds": 120
+  }
+}

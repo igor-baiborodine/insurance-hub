@@ -340,8 +340,8 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         for line in metric_transform.splitlines()
         if "keep_matching_keys(attributes" in line and "metric.name" in line
     ]
-    if len(metric_dimension_allowlists) != 10:
-        raise ValidationError("shared Go metric policy must contain ten dimension allowlists")
+    if len(metric_dimension_allowlists) != 14:
+        raise ValidationError("shared Go metric policy must contain fourteen dimension allowlists")
     if any(
         'resource.attributes["insurance_hub.service.implementation"] == "go"' not in line
         for line in metric_dimension_allowlists
@@ -349,7 +349,7 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         raise ValidationError("metric datapoint allowlists must remain Go-service scoped")
     if re.search(r"insurance_hub\\\\\.[a-z0-9_]+", metric_transform):
         raise ValidationError("shared Go metric policy must not encode one service namespace")
-    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 10:
+    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 14:
         raise ValidationError(
             "metric policy must bind instruments and dimensions to service domain"
         )
@@ -640,6 +640,7 @@ def sanitize_go_span(service_domain: str, attributes: Mapping[str, object]) -> d
         f"insurance_hub.{service_domain}.dependency",
         f"insurance_hub.{service_domain}.stage",
         f"insurance_hub.{service_domain}.lookup.outcome",
+        f"insurance_hub.{service_domain}.handshake.outcome",
     }
     allowed = set(COMMON_SPAN_ATTRIBUTES) | service_attributes
     return {key: value for key, value in attributes.items() if key in allowed}
@@ -706,6 +707,23 @@ def sanitize_datapoint(
             f"{application_prefix}.operation",
             f"{application_prefix}.lookup.outcome",
         )
+    elif metric_name in {
+        f"{application_prefix}.handshakes",
+        f"{application_prefix}.handshake.duration",
+    }:
+        dimensions = (f"{application_prefix}.handshake.outcome",)
+    elif metric_name == f"{application_prefix}.broadcast.deliveries":
+        dimensions = (
+            f"{application_prefix}.broadcast.event",
+            f"{application_prefix}.broadcast.outcome",
+        )
+    elif metric_name == f"{application_prefix}.connection.closes":
+        dimensions = (f"{application_prefix}.connection.close.reason",)
+    elif metric_name in {
+        f"{application_prefix}.connections.active",
+        f"{application_prefix}.shutdown.failures",
+    }:
+        dimensions = ()
     elif metric_name == "db.client.operation.duration":
         dimensions = (
             f"{application_prefix}.operation",

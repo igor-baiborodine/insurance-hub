@@ -38,6 +38,7 @@ SERVICE_TRACE_ID = "13513513513513513513513513513515"
 SYNTHETIC_TRACE_ID = "51515151515151515151515151515151"
 JAVA_TRACE_ID = "42424242424242424242424242424242"
 DOCUMENT_SENSITIVE_SENTINEL = "SENTINEL-document-observability-private"
+CHAT_SENSITIVE_SENTINEL = "SENTINEL-chat-observability-private"
 
 METRIC_IDENTITY = {
     "service_namespace": "insurance-hub",
@@ -1039,6 +1040,7 @@ def validate_database_pool_and_runtime_metrics(
 
 def validate_runtime_metrics(service_domain: str, prometheus_port: int) -> None:
     service_name = f"{service_domain}-service"
+    memory_limit_mib = 96 if service_domain == "chat" else 256
     runtime_metrics = {
         "go_memory_used_bytes": [
             {"go_memory_type": "stack"},
@@ -1057,9 +1059,10 @@ def validate_runtime_metrics(service_domain: str, prometheus_port: int) -> None:
         values = [float(result["value"][1]) for result in results]
         if any(value < 0 for value in values):
             raise HarnessError(f"{metric_name} contains a negative runtime value")
-        if metric_name == "go_memory_limit_bytes" and values != [256 * 1024 * 1024]:
+        if metric_name == "go_memory_limit_bytes" and values != [memory_limit_mib * 1024 * 1024]:
             raise HarnessError(
-                f"{metric_name} is {values}, expected the probe's 256MiB limit in bytes"
+                f"{metric_name} is {values}, expected the probe's "
+                f"{memory_limit_mib}MiB limit in bytes"
             )
 
 
@@ -1315,6 +1318,87 @@ def validate_document_metrics(prometheus_port: int) -> None:
     validate_runtime_metrics("document", prometheus_port)
 
 
+def validate_chat_metrics(prometheus_port: int) -> None:
+    service_name = "chat-service"
+    prefix = "insurance_hub_chat_"
+    inventory_response = wait_json(
+        f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
+        + urllib.parse.urlencode({"query": f'{{service_name="{service_name}"}}'}),
+        lambda value: len(query_results(value)) > 0,
+        "Chat metric inventory",
+    )
+    inventory = sorted(
+        {
+            result.get("metric", {}).get("__name__", "")
+            for result in query_results(inventory_response)
+        }
+    )
+    print(f"Chat metric inventory: {inventory}")
+    if f"{prefix}connections_active" not in inventory:
+        raise HarnessError("Chat active-connection gauge is absent from the metric inventory")
+    active = metric_series(
+        prometheus_port,
+        f"{prefix}connections_active",
+        service_name,
+        [{}],
+    )
+    if float(active[0]["value"][1]) != 0:
+        raise HarnessError("Chat active-connection gauge did not return to healthy idle zero")
+
+    handshake_dimensions = [
+        {f"{prefix}handshake_outcome": outcome}
+        for outcome in ("accepted", "capacity_rejected", "upgrade_failed")
+    ]
+    handshakes = metric_series(
+        prometheus_port,
+        f"{prefix}handshakes_total",
+        service_name,
+        handshake_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in handshakes):
+        raise HarnessError("Chat handshake counters are not exactly one each")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}handshake_duration_seconds",
+        service_name,
+        handshake_dimensions,
+    )
+
+    delivery_dimensions = [
+        {f"{prefix}broadcast_event": event, f"{prefix}broadcast_outcome": outcome}
+        for event, outcome in (("join", "delivered"), ("message", "queue_full"))
+    ]
+    deliveries = metric_series(
+        prometheus_port,
+        f"{prefix}broadcast_deliveries_total",
+        service_name,
+        delivery_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in deliveries):
+        raise HarnessError("Chat delivery counters are not exactly one each")
+
+    close_dimensions = [
+        {f"{prefix}connection_close_reason": reason} for reason in ("normal", "slow_peer")
+    ]
+    closes = metric_series(
+        prometheus_port,
+        f"{prefix}connection_closes_total",
+        service_name,
+        close_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in closes):
+        raise HarnessError("Chat close counters are not exactly one each")
+    shutdowns = metric_series(
+        prometheus_port,
+        f"{prefix}shutdown_failures_total",
+        service_name,
+        [{}],
+    )
+    if float(shutdowns[0]["value"][1]) != 1:
+        raise HarnessError("Chat shutdown-failure counter is not exactly one")
+    validate_runtime_metrics("chat", prometheus_port)
+
+
 def start_prometheus(harness: DockerHarness, enabled: bool) -> tuple[str, int]:
     arguments = [
         "--config.file=/fixture/prometheus.yml",
@@ -1369,7 +1453,9 @@ def validate_service_backends(
         "document": "find_documents",
         "policy-search": "search",
     }.get(service_domain, "list")
-    if service_domain == "dashboard":
+    if service_domain == "chat":
+        request_dimensions = []
+    elif service_domain == "dashboard":
         request_dimensions = [
             {
                 "insurance_hub_dashboard_operation": operation,
@@ -1393,36 +1479,39 @@ def validate_service_backends(
                 "http_response_status_code": "200",
             }
         ]
-    request_counter = metric_series(
-        prometheus_port,
-        f"insurance_hub_{metric_domain}_requests_total",
-        service_name,
-        request_dimensions,
-    )
-    if any(float(result["value"][1]) != 1 for result in request_counter):
-        raise HarnessError(f"{service_domain} request counters are not exactly one each")
-    if request_histogram_buckets != len(REQUEST_HISTOGRAM_BOUNDS):
-        raise HarnessError(
-            f"{service_domain} request histogram contract has "
-            f"{len(REQUEST_HISTOGRAM_BOUNDS)} buckets, configured proof expects "
-            f"{request_histogram_buckets}"
-        )
-    if service_domain == "dashboard":
-        validate_histogram_inventory(
+    if service_domain != "chat":
+        request_counter = metric_series(
             prometheus_port,
-            f"insurance_hub_{metric_domain}_request_duration_seconds",
+            f"insurance_hub_{metric_domain}_requests_total",
             service_name,
             request_dimensions,
         )
-    else:
-        validate_histogram(
-            prometheus_port,
-            f"insurance_hub_{metric_domain}_request_duration_seconds",
-            service_name,
-            request_dimensions[0],
-            REQUEST_HISTOGRAM_BOUNDS,
-        )
-    if service_domain == "product":
+        if any(float(result["value"][1]) != 1 for result in request_counter):
+            raise HarnessError(f"{service_domain} request counters are not exactly one each")
+        if request_histogram_buckets != len(REQUEST_HISTOGRAM_BOUNDS):
+            raise HarnessError(
+                f"{service_domain} request histogram contract has "
+                f"{len(REQUEST_HISTOGRAM_BOUNDS)} buckets, configured proof expects "
+                f"{request_histogram_buckets}"
+            )
+        if service_domain == "dashboard":
+            validate_histogram_inventory(
+                prometheus_port,
+                f"insurance_hub_{metric_domain}_request_duration_seconds",
+                service_name,
+                request_dimensions,
+            )
+        else:
+            validate_histogram(
+                prometheus_port,
+                f"insurance_hub_{metric_domain}_request_duration_seconds",
+                service_name,
+                request_dimensions[0],
+                REQUEST_HISTOGRAM_BOUNDS,
+            )
+    if service_domain == "chat":
+        validate_chat_metrics(prometheus_port)
+    elif service_domain == "product":
         validate_database_pool_and_runtime_metrics(service_domain, prometheus_port)
     elif service_domain == "dashboard":
         validate_dashboard_metrics(prometheus_port)
@@ -1447,13 +1536,18 @@ def validate_service_backends(
     )
     # Filter the retained JSON body without a query-time parser so the returned
     # stream map contains only stored index labels, not extracted fields.
-    query = f'{{service_name="{service_name}"}} |= "{SERVICE_TRACE_ID}" |= "request completed"'
+    completion_message = (
+        "chat WebSocket handshake completed" if service_domain == "chat" else "request completed"
+    )
+    query = f'{{service_name="{service_name}"}} |= "{SERVICE_TRACE_ID}" |= "{completion_message}"'
     start = int((time.time() - 300) * 1_000_000_000)
     end = int((time.time() + 30) * 1_000_000_000)
     url = f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
         {"query": query, "start": start, "end": end, "limit": 20}
     )
-    expected_completion_logs = 2 if service_domain in {"dashboard", "document"} else 1
+    expected_completion_logs = (
+        3 if service_domain == "chat" else 2 if service_domain in {"dashboard", "document"} else 1
+    )
     logs = wait_json(
         url,
         lambda value: (
@@ -1480,7 +1574,9 @@ def validate_service_backends(
             "end": end,
         }
     )
-    expected_levels = {"INFO", "WARN", "ERROR"} if service_domain == "document" else {"INFO"}
+    expected_levels = (
+        {"INFO", "WARN", "ERROR"} if service_domain in {"chat", "document"} else {"INFO"}
+    )
     series = wait_json(
         series_url,
         lambda value: len(value.get("data", [])) == len(expected_levels),
@@ -1739,8 +1835,11 @@ def execute(args: argparse.Namespace) -> None:
                 root / f"probe-{args.service_domain}-pgid",
                 service_domain=args.service_domain,
             )
-            if DOCUMENT_SENSITIVE_SENTINEL in (root / "service.log").read_text(encoding="utf-8"):
+            service_log = (root / "service.log").read_text(encoding="utf-8")
+            if DOCUMENT_SENSITIVE_SENTINEL in service_log:
                 raise HarnessError("Document probe exposed the synthetic sensitive sentinel")
+            if CHAT_SENSITIVE_SENTINEL in service_log:
+                raise HarnessError("Chat probe exposed the synthetic sensitive sentinel")
             validate_service_backends(
                 args.service_domain,
                 args.request_histogram_buckets,

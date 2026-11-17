@@ -54,6 +54,7 @@ def test_source_policy_registers_each_active_go_service_log_stream() -> None:
     alloy_check.validate_service_log_registrations(config)
     alloy_check.validate_service_log_deployments(config, service_deployments())
     assert 'service_json_logs "dashboard"' in config
+    assert 'service_json_logs "chat"' in config
     assert 'service_json_logs "document"' in config
     assert 'service_json_logs "product"' in config
     assert 'service_json_logs "policy_search"' in config
@@ -251,6 +252,21 @@ class TestMetricPolicy:
                     "insurance_hub.alpha.lookup.outcome": "complete",
                 },
             ),
+            (
+                "insurance_hub.alpha.handshakes",
+                {"insurance_hub.alpha.handshake.outcome": "accepted"},
+            ),
+            (
+                "insurance_hub.alpha.broadcast.deliveries",
+                {
+                    "insurance_hub.alpha.broadcast.event": "message",
+                    "insurance_hub.alpha.broadcast.outcome": "delivered",
+                },
+            ),
+            (
+                "insurance_hub.alpha.connection.closes",
+                {"insurance_hub.alpha.connection.close.reason": "slow_peer"},
+            ),
         ),
     )
     def test_event_and_dependency_metrics_keep_bounded_dimensions(
@@ -351,6 +367,7 @@ class TestSpanPolicy:
                 "insurance_hub.alpha.dependency": "elasticsearch",
                 "insurance_hub.alpha.stage": "projection",
                 "insurance_hub.alpha.lookup.outcome": "complete",
+                "insurance_hub.alpha.handshake.outcome": "accepted",
                 "insurance_hub.alpha.outcome": "success",
                 "policy_number": "forbidden",
                 "customer_id": "forbidden",
@@ -361,6 +378,7 @@ class TestSpanPolicy:
             "insurance_hub.alpha.dependency": "elasticsearch",
             "insurance_hub.alpha.stage": "projection",
             "insurance_hub.alpha.lookup.outcome": "complete",
+            "insurance_hub.alpha.handshake.outcome": "accepted",
             "insurance_hub.alpha.outcome": "success",
         } == attributes
 

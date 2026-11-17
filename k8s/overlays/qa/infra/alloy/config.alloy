@@ -225,7 +225,7 @@ otelcol.processor.transform "service_trace_policies" {
       `set(status.message, "") where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
       `set(events, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
       `set(links, nil) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
-      `keep_matching_keys(attributes, Concat(["^(insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|transport|outcome|stage|lookup\\.outcome|database\\.stage|event\\.type|dependency)|http\\.(request\\.method|route|response\\.status_code)|url\\.scheme|network\\.protocol\\.version|rpc\\.(system\\.name|method|response\\.status_code)|db\\.(system\\.name|namespace|collection\\.name|operation\\.name|query\\.summary)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
+      `keep_matching_keys(attributes, Concat(["^(insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|transport|outcome|stage|lookup\\.outcome|database\\.stage|event\\.type|dependency|handshake\\.outcome)|http\\.(request\\.method|route|response\\.status_code)|url\\.scheme|network\\.protocol\\.version|rpc\\.(system\\.name|method|response\\.status_code)|db\\.(system\\.name|namespace|collection\\.name|operation\\.name|query\\.summary)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc"`,
     ]
   }
 
@@ -251,7 +251,7 @@ otelcol.processor.filter "service_metric_policies" {
   metric_conditions {
     context    = "metric"
     conditions = [
-      `resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc" and not (IsMatch(name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(requests|request\\.duration|database\\.operations|events|event\\.duration|event\\.commit\\.failures|event\\.worker\\.(enabled|in_flight_age|failed)|lookup\\.results|dependencies|dependency\\.duration)$"], "")) or IsMatch(name, "^(db\\.client\\.(operation\\.duration|connection\\.(count|max|timeouts|wait_time))|go\\.(memory\\.(used|limit|allocated|allocations|gc\\.(goal|cycles))|goroutine\\.count|processor\\.limit))$"))`,
+      `resource.attributes["insurance_hub.service.implementation"] == "go" and resource.attributes["k8s.namespace.name"] == "qa-svc" and not (IsMatch(name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(requests|request\\.duration|database\\.operations|events|event\\.duration|event\\.commit\\.failures|event\\.worker\\.(enabled|in_flight_age|failed)|lookup\\.results|dependencies|dependency\\.duration|connections\\.active|handshakes|handshake\\.duration|broadcast\\.deliveries|connection\\.closes|shutdown\\.failures)$"], "")) or IsMatch(name, "^(db\\.client\\.(operation\\.duration|connection\\.(count|max|timeouts|wait_time))|go\\.(memory\\.(used|limit|allocated|allocations|gc\\.(goal|cycles))|goroutine\\.count|processor\\.limit))$"))`,
     ]
   }
 
@@ -281,6 +281,10 @@ otelcol.processor.transform "service_metric_policies" {
       `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(event\\.type|outcome))$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(events|event\\.duration|event\\.commit\\.failures|event\\.worker\\.(enabled|in_flight_age|failed))$"], ""))`,
       `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(dependency|operation|stage|outcome))$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(dependencies|dependency\\.duration)$"], ""))`,
       `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(operation|lookup\\.outcome))$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.lookup\\.results$"], ""))`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.handshake\\.outcome)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(handshakes|handshake\\.duration)$"], ""))`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.broadcast\\.(event|outcome))$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.broadcast\\.deliveries$"], ""))`,
+      `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.connection\\.close\\.reason)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.connection\\.closes$"], ""))`,
+      `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name)$") where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, Concat(["^insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.(connections\\.active|shutdown\\.failures)$"], ""))`,
       `keep_matching_keys(attributes, Concat(["^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|insurance_hub\\.", resource.attributes["insurance_hub.expected.service.domain"], "\\.operation|db\\.(system\\.name|namespace|collection\\.name|operation\\.name)|error\\.type)$"], "")) where resource.attributes["insurance_hub.service.implementation"] == "go" and metric.name == "db.client.operation.duration"`,
       `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|db\\.client\\.connection\\.(pool\\.name|state))$") where resource.attributes["insurance_hub.service.implementation"] == "go" and metric.name == "db.client.connection.count"`,
       `keep_matching_keys(attributes, "^(service_(name|namespace|version|instance_id|implementation)|deployment_environment_name|k8s_(cluster|namespace)_name|db\\.client\\.connection\\.pool\\.name)$") where resource.attributes["insurance_hub.service.implementation"] == "go" and IsMatch(metric.name, "^db\\.client\\.connection\\.(max|timeouts|wait_time)$")`,
@@ -679,6 +683,16 @@ service_json_logs "dashboard" {
   container_name = "dashboard-api"
   port_name      = "http"
   service_name   = "dashboard-service"
+  max_streams    = 8
+}
+
+// Chat service log policy registration.
+service_json_logs "chat" {
+  targets        = discovery.kubernetes.qa_service_pods.targets
+  workload_name  = "chat-api"
+  container_name = "chat-api"
+  port_name      = "http"
+  service_name   = "chat-service"
   max_streams    = 8
 }
 
