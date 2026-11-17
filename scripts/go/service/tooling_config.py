@@ -112,7 +112,7 @@ class AdministrationConfig:
 @dataclass(frozen=True)
 class ToolingContracts:
     runner: RunnerConfig
-    gateway: GatewayConfig
+    gateway: GatewayConfig | None
     dependencies: tuple[DependencyConfig, ...]
     deployment: DeploymentConfig
     administration: AdministrationConfig
@@ -493,15 +493,22 @@ def _load_contracts(value: object, module_root: Path) -> ToolingContracts:
         "contracts.runner.timeoutSeconds is invalid",
     )
 
-    gateway = value["gateway"]
-    require(isinstance(gateway, dict), "contracts.gateway is invalid")
-    require_keys(gateway, {"generatedPath", "contractPath"}, "contracts.gateway")
-    generated_path = module_file(
-        module_root, gateway["generatedPath"], "contracts.gateway.generatedPath"
-    )
-    contract_path = module_file(
-        module_root, gateway["contractPath"], "contracts.gateway.contractPath"
-    )
+    gateway_value = value["gateway"]
+    gateway = None
+    if gateway_value is not None:
+        require(isinstance(gateway_value, dict), "contracts.gateway is invalid")
+        require_keys(gateway_value, {"generatedPath", "contractPath"}, "contracts.gateway")
+        generated_path = module_file(
+            module_root,
+            gateway_value["generatedPath"],
+            "contracts.gateway.generatedPath",
+        )
+        contract_path = module_file(
+            module_root,
+            gateway_value["contractPath"],
+            "contracts.gateway.contractPath",
+        )
+        gateway = GatewayConfig(generated_path=generated_path, contract_path=contract_path)
 
     dependencies_value = value["dependencies"]
     require(isinstance(dependencies_value, list), "contracts.dependencies must be a list")
@@ -578,7 +585,7 @@ def _load_contracts(value: object, module_root: Path) -> ToolingContracts:
             suite_path=suite_path,
             timeout_seconds=timeout_seconds,
         ),
-        gateway=GatewayConfig(generated_path=generated_path, contract_path=contract_path),
+        gateway=gateway,
         dependencies=tuple(dependencies),
         deployment=DeploymentConfig(port_forward_seconds=port_forward_seconds),
         administration=AdministrationConfig(

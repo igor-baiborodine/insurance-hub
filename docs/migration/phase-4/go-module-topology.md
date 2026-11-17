@@ -21,7 +21,7 @@ inventory, owning Make target, consumers, and CI path agree.
 
 ## Current topology
 
-The repository currently owns six Go modules and no Go workspace.
+The repository currently owns seven Go modules and no Go workspace.
 
 | Directory | Module path | Role and owner | Consumers | Replacements | Supported mode | Owning validation | CI |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -30,7 +30,8 @@ The repository currently owns six Go modules and no Go workspace.
 | `services/policy-search-service` | `github.com/igor-baiborodine/insurance-hub/services/policy-search-service` | Policy Search Echo business service; Policy Search service maintainers | Its current executable, generated Echo contract and support packages | None | Standalone, `GOWORK=off` | `make -C services/policy-search-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
 | `services/dashboard-service` | `github.com/igor-baiborodine/insurance-hub/services/dashboard-service` | Dashboard Echo business service; Dashboard service maintainers | Its current executable, generated Echo contract and support packages | None | Standalone, `GOWORK=off` | `make -C services/dashboard-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
 | `services/document-service` | `github.com/igor-baiborodine/insurance-hub/services/document-service` | Private Document Echo foundation; Document service maintainers | Its current executable, generated Echo contract and support packages | None | Standalone, `GOWORK=off` | `make -C services/document-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
-| `libs/servicekit` | `github.com/igor-baiborodine/insurance-hub/libs/servicekit` | Public runtime infrastructure; Insurance Hub repository maintainers | Product, Policy Search, Dashboard, Document and scaffold | None | Standalone, `GOWORK=off` | `make -C libs/servicekit check-go-pr` | `.github/workflows/go-pr-shared.yml` |
+| `services/chat-service` | `github.com/igor-baiborodine/insurance-hub/services/chat-service` | Behaviorless Chat business foundation; Chat service maintainers | Its current executable, two-listener lifecycle and support packages | None | Standalone, `GOWORK=off` | `make -C services/chat-service check-go-pr` | `.github/workflows/go-pr-mod.yml` |
+| `libs/servicekit` | `github.com/igor-baiborodine/insurance-hub/libs/servicekit` | Public runtime infrastructure; Insurance Hub repository maintainers | Product, Policy Search, Dashboard, Document, Chat and scaffold | None | Standalone, `GOWORK=off` | `make -C libs/servicekit check-go-pr` | `.github/workflows/go-pr-shared.yml` |
 
 The scaffold owns its Protobuf source and generated bindings. It is not a deployed business
 service, shared business model, or independently distributed contract module. Product owns its
@@ -40,6 +41,9 @@ composition and deployment image; it has no Elasticsearch or Kafka dependency in
 Dashboard and Document each own their temporary Echo contract, generated gateway, runtime
 composition and deployment image. Document remains private and has no database, messaging, object
 storage, scan or workflow dependency in this foundation increment.
+Chat owns one business not-found listener, one management listener and bounded lifecycle/image
+interfaces. It deliberately owns no WebSocket, Chat payload, protobuf, generated contract,
+persistence or broker behavior in C01.
 There is no approved cross-module application dependency,
 private-module prerequisite, `go.work`, `go.work.sum`, or filesystem `replace`. The
 `services/example-copy` tree created by `check-copy` is a disposable reuse fixture and is excluded
@@ -64,6 +68,7 @@ make go-product-bootstrap-tools
 make -C services/policy-search-service bootstrap-go-tools
 make -C services/dashboard-service bootstrap-go-tools
 make -C services/document-service bootstrap-go-tools
+make -C services/chat-service bootstrap-go-tools
 make -C libs/servicekit bootstrap-go-tools
 ```
 
@@ -100,9 +105,10 @@ The scaffold and Product `./...` scopes cover all their current packages. Produc
 the bounded PostgreSQL reader, contract tests, the authoritative QA fixture loader, and the tagged
 PostgreSQL harness/reader suites invoked by `test-integration`.
 
-The service and scaffold include the root-owned `scripts/go/module/common.mk`. The shared scripts implement
-tool verification, formatting, dependency reproduction, and exact generated-output drift checks;
-module Makefiles retain their pins and explicit Protobuf, SQL, integration, and run targets. The
+The scaffold and services reuse root-owned scripts under `scripts/go/module/` for the capabilities
+they implement. Their module Makefiles retain pins and explicit transport, generated, SQL,
+integration and run targets. Chat deliberately invokes only the format, dependency and build
+helpers because it owns no Buf/protobuf or generated-contract surface. The
 scaffold copy proof points its disposable service at the repository helper, so the renamed service
 uses the same checked-in implementation as other repository modules. Generated services remain in
 this repository and resolve the root Python declarations, root `.venv/`, and shared Go helper
@@ -175,6 +181,7 @@ make go-product-bootstrap-tools
 make -C services/policy-search-service bootstrap-go-tools
 make -C services/dashboard-service bootstrap-go-tools
 make -C services/document-service bootstrap-go-tools
+make -C services/chat-service bootstrap-go-tools
 make go-modules-check FORMAT_SCOPE=all
 make go-topology-test
 make go-scaffold-test-tooling

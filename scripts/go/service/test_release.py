@@ -375,6 +375,76 @@ def test_document_release_rejects_incomplete_activation_configuration(tmp_path: 
         )
 
 
+def test_chat_release_uses_generic_selection_activation_and_runtime_identity(
+    tmp_path: Path,
+) -> None:
+    # given
+    create_service(tmp_path, "chat", initialization=False)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    flux = catalog["services"]["chat"]["deploymentTargets"]["qa"]["flux"]
+    flux["activationKustomization"] = "k8s/overlays/qa/svc/kustomization.yaml"
+    flux["activationResource"] = "./chat"
+    catalog_path.write_text(json.dumps(catalog))
+    parent = tmp_path / "k8s/overlays/qa/svc/kustomization.yaml"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_text(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\n"
+        "kind: Kustomization\n"
+        "resources:\n"
+        "  - ./product\n"
+    )
+    overlay = tmp_path / "k8s/overlays/qa/svc/chat/kustomization.yaml"
+    overlay.write_text(
+        overlay.read_text()
+        + "configMapGenerator:\n"
+        + "  - name: chat-config\n"
+        + "    literals:\n"
+        + "      - SERVICE_VERSION=git-111111111111\n"
+    )
+
+    # when
+    selected = release.select_service(
+        ["services/chat-service/internal/service/service.go"], tmp_path, REPOSITORY
+    )
+    paths = release.prepare_release(
+        tmp_path, "chat", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST
+    )
+
+    # then
+    assert selected.service == "chat"
+    assert selected.module_path == "services/chat-service"
+    assert selected.registry_image == f"ghcr.io/{REPOSITORY}/chat-api"
+    assert paths == [parent, overlay]
+    assert "newTag: 1.2.3" in overlay.read_text()
+    assert "SERVICE_VERSION=git-6c4669c81d3a" in overlay.read_text()
+    assert yaml.safe_load(parent.read_text())["resources"] == ["./chat", "./product"]
+
+
+@pytest.mark.parametrize("source_commit", ["0" * 40, "0" * 12 + "a" * 28])
+def test_chat_release_rejects_placeholder_runtime_version(
+    tmp_path: Path, source_commit: str
+) -> None:
+    # given
+    create_service(tmp_path, "chat", initialization=False)
+    overlay = tmp_path / "k8s/overlays/qa/svc/chat/kustomization.yaml"
+    overlay.write_text(
+        overlay.read_text()
+        + "configMapGenerator:\n"
+        + "  - name: chat-config\n"
+        + "    literals:\n"
+        + "      - SERVICE_VERSION=git-111111111111\n"
+    )
+    original = overlay.read_text()
+
+    # when / then
+    with pytest.raises(release.ReleaseSelectionError, match="canonical runtime version"):
+        release.prepare_release(tmp_path, "chat", REPOSITORY, "1.2.3", source_commit, IMAGE_DIGEST)
+
+    # then
+    assert overlay.read_text() == original
+
+
 def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "policy-search")

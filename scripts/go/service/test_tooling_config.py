@@ -143,6 +143,22 @@ def test_load_version_two_contracts(tmp_path: Path) -> None:
     assert config.contracts.administration.secret_environment == ("ADMIN_PASSWORD",)
 
 
+def test_load_version_two_without_gateway_contract(tmp_path: Path) -> None:
+    # given
+    module = configured_module(tmp_path)
+    data = version_two_configuration(module)
+    data["contracts"]["gateway"] = None  # type: ignore[index]
+    path = module / "go-service-tooling.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    # when
+    config = load_tooling_config(path, repository_root=tmp_path)
+
+    # then
+    assert config.contracts is not None
+    assert config.contracts.gateway is None
+
+
 def test_load_version_two_rejects_legacy_image_tag_prefix(tmp_path: Path) -> None:
     # given
     module = configured_module(tmp_path)

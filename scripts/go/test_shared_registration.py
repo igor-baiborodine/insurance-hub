@@ -317,8 +317,11 @@ def test_complete_diff_rejects_multiple_services_or_unknown_ownership(
 
 
 def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None:
+    # given
     fixture_tree(tmp_path / "base")
     fixture_tree(tmp_path / "head")
+
+    # when
     result = registration.plan_trees(
         tmp_path / "base",
         tmp_path / "head",
@@ -327,6 +330,8 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         "b" * 40,
         "a" * 40,
     )
+
+    # then
     assert {r["module"] for r in result["obligations"]} == {
         DIRECTORY,
         "templates/go-service",
@@ -334,6 +339,7 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         "services/policy-search-service",
         "services/dashboard-service",
         "services/document-service",
+        "services/chat-service",
     }
 
 

@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "service": "chat",
+  "modulePath": "services/chat-service",
+  "image": {
+    "name": "insurance-hub-chat-api",
+    "title": "Insurance Hub Chat API",
+    "entrypoint": [
+      "/chat-service"
+    ],
+    "user": "65532:65532",
+    "platform": "linux/amd64",
+    "lifecycle": {
+      "containerPort": 8081,
+      "path": "/livez",
+      "expectedBody": "live\n",
+      "environment": {
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "HEALTH_ADDR": "0.0.0.0:8081"
+      },
+      "stopSeconds": 10
+    }
+  },
+  "candidate": {
+    "copyPaths": [
+      "cmd",
+      "internal"
+    ],
+    "excludePaths": [],
+    "phaseTargets": {
+      "generated": [
+        "candidate-generated-inapplicable"
+      ],
+      "breaking": [
+        "candidate-breaking-inapplicable"
+      ],
+      "integration": [
+        "test-integration"
+      ],
+      "copy": [
+        "candidate-copy-inapplicable"
+      ]
+    },
+    "imageCheckTarget": "_image-check-existing"
+  },
+  "dockerfile": {
+    "sourceCopies": [
+      {
+        "source": "cmd",
+        "destination": "./cmd"
+      },
+      {
+        "source": "internal",
+        "destination": "./internal"
+      }
+    ],
+    "buildOutputs": [
+      {
+        "package": "./cmd/server",
+        "output": "/out/chat-service",
+        "destination": "/chat-service",
+        "mode": "0555"
+      }
+    ],
+    "runtimeCopies": [],
+    "ports": [
+      8080,
+      8081
+    ]
+  },
+  "contracts": {
+    "runner": {
+      "target": "test-tooling",
+      "suitePath": "scripts/test_tooling.py",
+      "timeoutSeconds": 3600
+    },
+    "gateway": null,
+    "dependencies": [],
+    "deployment": {
+      "portForwardSeconds": 30
+    },
+    "administration": {
+      "transports": [],
+      "secretEnvironment": []
+    }
+  }
+}

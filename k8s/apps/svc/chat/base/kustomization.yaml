@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: chat-api
+      app.kubernetes.io/part-of: insurance-hub
+      app.kubernetes.io/managed-by: kustomize
+resources:
+  - deployment.yaml
+  - service.yaml
+  - management-service.yaml
+  - network-policy.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: chat-config
+    literals:
+      - SERVICE_NAME=chat-service
+      - HTTP_ADDR=0.0.0.0:8080
+      - HEALTH_ADDR=0.0.0.0:8081
+      - HTTP_READ_HEADER_TIMEOUT=5s
+      - HTTP_READ_TIMEOUT=10s
+      - HTTP_WRITE_TIMEOUT=10s
+      - HTTP_IDLE_TIMEOUT=30s
+      - HTTP_MAX_HEADER_BYTES=16384
+      - PROBE_TIMEOUT=2s
+      - SHUTDOWN_TIMEOUT=10s
+      - LOG_LEVEL=info
+      - OTEL_ENABLED=false
+      - OTEL_EXPORTER_OTLP_TIMEOUT=2s
+      - DEPLOYMENT_ENVIRONMENT=unconfigured
+      - SERVICE_VERSION=git-000000000000
