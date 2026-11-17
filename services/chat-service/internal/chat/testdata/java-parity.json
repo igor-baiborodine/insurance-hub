@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "oracle": "legacy Java ChatWebSocket",
+  "setupSilenceVerified": [
+    "alice-main-open",
+    "carol-other-open"
+  ],
+  "sessions": [
+    {
+      "id": "alice-main",
+      "topic": "main",
+      "username": "alice"
+    },
+    {
+      "id": "bob-main",
+      "topic": "Main",
+      "username": "bob"
+    },
+    {
+      "id": "carol-other",
+      "topic": "other",
+      "username": "carol"
+    }
+  ],
+  "cases": [
+    {
+      "id": "CHAT-JOIN-01",
+      "action": {
+        "kind": "open",
+        "sessionId": "bob-main"
+      },
+      "deliveries": [
+        {
+          "recipientSessionId": "alice-main",
+          "messageType": "text",
+          "payloadBase64": "PHA+W2JvYl0gSm9pbmVkITwvcD4=",
+          "payloadUtf8": "\u003cp\u003e[bob] Joined!\u003c/p\u003e",
+          "payloadSha256": "91ec329facddaa2c37f22cca0d75911724450d6ea24f85b664a737f6828526ac"
+        }
+      ],
+      "silentSessionIds": [
+        "bob-main",
+        "carol-other"
+      ]
+    },
+    {
+      "id": "CHAT-MESSAGE-01",
+      "action": {
+        "kind": "text-message",
+        "sessionId": "bob-main",
+        "payloadBase64": "PHNwYW4gZGF0YS1jaGF0LXBhcml0eT0idHJ1ZSI+aGVsbG88L3NwYW4+",
+        "payloadUtf8": "\u003cspan data-chat-parity=\"true\"\u003ehello\u003c/span\u003e"
+      },
+      "deliveries": [
+        {
+          "recipientSessionId": "alice-main",
+          "messageType": "text",
+          "payloadBase64": "PHNwYW4gZGF0YS1jaGF0LXBhcml0eT0idHJ1ZSI+aGVsbG88L3NwYW4+",
+          "payloadUtf8": "\u003cspan data-chat-parity=\"true\"\u003ehello\u003c/span\u003e",
+          "payloadSha256": "3fdc3440f7642f3781bddcf8b3a541b84f979d57e0796639c591d66f9ca652ca"
+        }
+      ],
+      "silentSessionIds": [
+        "bob-main",
+        "carol-other"
+      ]
+    },
+    {
+      "id": "CHAT-EMPTY-MESSAGE-01",
+      "action": {
+        "kind": "text-message",
+        "sessionId": "bob-main",
+        "payloadBase64": "",
+        "payloadUtf8": ""
+      },
+      "deliveries": [
+        {
+          "recipientSessionId": "alice-main",
+          "messageType": "text",
+          "payloadBase64": "",
+          "payloadUtf8": "",
+          "payloadSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "silentSessionIds": [
+        "bob-main",
+        "carol-other"
+      ]
+    },
+    {
+      "id": "CHAT-CLOSE-01",
+      "action": {
+        "kind": "normal-close",
+        "sessionId": "bob-main"
+      },
+      "deliveries": [
+        {
+          "recipientSessionId": "alice-main",
+          "messageType": "text",
+          "payloadBase64": "PHA+W2JvYl0gRGlzY29ubmVjdGVkITwvcD4=",
+          "payloadUtf8": "\u003cp\u003e[bob] Disconnected!\u003c/p\u003e",
+          "payloadSha256": "0a3cb199c1d3d6785842df5f5c89588d50d16a5665ebfe1543fe9ec1bf90a57b"
+        }
+      ],
+      "silentSessionIds": [
+        "carol-other"
+      ]
+    }
+  ]
+}
