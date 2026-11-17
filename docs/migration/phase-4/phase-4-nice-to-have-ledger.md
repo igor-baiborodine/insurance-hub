@@ -58,6 +58,11 @@
       - [issue-247-N02 Internal builder and runtime base image](#issue-247-n02-internal-builder-and-runtime-base-image)
     - [Issue 288 Exact Dashboard monetary storage](#issue-288-exact-dashboard-monetary-storage)
       - [issue-288-N01 Exact monetary storage and aggregation semantics](#issue-288-n01-exact-monetary-storage-and-aggregation-semantics)
+  - [Sub-epic 4.6 Chat migration to Go](#sub-epic-46-chat-migration-to-go)
+    - [Issue 388 Migrate Chat to Go and retire its Java service](#issue-388-migrate-chat-to-go-and-retire-its-java-service)
+      - [issue-388-N01 Shared fanout and multi-replica ordering](#issue-388-n01-shared-fanout-and-multi-replica-ordering)
+      - [issue-388-N02 Persistent chat history and retention](#issue-388-n02-persistent-chat-history-and-retention)
+      - [issue-388-N03 Internal gRPC streaming API](#issue-388-n03-internal-grpc-streaming-api)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -1110,6 +1115,87 @@ identifies the authoritative writer, dual-read or cutover sequence, historical-d
 index/template and least-privilege changes, consumer compatibility, rollback and post-cutover
 verification. Elasticsearch's double-based aggregation limits and `scaled_float` rounding/saturation
 are measured rather than assumed away.
+
+## Sub-epic 4.6 Chat migration to Go
+
+Parent: [issue 388](https://github.com/igor-baiborodine/insurance-hub/issues/388).
+The base migration preserves the single-replica, process-local Java Chat behavior exactly. The
+optional capabilities below were identified during issue-388 assessment and remain outside its
+parity-only scope.
+
+### Issue 388 Migrate Chat to Go and retire its Java service
+
+Origin: issue-388 requirements assessment N01–N03, added to this ledger at the user's request on
+2026-11-17. Source IDs are preserved. Recording these entries does not select them for Phase 4.6
+delivery or change the requirement that its Go implementation match Java functionality without
+enhancements.
+
+Source ticket: [issue 388](https://github.com/igor-baiborodine/insurance-hub/issues/388).
+
+Local assessment: `ai/artifacts/epic-4.6/issue-388-requirements.md` (ignored local evidence).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-388-N01](#issue-388-n01-shared-fanout-and-multi-replica-ordering) | Shared fanout and multi-replica ordering | Deferred | Unassigned; requires a concrete availability or capacity need |
+| [issue-388-N02](#issue-388-n02-persistent-chat-history-and-retention) | Persistent chat history and retention | Deferred | Unassigned; requires a product need and data policy |
+| [issue-388-N03](#issue-388-n03-internal-grpc-streaming-api) | Internal gRPC streaming API | Deferred | Unassigned; requires a named caller and approved contract |
+
+#### issue-388-N01 Shared fanout and multi-replica ordering
+
+**Requirement:** Add a shared fanout mechanism and an explicit cross-replica ordering/delivery
+contract when Chat must run more than one active replica. Preserve case-insensitive room identity,
+sender exclusion and the selected join/message/disconnect representation across replicas. Define
+broker or transport ownership, bounded buffering, failure/reconnect behavior and rollout from the
+process-local implementation.
+
+**Why deferred:** The Java workload and the parity-only Go migration use one active replica with
+process-local rooms. A shared fanout dependency would add state, failure modes and delivery
+semantics without a current functional or measured capacity requirement.
+
+**Reconsider when:** An accepted availability, maintenance or measured capacity objective requires
+more than one active Chat replica.
+
+**Acceptance evidence:** At least two active replicas pass independently specified room-isolation,
+sender-exclusion, ordering, duplicate/loss, slow-consumer, replica-failure and reconnect scenarios
+without relying on session affinity. Deployment, readiness, observability and recovery evidence
+identify the shared fanout owner and prove that a partial outage does not silently split rooms.
+
+#### issue-388-N02 Persistent chat history and retention
+
+**Requirement:** Add persistent Chat history only with an approved user experience, data model,
+authorization, retention/deletion policy and retrieval contract. Define message identity, ordering,
+storage ownership, limits and treatment of existing live-only sessions.
+
+**Why deferred:** The Java service has no inspected database or history endpoint, and Phase 4.6 is
+an exact functional migration. Persistence would introduce durable personal data and new product,
+privacy, storage and operational behavior.
+
+**Reconsider when:** A product owner identifies a concrete history use case and approves who may
+read/delete messages, how long they are retained and which clients consume them.
+
+**Acceptance evidence:** Independent fixtures and access tests prove authorized bounded history,
+ordering, pagination or other selected limits, retention expiry, deletion and denied cross-user or
+cross-room access. Migration, backup/recovery, telemetry redaction and operating ownership are
+accepted without changing live delivery implicitly.
+
+#### issue-388-N03 Internal gRPC streaming API
+
+**Requirement:** Introduce a versioned internal gRPC streaming API only for a named caller with an
+approved framing, identity, authorization, ordering, cancellation, backpressure and error contract.
+Keep its business behavior consistent with the selected Chat model without forcing the browser
+WebSocket through a loopback RPC solely for code reuse.
+
+**Why deferred:** No internal stream caller exists. The browser WebSocket is the complete current
+business boundary, so adding protobuf, gRPC and another transport would expand rather than migrate
+the Java service.
+
+**Reconsider when:** A concrete internal consumer cannot use the WebSocket boundary and supplies
+observable requirements that justify a streaming contract.
+
+**Acceptance evidence:** The receiving ticket names the caller and contract owner. Generated-code,
+wire-compatibility and real-stream tests cover framing, cancellation, backpressure, status mapping,
+authorization and lifecycle, while browser WebSocket parity remains intact. Deployment and
+telemetry evidence distinguish the two transports and show no unapproved direct access.
 
 ## Ad hoc repository improvements
 
