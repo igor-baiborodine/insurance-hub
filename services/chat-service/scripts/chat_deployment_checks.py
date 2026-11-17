@@ -609,13 +609,13 @@ def _http(url: str) -> tuple[int, bytes]:
 def validate_deployed_responses(
     liveness: tuple[int, bytes],
     readiness: tuple[int, bytes],
-    business: tuple[int, bytes],
+    non_upgrade: tuple[int, bytes],
+    wrong_path: tuple[int, bytes],
 ) -> None:
     require(liveness == (200, b"live\n"), "deployed liveness contract differs")
     require(readiness == (200, b"ready\n"), "deployed readiness contract differs")
-    require(
-        business == (404, b"404 page not found\n"), "deployed business not-found contract differs"
-    )
+    require(non_upgrade[0] == 400, "deployed non-upgrade Chat contract differs")
+    require(wrong_path == (404, b"404 page not found\n"), "deployed wrong-path contract differs")
 
 
 def wait_for_readiness(url: str, timeout_seconds: float = 20, retry_seconds: float = 0.2) -> None:
@@ -662,6 +662,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
             _http(f"http://127.0.0.1:{management_port}/livez"),
             _http(f"http://127.0.0.1:{management_port}/readyz"),
             _http(f"http://127.0.0.1:{business_port}/ws/chat/main/test"),
+            _http(f"http://127.0.0.1:{business_port}/ws/chat/main"),
         )
 
 

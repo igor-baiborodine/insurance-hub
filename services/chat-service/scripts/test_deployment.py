@@ -75,6 +75,10 @@ def test_check_cli_rejects_invalid_usage_with_status_2(
     [
         (lambda value: value.replace("replicas: 1", "replicas: 2", 1), "rollout settings"),
         (
+            lambda value: value.replace("type: Recreate", "type: RollingUpdate", 1),
+            "rollout settings",
+        ),
+        (
             lambda value: value.replace(
                 "- containerPort: 8081\n          name: management",
                 "- containerPort: 9090\n          name: grpc\n          protocol: TCP\n"

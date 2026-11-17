@@ -142,22 +142,57 @@ def test_delete_namespace_rejects_foreign_resource(monkeypatch: pytest.MonkeyPat
     assert command.call_count == 1
 
 
+def test_deployed_response_contract_accepts_chat_boundaries() -> None:
+    checks.validate_deployed_responses(
+        (200, b"live\n"),
+        (200, b"ready\n"),
+        (400, b"bad request\n"),
+        (404, b"404 page not found\n"),
+    )
+
+
 @pytest.mark.parametrize(
-    ("liveness", "readiness", "business", "message"),
+    ("liveness", "readiness", "non_upgrade", "wrong_path", "message"),
     [
-        ((503, b"not live\n"), (200, b"ready\n"), (404, b"404 page not found\n"), "liveness"),
-        ((200, b"live\n"), (503, b"not ready\n"), (404, b"404 page not found\n"), "readiness"),
-        ((200, b"live\n"), (200, b"ready\n"), (200, b"unexpected\n"), "business"),
+        (
+            (503, b"not live\n"),
+            (200, b"ready\n"),
+            (400, b"bad request\n"),
+            (404, b"404 page not found\n"),
+            "liveness",
+        ),
+        (
+            (200, b"live\n"),
+            (503, b"not ready\n"),
+            (400, b"bad request\n"),
+            (404, b"404 page not found\n"),
+            "readiness",
+        ),
+        (
+            (200, b"live\n"),
+            (200, b"ready\n"),
+            (200, b"unexpected\n"),
+            (404, b"404 page not found\n"),
+            "non-upgrade",
+        ),
+        (
+            (200, b"live\n"),
+            (200, b"ready\n"),
+            (400, b"bad request\n"),
+            (200, b"unexpected\n"),
+            "wrong-path",
+        ),
     ],
 )
 def test_deployed_response_contract_rejects_changed_response(
     liveness: tuple[int, bytes],
     readiness: tuple[int, bytes],
-    business: tuple[int, bytes],
+    non_upgrade: tuple[int, bytes],
+    wrong_path: tuple[int, bytes],
     message: str,
 ) -> None:
     # given
-    responses = (liveness, readiness, business)
+    responses = (liveness, readiness, non_upgrade, wrong_path)
 
     # when / then
     with pytest.raises(checks.DeploymentError, match=message):

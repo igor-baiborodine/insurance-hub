@@ -14,8 +14,10 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
+	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/chat"
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/telemetry"
+	chatwebsocket "github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/websocket"
 )
 
 type telemetryProvider interface {
@@ -29,17 +31,23 @@ type ownedServer interface {
 }
 
 type connectionLifecycle interface {
+	Register(TrackedConnection) error
+	Unregister(TrackedConnection)
 	BeginDrain()
 	Drain(context.Context) error
 }
 
+type chatLifecycle interface{ BeginDrain() }
+
 type dependencies struct {
-	newTelemetry  func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newHealth     func(time.Duration, health.Check) (*health.State, error)
-	newRegistry   func() connectionLifecycle
-	listen        func(string, string) (net.Listener, error)
-	newBusiness   func(http.Handler, config.Config) ownedServer
-	newManagement func(*health.State) ownedServer
+	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
+	newHealth      func(time.Duration, health.Check) (*health.State, error)
+	newRegistry    func() connectionLifecycle
+	newHub         func(int) (*chat.Hub, error)
+	newChatHandler func(*chat.Hub, config.WebSocketSettings, chatwebsocket.Lifecycle) (http.Handler, error)
+	listen         func(string, string) (net.Listener, error)
+	newBusiness    func(http.Handler, config.Config) ownedServer
+	newManagement  func(*health.State) ownedServer
 }
 
 func productionDependencies() dependencies {
@@ -53,7 +61,15 @@ func productionDependencies() dependencies {
 		},
 		newHealth:   health.NewState,
 		newRegistry: func() connectionLifecycle { return NewConnectionRegistry() },
-		listen:      net.Listen,
+		newHub:      chat.NewHub,
+		newChatHandler: func(
+			hub *chat.Hub,
+			settings config.WebSocketSettings,
+			lifecycle chatwebsocket.Lifecycle,
+		) (http.Handler, error) {
+			return chatwebsocket.NewHandler(hub, settings, lifecycle)
+		},
+		listen: net.Listen,
 		newBusiness: func(handler http.Handler, settings config.Config) ownedServer {
 			return &http.Server{
 				Handler:           handler,
@@ -100,7 +116,32 @@ func run(
 	}
 
 	registry := deps.newRegistry()
-	businessHandler := newBusinessHandler()
+	hub, err := deps.newHub(settings.WebSocket.OutboundQueueSize)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("run service: initialize Chat hub: %w", err),
+			shutdownTelemetry(provider, settings.ExporterTimeout),
+		)
+	}
+	chatHandler, err := deps.newChatHandler(
+		hub,
+		settings.WebSocket,
+		chatwebsocket.Lifecycle{
+			Register: func(connection *chatwebsocket.Connection) error {
+				return registry.Register(connection)
+			},
+			Unregister: func(connection *chatwebsocket.Connection) {
+				registry.Unregister(connection)
+			},
+		},
+	)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("run service: initialize Chat WebSocket handler: %w", err),
+			shutdownTelemetry(provider, settings.ExporterTimeout),
+		)
+	}
+	businessHandler := newBusinessHandler(chatHandler)
 	businessListener, err := deps.listen("tcp", settings.HTTPAddress.String())
 	if err != nil {
 		return errors.Join(
@@ -132,6 +173,7 @@ func run(
 		settings,
 		state,
 		businessHandler,
+		hub,
 		registry,
 		businessServer,
 		managementServer,
@@ -212,9 +254,14 @@ func (listener *startListener) Accept() (net.Conn, error) {
 	return listener.Listener.Accept()
 }
 
-type businessHandler struct{ draining atomic.Bool }
+type businessHandler struct {
+	draining atomic.Bool
+	next     http.Handler
+}
 
-func newBusinessHandler() *businessHandler { return &businessHandler{} }
+func newBusinessHandler(next http.Handler) *businessHandler {
+	return &businessHandler{next: next}
+}
 
 func (handler *businessHandler) beginDrain() { handler.draining.Store(true) }
 
@@ -223,13 +270,14 @@ func (handler *businessHandler) ServeHTTP(writer http.ResponseWriter, request *h
 		http.Error(writer, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.NotFound(writer, request)
+	handler.next.ServeHTTP(writer, request)
 }
 
 func shutdown(
 	settings config.Config,
 	state *health.State,
 	businessHandler *businessHandler,
+	hub chatLifecycle,
 	registry connectionLifecycle,
 	businessServer ownedServer,
 	managementServer ownedServer,
@@ -238,6 +286,7 @@ func shutdown(
 	state.SetReady(false)
 	businessHandler.beginDrain()
 	registry.BeginDrain()
+	hub.BeginDrain()
 	serviceBudget := settings.ShutdownTimeout - settings.ExporterTimeout
 	serviceCtx, cancelService := context.WithTimeout(context.Background(), serviceBudget)
 	defer cancelService()

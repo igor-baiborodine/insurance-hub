@@ -149,7 +149,7 @@ coverage:
 
 test-integration:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
-		-run '^TestRun_ServesManagementAndExactBusinessNotFound$$' \
+		-run '^TestRun_ServesManagementAndExactChatWebSocket$$' \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 build: python-runtime-check
@@ -235,10 +235,10 @@ check-candidate-servicekit:
 	@echo 'check-candidate-servicekit: selected verified candidate directory'
 
 candidate-generated-inapplicable:
-	@echo 'generated phase: inapplicable because Chat C01 owns no generated source or contract'
+	@echo 'generated phase: inapplicable because Chat owns no generated source or contract'
 
 candidate-breaking-inapplicable:
-	@echo 'breaking phase: inapplicable because Chat C01 publishes no protobuf or gateway contract'
+	@echo 'breaking phase: inapplicable because Chat publishes no protobuf or gateway contract'
 
 candidate-copy-inapplicable:
 	@echo 'copy phase: inapplicable because Chat owns its final source and retains provenance only'
