@@ -20,15 +20,30 @@ upgrade attempt to `/ws/chat/main/test`.
 
 ## Architecture and ownership
 
-```text
-cmd/server
-  -> internal/config       typed environment loading and fixed identity
-  -> internal/service      two listeners, health lifecycle and bounded shutdown
-       -> business :8080   standard-library not-found handler
-       -> management :8081 /livez and /readyz
-       -> connection registry (protocol-neutral C02 seam)
-  -> internal/telemetry    Servicekit telemetry provider
+```mermaid
+flowchart LR
+    Main["cmd/server"] -->|"source: loads"| Config["internal/config"]
+    Main -->|"source: calls Run"| Service["internal/service"]
+    Service -->|"source: constructs"| Telemetry["internal/telemetry"]
+    Service -->|"runtime: serves :8080"| Business["business handler"]
+    Service -->|"runtime: serves :8081"| Management["Servicekit management server"]
+    Service -->|"runtime: owns lifecycle"| Registry["connection registry"]
+    Business -->|"runtime: every request"| NotFound["HTTP 404"]
+    Management -->|"runtime: reads"| Health["health state"]
+    Telemetry -->|"source: wraps"| KitTelemetry["Servicekit telemetry"]
 ```
+
+`cmd/server` is the composition root, `internal/config` owns typed environment loading and fixed
+identity, `internal/service` owns both listeners and bounded shutdown, and `internal/telemetry`
+adapts the shared Servicekit telemetry provider. The connection registry is the protocol-neutral
+C02 seam; it does not add a protocol or route in C01.
+
+A representative business request reaches the `:8080` listener, passes the drain guard and then
+uses `http.NotFound`; for example, `/ws/chat/main/test` returns HTTP 404 without performing a
+WebSocket upgrade. A management request to `:8081/readyz` reaches the Servicekit management server
+and reads the lifecycle health state. That state becomes ready only after both listeners start and
+is withdrawn before shutdown begins, so the response is either `200 ready` or `503 not ready`
+according to process lifecycle.
 
 The module depends on the published `libs/servicekit` version in `go.mod`. It has no Go workspace,
 filesystem replacement, template import, sibling-service private import, Java runtime dependency,
