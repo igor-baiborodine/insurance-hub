@@ -28,6 +28,5 @@ configMapGenerator:
       - SHUTDOWN_TIMEOUT=10s
       - LOG_LEVEL=info
       - OTEL_ENABLED=false
-      - OTEL_EXPORTER_OTLP_TIMEOUT=2s
       - DEPLOYMENT_ENVIRONMENT=unconfigured
       - SERVICE_VERSION=git-000000000000

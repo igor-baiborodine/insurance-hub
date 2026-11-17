@@ -106,6 +106,17 @@ def test_render_rejects_replica_port_and_security_mutations(mutation, message: s
         checks.validate_render("local-dev", mutation(rendered))
 
 
+def test_render_requires_the_application_exporter_timeout_default() -> None:
+    # given
+    items = checks.documents(checks.render("local-dev"))
+    config = checks.resource(items, "ConfigMap", "local-dev-chat-config")
+    config["data"]["OTEL_EXPORTER_OTLP_TIMEOUT"] = "2s"
+
+    # when / then
+    with pytest.raises(checks.DeploymentError, match="application default"):
+        checks.validate_render("local-dev", yaml.safe_dump_all(items))
+
+
 def test_render_rejects_placeholder_and_mismatched_versions() -> None:
     # given
     rendered = checks.render("local-dev")
