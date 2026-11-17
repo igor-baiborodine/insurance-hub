@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/chat"
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
@@ -21,7 +23,16 @@ import (
 )
 
 type telemetryProvider interface {
+	MeterProvider() metric.MeterProvider
+	TracerProvider() trace.TracerProvider
 	Shutdown(context.Context) error
+}
+
+type telemetryObserver interface {
+	chat.Observer
+	chatwebsocket.Observer
+	RecordShutdownFailure(context.Context)
+	Close() error
 }
 
 type ownedServer interface {
@@ -41,13 +52,19 @@ type chatLifecycle interface{ BeginDrain() }
 
 type dependencies struct {
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
+	newObserver    func(*slog.Logger, metric.MeterProvider, trace.TracerProvider) (telemetryObserver, error)
 	newHealth      func(time.Duration, health.Check) (*health.State, error)
 	newRegistry    func() connectionLifecycle
-	newHub         func(int) (*chat.Hub, error)
-	newChatHandler func(*chat.Hub, config.WebSocketSettings, chatwebsocket.Lifecycle) (http.Handler, error)
-	listen         func(string, string) (net.Listener, error)
-	newBusiness    func(http.Handler, config.Config) ownedServer
-	newManagement  func(*health.State) ownedServer
+	newHub         func(int, chat.Observer) (*chat.Hub, error)
+	newChatHandler func(
+		*chat.Hub,
+		config.WebSocketSettings,
+		chatwebsocket.Lifecycle,
+		chatwebsocket.Observer,
+	) (http.Handler, error)
+	listen        func(string, string) (net.Listener, error)
+	newBusiness   func(http.Handler, config.Config) ownedServer
+	newManagement func(*health.State) ownedServer
 }
 
 func productionDependencies() dependencies {
@@ -59,6 +76,13 @@ func productionDependencies() dependencies {
 		) (telemetryProvider, error) {
 			return telemetry.New(ctx, serviceName, settings)
 		},
+		newObserver: func(
+			logger *slog.Logger,
+			meterProvider metric.MeterProvider,
+			tracerProvider trace.TracerProvider,
+		) (telemetryObserver, error) {
+			return telemetry.NewObserver(logger, meterProvider, tracerProvider)
+		},
 		newHealth:   health.NewState,
 		newRegistry: func() connectionLifecycle { return NewConnectionRegistry() },
 		newHub:      chat.NewHub,
@@ -66,8 +90,9 @@ func productionDependencies() dependencies {
 			hub *chat.Hub,
 			settings config.WebSocketSettings,
 			lifecycle chatwebsocket.Lifecycle,
+			observer chatwebsocket.Observer,
 		) (http.Handler, error) {
-			return chatwebsocket.NewHandler(hub, settings, lifecycle)
+			return chatwebsocket.NewHandler(hub, settings, lifecycle, observer)
 		},
 		listen: net.Listen,
 		newBusiness: func(handler http.Handler, settings config.Config) ownedServer {
@@ -104,6 +129,17 @@ func run(
 	if err != nil {
 		return fmt.Errorf("run service: initialize telemetry: %w", err)
 	}
+	observer, err := deps.newObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("run service: initialize Chat observer: %w", err),
+			shutdownTelemetry(provider, nil, settings.ExporterTimeout),
+		)
+	}
 	state, err := deps.newHealth(
 		settings.ProbeTimeout,
 		func(context.Context) error { return nil },
@@ -111,16 +147,16 @@ func run(
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("run service: initialize health: %w", err),
-			shutdownTelemetry(provider, settings.ExporterTimeout),
+			shutdownTelemetry(provider, observer, settings.ExporterTimeout),
 		)
 	}
 
 	registry := deps.newRegistry()
-	hub, err := deps.newHub(settings.WebSocket.OutboundQueueSize)
+	hub, err := deps.newHub(settings.WebSocket.OutboundQueueSize, observer)
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("run service: initialize Chat hub: %w", err),
-			shutdownTelemetry(provider, settings.ExporterTimeout),
+			shutdownTelemetry(provider, observer, settings.ExporterTimeout),
 		)
 	}
 	chatHandler, err := deps.newChatHandler(
@@ -134,11 +170,12 @@ func run(
 				registry.Unregister(connection)
 			},
 		},
+		observer,
 	)
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("run service: initialize Chat WebSocket handler: %w", err),
-			shutdownTelemetry(provider, settings.ExporterTimeout),
+			shutdownTelemetry(provider, observer, settings.ExporterTimeout),
 		)
 	}
 	businessHandler := newBusinessHandler(chatHandler)
@@ -146,7 +183,7 @@ func run(
 	if err != nil {
 		return errors.Join(
 			fmt.Errorf("run service: acquire business listener: %w", err),
-			shutdownTelemetry(provider, settings.ExporterTimeout),
+			shutdownTelemetry(provider, observer, settings.ExporterTimeout),
 		)
 	}
 	managementListener, err := deps.listen("tcp", settings.HealthAddress.String())
@@ -154,7 +191,7 @@ func run(
 		return errors.Join(
 			fmt.Errorf("run service: acquire management listener: %w", err),
 			businessListener.Close(),
-			shutdownTelemetry(provider, settings.ExporterTimeout),
+			shutdownTelemetry(provider, observer, settings.ExporterTimeout),
 		)
 	}
 
@@ -178,6 +215,7 @@ func run(
 		businessServer,
 		managementServer,
 		provider,
+		observer,
 	)
 	return errors.Join(cause, cleanup)
 }
@@ -282,6 +320,7 @@ func shutdown(
 	businessServer ownedServer,
 	managementServer ownedServer,
 	provider telemetryProvider,
+	observer telemetryObserver,
 ) error {
 	state.SetReady(false)
 	businessHandler.beginDrain()
@@ -296,7 +335,13 @@ func shutdown(
 		registry.Drain(serviceCtx),
 		shutdownServer(serviceCtx, managementServer),
 	)
-	return errors.Join(serviceErr, shutdownTelemetry(provider, settings.ExporterTimeout))
+	if serviceErr != nil {
+		observer.RecordShutdownFailure(context.Background())
+	}
+	return errors.Join(
+		serviceErr,
+		shutdownTelemetry(provider, observer, settings.ExporterTimeout),
+	)
 }
 
 func shutdownServer(ctx context.Context, server ownedServer) error {
@@ -306,8 +351,17 @@ func shutdownServer(ctx context.Context, server ownedServer) error {
 	return nil
 }
 
-func shutdownTelemetry(provider telemetryProvider, timeout time.Duration) error {
+func shutdownTelemetry(
+	provider telemetryProvider,
+	observer telemetryObserver,
+	timeout time.Duration,
+) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return provider.Shutdown(ctx)
+	providerErr := provider.Shutdown(ctx)
+	var observerErr error
+	if observer != nil {
+		observerErr = observer.Close()
+	}
+	return errors.Join(providerErr, observerErr)
 }

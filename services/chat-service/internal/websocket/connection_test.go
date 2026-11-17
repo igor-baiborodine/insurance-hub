@@ -93,9 +93,55 @@ func TestCloseCodeForReadError_MapsProtocolFailures(t *testing.T) {
 	}
 }
 
+func TestCloseReasonForConnection_MapsOnlyBoundedReasons(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    int
+		removal chat.RemovalReason
+		want    CloseReason
+	}{
+		{"normal", gorilla.CloseNormalClosure, chat.RemovalLeft, CloseReasonNormal},
+		{
+			"unsupported",
+			gorilla.CloseUnsupportedData,
+			chat.RemovalLeft,
+			CloseReasonUnsupportedData,
+		},
+		{
+			"too large",
+			gorilla.CloseMessageTooBig,
+			chat.RemovalLeft,
+			CloseReasonMessageTooLarge,
+		},
+		{
+			"queue full",
+			gorilla.CloseInternalServerErr,
+			chat.RemovalQueueFull,
+			CloseReasonSlowPeer,
+		},
+		{
+			"draining",
+			gorilla.CloseInternalServerErr,
+			chat.RemovalDraining,
+			CloseReasonDraining,
+		},
+		{"transport", 4999, chat.RemovalLeft, CloseReasonTransportFailure},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := closeReasonForConnection(
+				test.code,
+				test.removal,
+			); got != test.want {
+				t.Fatalf("close reason = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func newTestHub(t *testing.T, queueSize int) *chat.Hub {
 	t.Helper()
-	hub, err := chat.NewHub(queueSize)
+	hub, err := chat.NewHub(queueSize, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

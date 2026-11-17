@@ -17,8 +17,14 @@ import (
 	gorilla "github.com/gorilla/websocket"
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/chat"
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
+	chatwebsocket "github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/websocket"
 )
 
 func TestRun_ServesManagementAndExactChatWebSocket(t *testing.T) {
@@ -144,6 +150,36 @@ func TestRun_TelemetryAcquisitionFailureStopsComposition(t *testing.T) {
 	// then
 	if !errors.Is(err, telemetryErr) {
 		t.Fatalf("run error = %v", err)
+	}
+}
+
+func TestRun_ObserverAcquisitionFailureCleansUpTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	provider := &recordingProvider{}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	observerErr := errors.New("observer initialization failed")
+	deps.newObserver = func(
+		*slog.Logger,
+		metric.MeterProvider,
+		trace.TracerProvider,
+	) (telemetryObserver, error) {
+		return nil, observerErr
+	}
+	deps.newHealth = func(time.Duration, health.Check) (*health.State, error) {
+		t.Fatal("health acquired after observer failure")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, observerErr) || provider.shutdowns.Load() != 1 {
+		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
 	}
 }
 
@@ -351,9 +387,12 @@ func TestShutdown_OrdersDrainServersAndTelemetry(t *testing.T) {
 	business := &orderedServer{name: "business", calls: &calls}
 	management := &orderedServer{name: "management", calls: &calls}
 	provider := &orderedProvider{calls: &calls}
+	observer := &orderedTelemetryObserver{calls: &calls}
 
 	// when
-	err = shutdown(settings, state, handler, hub, registry, business, management, provider)
+	err = shutdown(
+		settings, state, handler, hub, registry, business, management, provider, observer,
+	)
 	// then
 	if err != nil {
 		t.Fatal(err)
@@ -365,6 +404,7 @@ func TestShutdown_OrdersDrainServersAndTelemetry(t *testing.T) {
 		"registry drain",
 		"management shutdown",
 		"telemetry shutdown",
+		"observer close",
 	}
 	if !slices.Equal(calls, want) {
 		t.Errorf("shutdown calls = %v, want %v", calls, want)
@@ -374,6 +414,42 @@ func TestShutdown_OrdersDrainServersAndTelemetry(t *testing.T) {
 	}
 	if !handler.draining.Load() {
 		t.Error("business handler still accepted upgrades during shutdown")
+	}
+}
+
+func TestShutdown_RecordsServiceCleanupFailureBeforeTelemetryStops(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdownErr := errors.New("business shutdown failed")
+	business := newFakeServer(nil)
+	business.shutdownErr = shutdownErr
+	provider := &recordingProvider{}
+	observer := &recordingTelemetryObserver{}
+
+	// when
+	err = shutdown(
+		settings,
+		state,
+		newBusinessHandler(http.NotFoundHandler()),
+		&orderedHub{calls: &[]string{}},
+		&orderedRegistry{calls: &[]string{}},
+		business,
+		newFakeServer(nil),
+		provider,
+		observer,
+	)
+
+	// then
+	if !errors.Is(err, shutdownErr) || observer.shutdownFailures.Load() != 1 {
+		t.Fatalf(
+			"shutdown result = error %v, observed failures %d",
+			err,
+			observer.shutdownFailures.Load(),
+		)
 	}
 }
 
@@ -522,6 +598,14 @@ type recordingProvider struct {
 	err       error
 }
 
+func (*recordingProvider) MeterProvider() metric.MeterProvider {
+	return metricnoop.NewMeterProvider()
+}
+
+func (*recordingProvider) TracerProvider() trace.TracerProvider {
+	return tracenoop.NewTracerProvider()
+}
+
 func (provider *recordingProvider) Shutdown(context.Context) error {
 	provider.shutdowns.Add(1)
 	return provider.err
@@ -548,10 +632,11 @@ func (address testAddress) Network() string { return "test" }
 func (address testAddress) String() string  { return string(address) }
 
 type fakeServer struct {
-	serveErr  error
-	release   chan struct{}
-	once      sync.Once
-	shutdowns atomic.Int32
+	serveErr    error
+	shutdownErr error
+	release     chan struct{}
+	once        sync.Once
+	shutdowns   atomic.Int32
 }
 
 type controlledServer struct {
@@ -617,10 +702,53 @@ func (*orderedServer) Close() error { return nil }
 
 type orderedProvider struct{ calls *[]string }
 
+func (*orderedProvider) MeterProvider() metric.MeterProvider {
+	return metricnoop.NewMeterProvider()
+}
+
+func (*orderedProvider) TracerProvider() trace.TracerProvider {
+	return tracenoop.NewTracerProvider()
+}
+
 func (provider *orderedProvider) Shutdown(context.Context) error {
 	*provider.calls = append(*provider.calls, "telemetry shutdown")
 	return nil
 }
+
+type orderedTelemetryObserver struct{ calls *[]string }
+
+func (*orderedTelemetryObserver) ObserveBroadcast(chat.BroadcastEvent, chat.DeliveryOutcome) {}
+func (*orderedTelemetryObserver) ObserveHandshake(
+	context.Context,
+	time.Time,
+	chatwebsocket.HandshakeOutcome,
+) {
+}
+func (*orderedTelemetryObserver) ConnectionOpened()                          {}
+func (*orderedTelemetryObserver) ConnectionClosed(chatwebsocket.CloseReason) {}
+func (*orderedTelemetryObserver) RecordShutdownFailure(context.Context)      {}
+func (observer *orderedTelemetryObserver) Close() error {
+	*observer.calls = append(*observer.calls, "observer close")
+	return nil
+}
+
+type recordingTelemetryObserver struct{ shutdownFailures atomic.Int32 }
+
+func (*recordingTelemetryObserver) ObserveBroadcast(chat.BroadcastEvent, chat.DeliveryOutcome) {}
+func (*recordingTelemetryObserver) ObserveHandshake(
+	context.Context,
+	time.Time,
+	chatwebsocket.HandshakeOutcome,
+) {
+}
+func (*recordingTelemetryObserver) ConnectionOpened() {}
+func (*recordingTelemetryObserver) ConnectionClosed(chatwebsocket.CloseReason) {
+}
+
+func (observer *recordingTelemetryObserver) RecordShutdownFailure(context.Context) {
+	observer.shutdownFailures.Add(1)
+}
+func (*recordingTelemetryObserver) Close() error { return nil }
 
 func newFakeServer(serveErr error) *fakeServer {
 	return &fakeServer{serveErr: serveErr, release: make(chan struct{})}
@@ -638,7 +766,7 @@ func (server *fakeServer) Serve(listener net.Listener) error {
 func (server *fakeServer) Shutdown(context.Context) error {
 	server.shutdowns.Add(1)
 	server.once.Do(func() { close(server.release) })
-	return nil
+	return server.shutdownErr
 }
 
 func (server *fakeServer) Close() error {

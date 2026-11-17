@@ -66,7 +66,7 @@ func (connection *Connection) reject(code int) {
 	close(connection.done)
 }
 
-func (connection *Connection) serve(session *chat.Session) {
+func (connection *Connection) serve(session *chat.Session) CloseReason {
 	writerResult := make(chan error, 1)
 	go func() {
 		writerResult <- connection.writePump(session)
@@ -79,6 +79,7 @@ func (connection *Connection) serve(session *chat.Session) {
 	<-writerResult
 	connection.closeTransport()
 	close(connection.done)
+	return closeReasonForConnection(closeCode, session.RemovalReason())
 }
 
 func (connection *Connection) readPump(session *chat.Session) int {
@@ -199,5 +200,29 @@ func closeCodeForSession(session *chat.Session) int {
 		return gorilla.CloseGoingAway
 	default:
 		return gorilla.CloseNormalClosure
+	}
+}
+
+func closeReasonForConnection(code int, removal chat.RemovalReason) CloseReason {
+	switch removal {
+	case chat.RemovalQueueFull:
+		return CloseReasonSlowPeer
+	case chat.RemovalDraining:
+		return CloseReasonDraining
+	default:
+	}
+	switch code {
+	case gorilla.CloseNormalClosure:
+		return CloseReasonNormal
+	case gorilla.CloseUnsupportedData:
+		return CloseReasonUnsupportedData
+	case gorilla.CloseMessageTooBig:
+		return CloseReasonMessageTooLarge
+	case gorilla.CloseTryAgainLater:
+		return CloseReasonSlowPeer
+	case gorilla.CloseGoingAway:
+		return CloseReasonDraining
+	default:
+		return CloseReasonTransportFailure
 	}
 }

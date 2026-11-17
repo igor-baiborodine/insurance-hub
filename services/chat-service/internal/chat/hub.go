@@ -18,6 +18,28 @@ var (
 // Message is an immutable text payload shared across outbound session queues.
 type Message string
 
+// BroadcastEvent identifies the bounded kind of room event being delivered.
+type BroadcastEvent uint8
+
+const (
+	BroadcastEventJoin BroadcastEvent = iota + 1
+	BroadcastEventMessage
+	BroadcastEventDisconnect
+)
+
+// DeliveryOutcome identifies the bounded result of one attempted room delivery.
+type DeliveryOutcome uint8
+
+const (
+	DeliveryOutcomeDelivered DeliveryOutcome = iota + 1
+	DeliveryOutcomeQueueFull
+)
+
+// Observer receives bounded delivery outcomes without exposing Chat content or identities.
+type Observer interface {
+	ObserveBroadcast(BroadcastEvent, DeliveryOutcome)
+}
+
 // RemovalReason identifies why a session stopped belonging to the hub.
 type RemovalReason uint32
 
@@ -58,6 +80,7 @@ type delivery struct {
 	room    *room
 	origin  *Session
 	message Message
+	event   BroadcastEvent
 }
 
 // Hub serializes process-local room membership and message delivery.
@@ -66,14 +89,15 @@ type Hub struct {
 	outboundQueueSize int
 	rooms             []*room
 	draining          bool
+	observer          Observer
 }
 
 // NewHub creates a process-local hub with the configured per-session outbound queue size.
-func NewHub(outboundQueueSize int) (*Hub, error) {
+func NewHub(outboundQueueSize int, observer Observer) (*Hub, error) {
 	if outboundQueueSize <= 0 {
 		return nil, errors.New("create chat hub: outbound queue size must be positive")
 	}
-	return &Hub{outboundQueueSize: outboundQueueSize}, nil
+	return &Hub{outboundQueueSize: outboundQueueSize, observer: observer}, nil
 }
 
 // Join adds a session and broadcasts the accepted Java-compatible join message to its peers.
@@ -97,6 +121,7 @@ func (hub *Hub) Join(topic, username string) (*Session, error) {
 		room:    joinedRoom,
 		origin:  session,
 		message: Message("<p>[" + username + "] Joined!</p>"),
+		event:   BroadcastEventJoin,
 	})
 	return session, nil
 }
@@ -111,7 +136,9 @@ func (hub *Hub) Broadcast(origin *Session, payload []byte) error {
 	if !hub.containsLocked(origin) {
 		return ErrSessionClosed
 	}
-	hub.deliverLocked(delivery{room: origin.room, origin: origin, message: message})
+	hub.deliverLocked(delivery{
+		room: origin.room, origin: origin, message: message, event: BroadcastEventMessage,
+	})
 	return nil
 }
 
@@ -215,7 +242,9 @@ func (hub *Hub) deliverLocked(first delivery) {
 			}
 			select {
 			case recipient.outbound <- current.message:
+				hub.observe(current.event, DeliveryOutcomeDelivered)
 			default:
+				hub.observe(current.event, DeliveryOutcomeQueueFull)
 				if hub.removeLocked(recipient, RemovalQueueFull) && !hub.draining {
 					pending = append(pending, disconnectDelivery(recipient))
 				}
@@ -224,9 +253,16 @@ func (hub *Hub) deliverLocked(first delivery) {
 	}
 }
 
+func (hub *Hub) observe(event BroadcastEvent, outcome DeliveryOutcome) {
+	if hub.observer != nil {
+		hub.observer.ObserveBroadcast(event, outcome)
+	}
+}
+
 func disconnectDelivery(session *Session) delivery {
 	return delivery{
 		room:    session.room,
 		message: Message("<p>[" + session.username + "] Disconnected!</p>"),
+		event:   BroadcastEventDisconnect,
 	}
 }

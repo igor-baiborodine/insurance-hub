@@ -129,6 +129,38 @@ func TestHub_QueueSaturationEvictsOnlySlowSession(t *testing.T) {
 	}
 }
 
+func TestHub_ObserverReceivesOnlyBoundedDeliveryOutcomes(t *testing.T) {
+	// given
+	observer := &recordingObserver{}
+	hub, err := chat.NewHub(1, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := join(t, hub, "private-topic", "private-sender")
+	slow := join(t, hub, "PRIVATE-TOPIC", "private-recipient")
+	assertMessage(t, sender, []byte("<p>[private-recipient] Joined!</p>"))
+
+	// when
+	if err := hub.Broadcast(sender, []byte("private-payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.Broadcast(sender, []byte("queue-full")); err != nil {
+		t.Fatal(err)
+	}
+
+	// then
+	want := []observedDelivery{
+		{chat.BroadcastEventJoin, chat.DeliveryOutcomeDelivered},
+		{chat.BroadcastEventMessage, chat.DeliveryOutcomeDelivered},
+		{chat.BroadcastEventMessage, chat.DeliveryOutcomeQueueFull},
+		{chat.BroadcastEventDisconnect, chat.DeliveryOutcomeDelivered},
+	}
+	if !slices.Equal(observer.deliveries, want) {
+		t.Fatalf("delivery observations = %v, want %v", observer.deliveries, want)
+	}
+	assertDone(t, slow, chat.RemovalQueueFull)
+}
+
 func TestHub_BeginDrainSuppressesDisconnectAndRejectsJoin(t *testing.T) {
 	// given
 	hub := newHub(t, 8)
@@ -233,7 +265,7 @@ func TestHub_RejectsForeignSession(t *testing.T) {
 
 func TestNewHub_RejectsNonPositiveQueueSize(t *testing.T) {
 	for _, size := range []int{-1, 0} {
-		if _, err := chat.NewHub(size); err == nil {
+		if _, err := chat.NewHub(size, nil); err == nil {
 			t.Fatalf("NewHub(%d) succeeded", size)
 		}
 	}
@@ -342,11 +374,25 @@ func join(t *testing.T, hub *chat.Hub, topic, username string) *chat.Session {
 
 func newHub(t *testing.T, queueSize int) *chat.Hub {
 	t.Helper()
-	hub, err := chat.NewHub(queueSize)
+	hub, err := chat.NewHub(queueSize, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return hub
+}
+
+type observedDelivery struct {
+	event   chat.BroadcastEvent
+	outcome chat.DeliveryOutcome
+}
+
+type recordingObserver struct{ deliveries []observedDelivery }
+
+func (observer *recordingObserver) ObserveBroadcast(
+	event chat.BroadcastEvent,
+	outcome chat.DeliveryOutcome,
+) {
+	observer.deliveries = append(observer.deliveries, observedDelivery{event, outcome})
 }
 
 func assertMessage(t *testing.T, session *chat.Session, want []byte) {

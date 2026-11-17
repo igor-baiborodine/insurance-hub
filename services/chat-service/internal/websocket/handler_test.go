@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -67,6 +68,35 @@ func TestHandler_RouteAndHandshakeContract(t *testing.T) {
 		t.Fatalf("negotiated extensions = %q", got)
 	}
 	closeNormally(t, sameOrigin)
+}
+
+func TestHandler_ObserverReceivesBoundedHandshakeAndCloseEvents(t *testing.T) {
+	// given
+	observer := newRecordingObserver()
+	server, _ := newTestServerWithObserver(t, testSettings(), observer)
+
+	// when
+	response, err := server.Client().Get(server.URL + "/ws/chat/sensitive-topic/sensitive-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHTTPStatus(t, response, http.StatusBadRequest)
+	client := dial(t, server, "/sensitive-topic/sensitive-user")
+	closeNormally(t, client)
+	closeReason := observer.waitForClose(t)
+
+	// then
+	handshakes, opened := observer.snapshot()
+	wantHandshakes := []chatwebsocket.HandshakeOutcome{
+		chatwebsocket.HandshakeUpgradeFailed,
+		chatwebsocket.HandshakeAccepted,
+	}
+	if !slices.Equal(handshakes, wantHandshakes) {
+		t.Fatalf("handshake outcomes = %v, want %v", handshakes, wantHandshakes)
+	}
+	if opened != 1 || closeReason != chatwebsocket.CloseReasonNormal {
+		t.Fatalf("connection observations = opened %d, close %d", opened, closeReason)
+	}
 }
 
 func TestHandler_RealClientsPreserveChatContract(t *testing.T) {
@@ -220,7 +250,7 @@ func TestConnection_WaitCancellationForcesTransportClose(t *testing.T) {
 }
 
 func TestNewHandler_RejectsInvalidDependencies(t *testing.T) {
-	hub, err := chat.NewHub(8)
+	hub, err := chat.NewHub(8, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,6 +273,7 @@ func TestNewHandler_RejectsInvalidDependencies(t *testing.T) {
 				test.hub,
 				test.settings,
 				test.lifecycle,
+				nil,
 			); err == nil {
 				t.Fatal("invalid handler dependencies accepted")
 			}
@@ -289,19 +320,82 @@ func newTestServer(
 	t *testing.T,
 	settings config.WebSocketSettings,
 ) (*httptest.Server, *tracker) {
+	return newTestServerWithObserver(t, settings, nil)
+}
+
+func newTestServerWithObserver(
+	t *testing.T,
+	settings config.WebSocketSettings,
+	observer chatwebsocket.Observer,
+) (*httptest.Server, *tracker) {
 	t.Helper()
-	hub, err := chat.NewHub(settings.OutboundQueueSize)
+	hub, err := chat.NewHub(settings.OutboundQueueSize, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tracker := newTracker()
-	handler, err := chatwebsocket.NewHandler(hub, settings, lifecycleForTests(tracker))
+	handler, err := chatwebsocket.NewHandler(
+		hub,
+		settings,
+		lifecycleForTests(tracker),
+		observer,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	return server, tracker
+}
+
+type recordingObserver struct {
+	mu         sync.Mutex
+	handshakes []chatwebsocket.HandshakeOutcome
+	opened     int
+	closed     chan chatwebsocket.CloseReason
+}
+
+func newRecordingObserver() *recordingObserver {
+	return &recordingObserver{closed: make(chan chatwebsocket.CloseReason, 8)}
+}
+
+func (observer *recordingObserver) ObserveHandshake(
+	_ context.Context,
+	_ time.Time,
+	outcome chatwebsocket.HandshakeOutcome,
+) {
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	observer.handshakes = append(observer.handshakes, outcome)
+}
+
+func (observer *recordingObserver) ConnectionOpened() {
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	observer.opened++
+}
+
+func (observer *recordingObserver) ConnectionClosed(reason chatwebsocket.CloseReason) {
+	observer.closed <- reason
+}
+
+func (observer *recordingObserver) waitForClose(t *testing.T) chatwebsocket.CloseReason {
+	t.Helper()
+	select {
+	case reason := <-observer.closed:
+		return reason
+	case <-time.After(time.Second):
+		t.Fatal("connection close was not observed")
+		return 0
+	}
+}
+
+func (observer *recordingObserver) snapshot() ([]chatwebsocket.HandshakeOutcome, int) {
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	return append(
+		[]chatwebsocket.HandshakeOutcome(nil),
+		observer.handshakes...), observer.opened
 }
 
 func testSettings() config.WebSocketSettings {

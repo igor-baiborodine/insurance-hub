@@ -2,8 +2,10 @@
 package websocket
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	gorilla "github.com/gorilla/websocket"
 
@@ -17,11 +19,40 @@ type Lifecycle struct {
 	Unregister func(*Connection)
 }
 
+// HandshakeOutcome identifies the bounded result of one accepted-route upgrade attempt.
+type HandshakeOutcome uint8
+
+const (
+	HandshakeAccepted HandshakeOutcome = iota + 1
+	HandshakeCapacityRejected
+	HandshakeUpgradeFailed
+)
+
+// CloseReason identifies the bounded reason an upgraded connection stopped.
+type CloseReason uint8
+
+const (
+	CloseReasonNormal CloseReason = iota + 1
+	CloseReasonUnsupportedData
+	CloseReasonMessageTooLarge
+	CloseReasonSlowPeer
+	CloseReasonDraining
+	CloseReasonTransportFailure
+)
+
+// Observer receives bounded WebSocket lifecycle events without request or payload values.
+type Observer interface {
+	ObserveHandshake(context.Context, time.Time, HandshakeOutcome)
+	ConnectionOpened()
+	ConnectionClosed(CloseReason)
+}
+
 // Handler exposes only the accepted Chat WebSocket route.
 type Handler struct {
 	hub       *chat.Hub
 	settings  config.WebSocketSettings
 	lifecycle Lifecycle
+	observer  Observer
 	upgrader  gorilla.Upgrader
 	slots     chan struct{}
 	mux       *http.ServeMux
@@ -32,6 +63,7 @@ func NewHandler(
 	hub *chat.Hub,
 	settings config.WebSocketSettings,
 	lifecycle Lifecycle,
+	observer Observer,
 ) (*Handler, error) {
 	if hub == nil {
 		return nil, errors.New("create WebSocket handler: chat hub is required")
@@ -49,6 +81,7 @@ func NewHandler(
 		hub:       hub,
 		settings:  settings,
 		lifecycle: lifecycle,
+		observer:  observer,
 		upgrader: gorilla.Upgrader{
 			HandshakeTimeout:  settings.WriteTimeout,
 			EnableCompression: false,
@@ -66,6 +99,7 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 }
 
 func (handler *Handler) upgrade(writer http.ResponseWriter, request *http.Request) {
+	started := time.Now()
 	var registered *Connection
 	select {
 	case handler.slots <- struct{}{}:
@@ -76,17 +110,30 @@ func (handler *Handler) upgrade(writer http.ResponseWriter, request *http.Reques
 			}
 		}()
 	default:
+		handler.observeHandshake(request.Context(), started, HandshakeCapacityRejected)
 		http.Error(writer, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
 	transport, err := handler.upgrader.Upgrade(writer, request, nil)
 	if err != nil {
+		handler.observeHandshake(request.Context(), started, HandshakeUpgradeFailed)
 		return
 	}
+	handler.observeHandshake(request.Context(), started, HandshakeAccepted)
+	if handler.observer != nil {
+		handler.observer.ConnectionOpened()
+	}
+	closeReason := CloseReasonTransportFailure
+	defer func() {
+		if handler.observer != nil {
+			handler.observer.ConnectionClosed(closeReason)
+		}
+	}()
 	connection := newConnection(transport, handler.hub, handler.settings)
 	if err := handler.lifecycle.Register(connection); err != nil {
 		connection.reject(gorilla.CloseGoingAway)
+		closeReason = CloseReasonDraining
 		return
 	}
 	registered = connection
@@ -94,7 +141,18 @@ func (handler *Handler) upgrade(writer http.ResponseWriter, request *http.Reques
 	session, err := handler.hub.Join(request.PathValue("topic"), request.PathValue("username"))
 	if err != nil {
 		connection.reject(gorilla.CloseGoingAway)
+		closeReason = CloseReasonDraining
 		return
 	}
-	connection.serve(session)
+	closeReason = connection.serve(session)
+}
+
+func (handler *Handler) observeHandshake(
+	ctx context.Context,
+	started time.Time,
+	outcome HandshakeOutcome,
+) {
+	if handler.observer != nil {
+		handler.observer.ObserveHandshake(ctx, started, outcome)
+	}
 }
