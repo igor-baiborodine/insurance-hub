@@ -12,12 +12,16 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
 )
 
-func TestNewDisabledProvider(t *testing.T) {
+func TestNew_DisabledProvider(t *testing.T) {
+	// given
 	settings := config.Telemetry{
 		Identity:        config.DevelopmentIdentity(config.DefaultServiceName).Identity,
 		ExporterTimeout: time.Second,
 	}
+
+	// when
 	provider, err := New(context.Background(), config.DefaultServiceName, settings)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +30,8 @@ func TestNewDisabledProvider(t *testing.T) {
 	}
 }
 
-func TestNewRejectsInvalidIdentityWithoutDisclosingValues(t *testing.T) {
+func TestNew_InvalidIdentityDoesNotDiscloseValues(t *testing.T) {
+	// given
 	const private = "private-marker"
 	settings := config.Telemetry{
 		Enabled: true,
@@ -41,7 +46,11 @@ func TestNewRejectsInvalidIdentityWithoutDisclosingValues(t *testing.T) {
 		ExporterEndpoint: mustURL("http://127.0.0.1:4317"),
 		ExporterTimeout:  time.Second,
 	}
+
+	// when
 	_, err := New(context.Background(), config.DefaultServiceName, settings)
+
+	// then
 	if err == nil {
 		t.Fatal("mismatched identity accepted")
 	}

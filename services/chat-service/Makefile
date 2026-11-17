@@ -107,7 +107,7 @@ coverage:
 
 test-integration:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
-		-run '^TestRunServesManagementAndExactBusinessNotFound$$' \
+		-run '^TestRun_ServesManagementAndExactBusinessNotFound$$' \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 build: python-runtime-check

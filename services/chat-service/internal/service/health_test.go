@@ -11,21 +11,37 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 )
 
-func TestManagementHealthReflectsLifecycleState(t *testing.T) {
+func TestManagementHealth_ReflectsLifecycleState(t *testing.T) {
+	// given
 	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler := health.NewHandler(state)
-	assertHealth(t, handler, "/livez", http.StatusOK, "live\n")
-	assertHealth(t, handler, "/readyz", http.StatusServiceUnavailable, "not ready\n")
+
+	// when
+	live := requestHealth(handler, "/livez")
+	initial := requestHealth(handler, "/readyz")
 	state.SetReady(true)
-	assertHealth(t, handler, "/readyz", http.StatusOK, "ready\n")
+	ready := requestHealth(handler, "/readyz")
 	state.SetReady(false)
-	assertHealth(t, handler, "/readyz", http.StatusServiceUnavailable, "not ready\n")
+	withdrawn := requestHealth(handler, "/readyz")
+
+	// then
+	assertHealth(t, "/livez", live, http.StatusOK, "live\n")
+	assertHealth(t, "/readyz initially", initial, http.StatusServiceUnavailable, "not ready\n")
+	assertHealth(t, "/readyz ready", ready, http.StatusOK, "ready\n")
+	assertHealth(
+		t,
+		"/readyz withdrawn",
+		withdrawn,
+		http.StatusServiceUnavailable,
+		"not ready\n",
+	)
 }
 
-func TestManagementHealthBoundsDependencyCheck(t *testing.T) {
+func TestManagementHealth_BoundsDependencyCheck(t *testing.T) {
+	// given
 	state, err := health.NewState(10*time.Millisecond, func(ctx context.Context) error {
 		<-ctx.Done()
 		return errors.New("dependency unavailable")
@@ -34,27 +50,41 @@ func TestManagementHealthBoundsDependencyCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.SetReady(true)
-	assertHealth(
-		t,
-		health.NewHandler(state),
-		"/readyz",
-		http.StatusServiceUnavailable,
-		"not ready\n",
-	)
+
+	// when
+	response := requestHealth(health.NewHandler(state), "/readyz")
+
+	// then
+	assertHealth(t, "/readyz", response, http.StatusServiceUnavailable, "not ready\n")
 }
 
-func assertHealth(t *testing.T, handler http.Handler, path string, status int, body string) {
-	t.Helper()
+type healthResponse struct {
+	status int
+	body   string
+}
+
+func requestHealth(handler http.Handler, path string) healthResponse {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
-	if recorder.Code != status || recorder.Body.String() != body {
+	return healthResponse{status: recorder.Code, body: recorder.Body.String()}
+}
+
+func assertHealth(
+	t *testing.T,
+	scenario string,
+	got healthResponse,
+	wantStatus int,
+	wantBody string,
+) {
+	t.Helper()
+	if got.status != wantStatus || got.body != wantBody {
 		t.Errorf(
 			"%s = (%d, %q), want (%d, %q)",
-			path,
-			recorder.Code,
-			recorder.Body.String(),
-			status,
-			body,
+			scenario,
+			got.status,
+			got.body,
+			wantStatus,
+			wantBody,
 		)
 	}
 }

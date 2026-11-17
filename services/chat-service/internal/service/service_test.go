@@ -19,7 +19,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
 )
 
-func TestRunServesManagementAndExactBusinessNotFound(t *testing.T) {
+func TestRun_ServesManagementAndExactBusinessNotFound(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	addresses := make(chan string, 2)
@@ -33,10 +34,14 @@ func TestRunServesManagementAndExactBusinessNotFound(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
+
+	// when
 	go func() { result <- run(ctx, settings, discardLogger(), deps) }()
 	businessAddress := receiveString(t, addresses)
 	managementAddress := receiveString(t, addresses)
 	client := &http.Client{Timeout: time.Second}
+
+	// then
 	waitForResponse(t, client, "http://"+managementAddress+"/readyz", http.StatusOK, "ready\n")
 	waitForResponse(t, client, "http://"+managementAddress+"/livez", http.StatusOK, "live\n")
 	waitForResponse(
@@ -72,7 +77,8 @@ func TestRunServesManagementAndExactBusinessNotFound(t *testing.T) {
 	}
 }
 
-func TestRunCleansUpBusinessListenerWhenManagementAcquisitionFails(t *testing.T) {
+func TestRun_ManagementAcquisitionFailureCleansUpBusinessListener(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	provider := &recordingProvider{}
@@ -90,7 +96,10 @@ func TestRunCleansUpBusinessListenerWhenManagementAcquisitionFails(t *testing.T)
 		return nil, listenErr
 	}
 
+	// when
 	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
 	if !errors.Is(err, listenErr) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -103,7 +112,8 @@ func TestRunCleansUpBusinessListenerWhenManagementAcquisitionFails(t *testing.T)
 	}
 }
 
-func TestRunPreservesServeAndCleanupErrorsAndWithdrawsReadiness(t *testing.T) {
+func TestRun_ServeAndCleanupErrorsArePreservedAndReadinessIsWithdrawn(t *testing.T) {
+	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
 	serveErr := errors.New("serve failed")
@@ -124,7 +134,10 @@ func TestRunPreservesServeAndCleanupErrorsAndWithdrawsReadiness(t *testing.T) {
 	deps.newBusiness = func(http.Handler, config.Config) ownedServer { return business }
 	deps.newManagement = func(*health.State) ownedServer { return management }
 
+	// when
 	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
 	if !errors.Is(err, serveErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("run error = %v", err)
 	}
@@ -142,9 +155,9 @@ func TestRunPreservesServeAndCleanupErrorsAndWithdrawsReadiness(t *testing.T) {
 	}
 }
 
-func TestBusinessHandlerRejectsNewWorkAfterDrain(t *testing.T) {
+func TestBusinessHandler_DrainRejectsNewWork(t *testing.T) {
+	// given
 	handler := newBusinessHandler()
-	handler.beginDrain()
 	request, err := http.NewRequest(
 		http.MethodGet,
 		"http://chat.invalid/ws/chat/main/test",
@@ -154,7 +167,12 @@ func TestBusinessHandlerRejectsNewWorkAfterDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := &responseRecorder{header: make(http.Header)}
+
+	// when
+	handler.beginDrain()
 	handler.ServeHTTP(recorder, request)
+
+	// then
 	if recorder.status != http.StatusServiceUnavailable ||
 		recorder.body.String() != "service unavailable\n" {
 		t.Errorf("response = (%d, %q)", recorder.status, recorder.body.String())

@@ -215,17 +215,17 @@ def test_chat_supports_only_foundation_capabilities_and_canonical_identity() -> 
         "deploy-test-tooling",
         "deploy-smoke",
     ]
+    record = catalog["services"]["chat"]
+    config = load_tooling_config(root / "services/chat-service/go-service-tooling.json")
 
     # when
     paths = [
         resolve.resolve_service(root, script_dir / "catalog.json", "chat", capability)
         for capability in expected
     ]
+    validate_catalog_identity(config, "chat", record)
 
     # then
-    record = catalog["services"]["chat"]
-    config = load_tooling_config(root / "services/chat-service/go-service-tooling.json")
-    validate_catalog_identity(config, "chat", record)
     assert record["modulePath"] == "services/chat-service"
     assert record["localImage"] == "insurance-hub-chat-api"
     assert record["registryImage"].endswith("/chat-api")
@@ -234,9 +234,19 @@ def test_chat_supports_only_foundation_capabilities_and_canonical_identity() -> 
     assert "administration" not in record
     assert all("initialization" not in target for target in record["deploymentTargets"].values())
     assert paths == ["services/chat-service"] * len(expected)
-    for unsupported in ("reader-ensure", "initialize", "resource-ensure", "deploy-test"):
-        with pytest.raises(resolve.DispatchError, match="does not support capability"):
-            resolve.resolve_service(root, script_dir / "catalog.json", "chat", unsupported)
+
+
+@pytest.mark.parametrize(
+    "capability", ("reader-ensure", "initialize", "resource-ensure", "deploy-test")
+)
+def test_chat_rejects_unsupported_capability(capability: str) -> None:
+    # given
+    script_dir = Path(resolve.__file__).resolve().parent
+    root = script_dir.parents[2]
+
+    # when / then
+    with pytest.raises(resolve.DispatchError, match="does not support capability"):
+        resolve.resolve_service(root, script_dir / "catalog.json", "chat", capability)
 
 
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])

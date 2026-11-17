@@ -417,7 +417,7 @@ def test_chat_release_uses_generic_selection_activation_and_runtime_identity(
     assert selected.registry_image == f"ghcr.io/{REPOSITORY}/chat-api"
     assert paths == [parent, overlay]
     assert "newTag: 1.2.3" in overlay.read_text()
-    assert f"SERVICE_VERSION=git-{SOURCE_COMMIT[:12]}" in overlay.read_text()
+    assert "SERVICE_VERSION=git-6c4669c81d3a" in overlay.read_text()
     assert yaml.safe_load(parent.read_text())["resources"] == ["./chat", "./product"]
 
 
@@ -435,10 +435,14 @@ def test_chat_release_rejects_placeholder_runtime_version(
         + "    literals:\n"
         + "      - SERVICE_VERSION=git-111111111111\n"
     )
+    original = overlay.read_text()
 
     # when / then
     with pytest.raises(release.ReleaseSelectionError, match="canonical runtime version"):
         release.prepare_release(tmp_path, "chat", REPOSITORY, "1.2.3", source_commit, IMAGE_DIGEST)
+
+    # then
+    assert overlay.read_text() == original
 
 
 def test_prepare_updates_optional_runtime_version_with_source_commit(tmp_path: Path) -> None:

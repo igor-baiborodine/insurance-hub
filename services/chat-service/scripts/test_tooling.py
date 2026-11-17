@@ -100,7 +100,7 @@ def mutate(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]:
         path = fixture / "internal" / "config" / "tooling_failure_test.go"
         path.write_text(
             'package config\n\nimport "testing"\n\n'
-            'func TestToolingControlledFailure(t *testing.T) { t.Fatal("controlled failure") }\n',
+            'func TestTooling_ControlledFailure(t *testing.T) { t.Fatal("controlled failure") }\n',
             encoding="utf-8",
         )
         return "test", ": test] Error", ("TEST_PACKAGES=./internal/config",)
@@ -122,6 +122,7 @@ def test_owned_target_rejects_controlled_defect(
     tmp_path: Path,
     case: str,
 ) -> None:
+    # given
     fixture = fixture_copy(tooling, tmp_path)
     target, expected, variables = mutate(fixture, case)
     before = inventory(fixture)
@@ -142,6 +143,8 @@ def test_owned_target_rejects_controlled_defect(
         {"PYTHON": sys.executable, "PYTHONDONTWRITEBYTECODE": "1"},
         preferred_executables=(tooling.go,),
     )
+
+    # when / then
     with pytest.raises(CommandError):
         run_command(
             arguments,
@@ -152,5 +155,7 @@ def test_owned_target_rejects_controlled_defect(
             activity=f"Chat tooling {case}",
             log_path=log,
         )
+
+    # then
     assert expected in log.read_text(encoding="utf-8")
     assert inventory(fixture) == before

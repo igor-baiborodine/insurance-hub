@@ -26,27 +26,34 @@ func (connection *fakeConnection) Wait(ctx context.Context) error {
 	return nil
 }
 
-func TestConnectionRegistryDrainClosesJoinsAndRejectsRegistration(t *testing.T) {
+func TestConnectionRegistry_Drain_ClosesJoinsAndRejectsRegistration(t *testing.T) {
+	// given
 	registry := NewConnectionRegistry()
 	connection := &fakeConnection{}
 	if err := registry.Register(connection); err != nil {
 		t.Fatal(err)
 	}
+
+	// when
 	if err := registry.Drain(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	registrationErr := registry.Register(&fakeConnection{})
+
+	// then
 	if connection.closed.Load() != 1 {
 		t.Errorf("close count = %d", connection.closed.Load())
 	}
 	if !registry.Draining() {
 		t.Error("registry did not enter drain")
 	}
-	if err := registry.Register(&fakeConnection{}); !errors.Is(err, errConnectionDrainStarted) {
-		t.Fatalf("register during drain = %v", err)
+	if !errors.Is(registrationErr, errConnectionDrainStarted) {
+		t.Fatalf("register during drain = %v", registrationErr)
 	}
 }
 
-func TestConnectionRegistryDrainBoundsBlockedJoinAndPreservesErrors(t *testing.T) {
+func TestConnectionRegistry_Drain_BoundsBlockedJoinAndPreservesErrors(t *testing.T) {
+	// given
 	closeErr := errors.New("close failed")
 	registry := NewConnectionRegistry()
 	connection := &fakeConnection{
@@ -61,7 +68,11 @@ func TestConnectionRegistryDrainBoundsBlockedJoinAndPreservesErrors(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
+
+	// when
 	err := registry.Drain(ctx)
+
+	// then
 	if !errors.Is(err, closeErr) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("drain error = %v", err)
 	}

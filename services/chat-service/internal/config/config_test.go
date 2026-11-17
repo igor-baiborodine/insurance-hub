@@ -9,8 +9,10 @@ import (
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 )
 
-func TestLoadDefaults(t *testing.T) {
+func TestLoad_Defaults(t *testing.T) {
+	// when
 	settings, err := load(mapLookup(nil))
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +46,8 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidSettingsWithoutDisclosingValues(t *testing.T) {
+func TestLoad_InvalidSettingsDoNotDiscloseValues(t *testing.T) {
+	// given
 	const private = "private-marker"
 	tests := []struct {
 		name    string
@@ -100,7 +103,10 @@ func TestLoadRejectsInvalidSettingsWithoutDisclosingValues(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// when
 			_, err := load(mapLookup(test.values))
+
+			// then
 			if err == nil {
 				t.Fatal("invalid settings accepted")
 			}
@@ -115,15 +121,20 @@ func TestLoadRejectsInvalidSettingsWithoutDisclosingValues(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsExplicitProductionIdentity(t *testing.T) {
-	settings, err := load(mapLookup(map[string]string{
+func TestLoad_ExplicitProductionIdentity(t *testing.T) {
+	// given
+	values := map[string]string{
 		kitconfig.EnvServiceName:           DefaultServiceName,
 		kitconfig.EnvDeploymentEnvironment: "qa",
 		kitconfig.EnvServiceVersion:        "git-123456789abc",
 		kitconfig.EnvServiceInstanceID:     "qa-chat-1",
 		kitconfig.EnvHTTPAddress:           "0.0.0.0:8080",
 		kitconfig.EnvHealthAddress:         "0.0.0.0:8081",
-	}))
+	}
+
+	// when
+	settings, err := load(mapLookup(values))
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}

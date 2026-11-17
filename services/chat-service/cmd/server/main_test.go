@@ -14,12 +14,14 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
 )
 
-func TestRunWithLogsConfigurationFailureSafely(t *testing.T) {
+func TestRunWith_ConfigurationFailureLogsSafely(t *testing.T) {
+	// given
 	const private = "private-marker"
 	cause := kitconfig.Invalid(kitconfig.EnvServiceName, "must match fixed identity")
 	load := func() (config.Config, error) { return config.Config{}, cause }
 	var output bytes.Buffer
 
+	// when
 	err := runWith(
 		context.Background(),
 		&output,
@@ -29,6 +31,8 @@ func TestRunWithLogsConfigurationFailureSafely(t *testing.T) {
 			return nil
 		},
 	)
+
+	// then
 	if !errors.Is(err, cause) {
 		t.Fatalf("cause lost: %v", err)
 	}
@@ -45,7 +49,8 @@ func TestRunWithLogsConfigurationFailureSafely(t *testing.T) {
 	}
 }
 
-func TestRunWithPreservesServiceFailure(t *testing.T) {
+func TestRunWith_ServiceFailureIsPreserved(t *testing.T) {
+	// given
 	cause := errors.New("private-service-cause")
 	settings := config.Config{
 		ServiceName: config.DefaultServiceName,
@@ -57,12 +62,16 @@ func TestRunWithPreservesServiceFailure(t *testing.T) {
 		},
 	}
 	var output bytes.Buffer
+
+	// when
 	err := runWith(
 		context.Background(),
 		&output,
 		func() (config.Config, error) { return settings, nil },
 		func(context.Context, config.Config, *slog.Logger) error { return cause },
 	)
+
+	// then
 	if !errors.Is(err, cause) {
 		t.Fatalf("cause lost: %v", err)
 	}
