@@ -28,9 +28,15 @@ type ownedServer interface {
 	Close() error
 }
 
+type connectionLifecycle interface {
+	BeginDrain()
+	Drain(context.Context) error
+}
+
 type dependencies struct {
 	newTelemetry  func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newHealth     func(time.Duration, health.Check) (*health.State, error)
+	newRegistry   func() connectionLifecycle
 	listen        func(string, string) (net.Listener, error)
 	newBusiness   func(http.Handler, config.Config) ownedServer
 	newManagement func(*health.State) ownedServer
@@ -45,8 +51,9 @@ func productionDependencies() dependencies {
 		) (telemetryProvider, error) {
 			return telemetry.New(ctx, serviceName, settings)
 		},
-		newHealth: health.NewState,
-		listen:    net.Listen,
+		newHealth:   health.NewState,
+		newRegistry: func() connectionLifecycle { return NewConnectionRegistry() },
+		listen:      net.Listen,
 		newBusiness: func(handler http.Handler, settings config.Config) ownedServer {
 			return &http.Server{
 				Handler:           handler,
@@ -92,7 +99,7 @@ func run(
 		)
 	}
 
-	registry := NewConnectionRegistry()
+	registry := deps.newRegistry()
 	businessHandler := newBusinessHandler()
 	businessListener, err := deps.listen("tcp", settings.HTTPAddress.String())
 	if err != nil {
@@ -223,7 +230,7 @@ func shutdown(
 	settings config.Config,
 	state *health.State,
 	businessHandler *businessHandler,
-	registry *ConnectionRegistry,
+	registry connectionLifecycle,
 	businessServer ownedServer,
 	managementServer ownedServer,
 	provider telemetryProvider,

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -112,6 +113,74 @@ func TestRun_ManagementAcquisitionFailureCleansUpBusinessListener(t *testing.T) 
 	}
 }
 
+func TestRun_TelemetryAcquisitionFailureStopsComposition(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	telemetryErr := errors.New("telemetry initialization failed")
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return nil, telemetryErr
+	}
+	deps.newHealth = func(time.Duration, health.Check) (*health.State, error) {
+		t.Fatal("health acquired after telemetry failure")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, telemetryErr) {
+		t.Fatalf("run error = %v", err)
+	}
+}
+
+func TestRun_HealthAcquisitionFailureCleansUpTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	provider := &recordingProvider{}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	healthErr := errors.New("health initialization failed")
+	deps.newHealth = func(time.Duration, health.Check) (*health.State, error) {
+		return nil, healthErr
+	}
+	deps.listen = func(string, string) (net.Listener, error) {
+		t.Fatal("listener acquired after health failure")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, healthErr) || provider.shutdowns.Load() != 1 {
+		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
+	}
+}
+
+func TestRun_BusinessAcquisitionFailureCleansUpTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	provider := &recordingProvider{}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	listenErr := errors.New("business listen failed")
+	deps.listen = func(string, string) (net.Listener, error) { return nil, listenErr }
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, listenErr) || provider.shutdowns.Load() != 1 {
+		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
+	}
+}
+
 func TestRun_ServeAndCleanupErrorsArePreservedAndReadinessIsWithdrawn(t *testing.T) {
 	// given
 	settings := testConfig(t)
@@ -179,6 +248,89 @@ func TestBusinessHandler_DrainRejectsNewWork(t *testing.T) {
 	}
 }
 
+func TestSupervise_PublishesReadinessAfterBothServersStart(t *testing.T) {
+	// given
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	business := newControlledServer()
+	management := newControlledServer()
+	t.Cleanup(business.releaseServe)
+	t.Cleanup(management.releaseServe)
+	result := make(chan error, 1)
+	go func() {
+		result <- supervise(
+			ctx,
+			discardLogger(),
+			state,
+			business,
+			&acceptingListener{},
+			management,
+			&acceptingListener{},
+		)
+	}()
+
+	// when
+	business.startServe()
+	waitForSignal(t, business.accepted, "business server did not start")
+	readyAfterBusiness := state.Ready()
+	management.startServe()
+	waitForSignal(t, management.accepted, "management server did not start")
+	waitForReady(t, state)
+	cancel()
+
+	// then
+	if readyAfterBusiness {
+		t.Error("readiness published before management server started")
+	}
+	select {
+	case superviseErr := <-result:
+		if superviseErr != nil {
+			t.Fatal(superviseErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("supervise did not stop after cancellation")
+	}
+}
+
+func TestShutdown_OrdersDrainServersAndTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.SetReady(true)
+	handler := newBusinessHandler()
+	calls := make([]string, 0, 5)
+	registry := &orderedRegistry{calls: &calls}
+	business := &orderedServer{name: "business", calls: &calls}
+	management := &orderedServer{name: "management", calls: &calls}
+	provider := &orderedProvider{calls: &calls}
+
+	// when
+	err = shutdown(settings, state, handler, registry, business, management, provider)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"registry begin",
+		"business shutdown",
+		"registry drain",
+		"management shutdown",
+		"telemetry shutdown",
+	}
+	if !slices.Equal(calls, want) {
+		t.Errorf("shutdown calls = %v, want %v", calls, want)
+	}
+	if state.Ready() {
+		t.Error("readiness remained published during shutdown")
+	}
+}
+
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
 	httpAddress, err := kitconfig.ParseAddress(kitconfig.EnvHTTPAddress, "127.0.0.1:0")
@@ -237,6 +389,27 @@ func waitForResponse(t *testing.T, client *http.Client, url string, status int, 
 	t.Fatalf("%s did not return (%d, %q)", url, status, body)
 }
 
+func waitForSignal(t *testing.T, signal <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatal(failure)
+	}
+}
+
+func waitForReady(t *testing.T, state *health.State) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if state.Ready() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("readiness was not published")
+}
+
 func assertResponse(t *testing.T, response *http.Response, status int, body string) {
 	t.Helper()
 	defer func() { _ = response.Body.Close() }()
@@ -290,6 +463,67 @@ type fakeServer struct {
 	release   chan struct{}
 	once      sync.Once
 	shutdowns atomic.Int32
+}
+
+type controlledServer struct {
+	start    chan struct{}
+	accepted chan struct{}
+	release  chan struct{}
+	startOne sync.Once
+	stopOne  sync.Once
+}
+
+func newControlledServer() *controlledServer {
+	return &controlledServer{
+		start:    make(chan struct{}),
+		accepted: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+}
+
+func (server *controlledServer) startServe() { server.startOne.Do(func() { close(server.start) }) }
+func (server *controlledServer) releaseServe() {
+	server.stopOne.Do(func() { close(server.release) })
+}
+
+func (server *controlledServer) Serve(listener net.Listener) error {
+	<-server.start
+	_, _ = listener.Accept()
+	close(server.accepted)
+	<-server.release
+	return http.ErrServerClosed
+}
+func (*controlledServer) Shutdown(context.Context) error { return nil }
+func (*controlledServer) Close() error                   { return nil }
+
+type orderedRegistry struct{ calls *[]string }
+
+func (registry *orderedRegistry) BeginDrain() {
+	*registry.calls = append(*registry.calls, "registry begin")
+}
+
+func (registry *orderedRegistry) Drain(context.Context) error {
+	*registry.calls = append(*registry.calls, "registry drain")
+	return nil
+}
+
+type orderedServer struct {
+	name  string
+	calls *[]string
+}
+
+func (*orderedServer) Serve(net.Listener) error { return nil }
+func (server *orderedServer) Shutdown(context.Context) error {
+	*server.calls = append(*server.calls, server.name+" shutdown")
+	return nil
+}
+func (*orderedServer) Close() error { return nil }
+
+type orderedProvider struct{ calls *[]string }
+
+func (provider *orderedProvider) Shutdown(context.Context) error {
+	*provider.calls = append(*provider.calls, "telemetry shutdown")
+	return nil
 }
 
 func newFakeServer(serveErr error) *fakeServer {
