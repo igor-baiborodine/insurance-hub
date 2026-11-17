@@ -7,7 +7,6 @@ resources:
 - ./dashboard
 - ./dashboard/legacy
 - ./document
-- ./document/legacy
 - ./jsreport
 - ./payment/legacy
 - ./policy-search

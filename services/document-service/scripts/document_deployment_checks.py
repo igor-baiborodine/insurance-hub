@@ -1285,8 +1285,8 @@ def validate_qa_aggregate(resources: Any) -> None:
         all(isinstance(resource, str) for resource in resources),
         "QA service aggregate resources are invalid",
     )
-    require(resources.count("./document/legacy") == 1, "Java Document must remain declared once")
-    require(resources.count("./document") <= 1, "Go Document must be activated at most once")
+    require(resources.count("./document") == 1, "Go Document must be active exactly once")
+    require(resources.count("./document/legacy") == 0, "Java Document must not be active")
 
 
 def validate_legacy_identity(environment: str) -> None:
@@ -1294,15 +1294,30 @@ def validate_legacy_identity(environment: str) -> None:
     text = run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
     items = documents(text)
     deployment = resource(items, "Deployment", f"{environment}-document-api-legacy")
+    service = resource(items, "Service", f"{environment}-document-api-legacy")
+    config_maps = [
+        item
+        for item in items
+        if item.get("kind") == "ConfigMap"
+        and str(item.get("metadata", {}).get("name", "")).startswith(
+            f"{environment}-document-config-legacy-"
+        )
+    ]
+    require(
+        len(items) == 3 and len(config_maps) == 1,
+        "retained Java Document manifest inventory differs",
+    )
     selector = deployment.get("spec", {}).get("selector", {}).get("matchLabels", {})
+    service_selector = service.get("spec", {}).get("selector", {})
     require(
         selector.get("app.kubernetes.io/name") == "document-api-legacy"
         and selector.get("app.kubernetes.io/name") != "document-api",
         "Java Document selector is not disjoint",
     )
+    require(service_selector == selector, "Java Document Service selector differs")
     require(
         deployment.get("spec", {}).get("replicas") == 0,
-        "Java Document transfer phase differs",
+        "retained Java Document Deployment must remain quiesced",
     )
 
 

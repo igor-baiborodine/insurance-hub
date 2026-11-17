@@ -259,19 +259,18 @@ def test_previous_render_accepts_only_valid_final_worker_authority() -> None:
         )
 
 
-def test_qa_aggregate_preserves_java_before_and_after_release_activation() -> None:
+def test_qa_aggregate_requires_go_only_document_ownership() -> None:
     # when / then
-    checks.validate_qa_aggregate(["./document/legacy", "./product"])
-    checks.validate_qa_aggregate(["./document/legacy", "./document", "./product"])
+    checks.validate_qa_aggregate(["./document", "./product"])
 
 
 @pytest.mark.parametrize(
     ("resources", "message"),
     [
-        (["./product"], "Java Document"),
-        (["./document/legacy", "./document/legacy"], "Java Document"),
-        (["./document/legacy", "./document", "./document"], "Go Document"),
-        (["./document/legacy", {"path": "./document"}], "resources are invalid"),
+        (["./product"], "Go Document"),
+        (["./document", "./document"], "Go Document"),
+        (["./document", "./document/legacy", "./product"], "Java Document"),
+        ([{"path": "./document"}], "resources are invalid"),
     ],
 )
 def test_qa_aggregate_rejects_ambiguous_document_ownership(
@@ -283,7 +282,7 @@ def test_qa_aggregate_rejects_ambiguous_document_ownership(
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
-def test_legacy_document_deployment_remains_declared_but_quiesced(environment: str) -> None:
+def test_legacy_document_manifests_remain_renderable_and_quiesced(environment: str) -> None:
     # given
     overlay = checks.ROOT / f"k8s/overlays/{environment}/svc/document/legacy"
     rendered = checks.run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)])
@@ -301,7 +300,17 @@ def test_legacy_document_deployment_remains_declared_but_quiesced(environment: s
     active_render = rendered.replace("replicas: 0", "replicas: 1", 1)
     with (
         patch.object(checks, "run", return_value=active_render),
-        pytest.raises(checks.DeploymentError, match="transfer phase"),
+        pytest.raises(checks.DeploymentError, match="must remain quiesced"),
+    ):
+        checks.validate_legacy_identity(environment)
+
+    # when / then
+    incomplete_render = "---\n".join(
+        document for document in rendered.split("---\n") if "kind: Service\n" not in document
+    )
+    with (
+        patch.object(checks, "run", return_value=incomplete_render),
+        pytest.raises(checks.DeploymentError, match="Service"),
     ):
         checks.validate_legacy_identity(environment)
 

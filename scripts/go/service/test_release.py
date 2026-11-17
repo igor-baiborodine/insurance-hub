@@ -317,7 +317,7 @@ def test_dashboard_release_uses_the_no_initialization_path(tmp_path: Path) -> No
     assert "newTag: 1.2.3" in overlay.read_text()
 
 
-def test_document_release_updates_identity_and_activates_shared_qa_owner(tmp_path: Path) -> None:
+def test_document_release_updates_identity_without_reactivating_legacy(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "document", initialization=False)
     catalog_path = tmp_path / "scripts/go/service/catalog.json"
@@ -332,7 +332,6 @@ def test_document_release_updates_identity_and_activates_shared_qa_owner(tmp_pat
         "apiVersion: kustomize.config.k8s.io/v1beta1\n"
         "kind: Kustomization\n"
         "resources:\n"
-        "  - ./document/legacy\n"
         "  - ./product\n"
     )
     overlay = tmp_path / "k8s/overlays/qa/svc/document/kustomization.yaml"
@@ -355,7 +354,6 @@ def test_document_release_updates_identity_and_activates_shared_qa_owner(tmp_pat
     assert f"SERVICE_VERSION=git-{SOURCE_COMMIT[:12]}" in overlay.read_text()
     assert yaml.safe_load(parent.read_text())["resources"] == [
         "./document",
-        "./document/legacy",
         "./product",
     ]
 
