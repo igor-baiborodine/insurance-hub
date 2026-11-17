@@ -95,7 +95,9 @@ without logging raw configuration values.
 | `SERVICE_INSTANCE_ID` | Local process identity by default; explicit when telemetry is enabled. |
 
 The image supplies `HTTP_ADDR=0.0.0.0:8080` and `HEALTH_ADDR=0.0.0.0:8081` for its lifecycle
-smoke. Kubernetes configuration is owned by the later C01 deployment step.
+smoke. The [Kubernetes base](../../k8s/apps/svc/chat/base) and the
+[local-dev](../../k8s/overlays/local-dev/svc/chat) and
+[QA](../../k8s/overlays/qa/svc/chat) overlays own the deployed settings.
 
 ## Development and validation
 
@@ -129,10 +131,11 @@ revision and version labels. The workload is designed for a read-only root files
 runtime file writes.
 
 The generic service catalog and module-owned deployment guards render hardened, one-replica
-local-dev and QA workloads with distinct business and management Services. Both environments keep
-the Go workload without browser ingress; local-dev is default-denied, and QA adds only DNS and
-Alloy OTLP egress. QA activates both the Go and legacy overlays, while both Vue environments retain
-the legacy Chat URL as their only route authority.
+local-dev and QA workloads with distinct business and management Services. Neither Go workload has
+browser ingress; local-dev is default-denied, and QA adds only DNS and Alloy OTLP egress. Before
+release, the QA service aggregate keeps only `./chat/legacy`; the generic release adds `./chat`
+after publishing the image and canonical identity. Both Vue environments retain the legacy Chat URL
+as their only route authority.
 
 `deploy-check` validates both renders, exact source-derived version mapping, legacy coexistence and
 unchanged Vue authority without contacting a cluster. `deploy-test-tooling` uses fake boundaries to
@@ -149,9 +152,10 @@ Live commands require separate authorization and these exact catalog coordinates
 | local-dev | direct | `kind-local-dev-insurance-hub` | `local-dev-all` | `local-dev-all` |
 | QA | Flux | `qa-insurance-hub` | `qa-svc` | `qa-data` |
 
-For local-dev, first verify the full candidate revision and build its exact local image. The image
-override is accepted only for the direct target and must end with the first 12 characters of that
-revision:
+For local-dev, use a checkout at the accepted service source revision—the exact revision the generic
+release builds, not a later release-target commit. Verify that full revision and build its exact
+local image. The image override is accepted only for the direct target and must end with the first
+12 characters of that revision:
 
 ```bash
 source_revision=$(git rev-parse --verify 'HEAD^{commit}')
