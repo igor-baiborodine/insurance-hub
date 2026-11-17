@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
 - ./agent-portal-gateway/legacy
 - ./auth/legacy
-- ./chat
 - ./chat/legacy
 - ./dashboard
 - ./dashboard/legacy

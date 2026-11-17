@@ -130,7 +130,7 @@ def test_qa_render_allows_only_dns_and_alloy_egress() -> None:
         checks.validate_render("qa", rendered.replace("port: 4317", "port: 4318", 1))
 
 
-def test_qa_aggregate_requires_go_and_legacy_chat_once() -> None:
+def test_qa_aggregate_defers_go_activation_and_requires_legacy_chat_once() -> None:
     # given
     resources = yaml.safe_load(
         (checks.ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text()
@@ -138,6 +138,8 @@ def test_qa_aggregate_requires_go_and_legacy_chat_once() -> None:
 
     # when / then
     checks.validate_qa_aggregate(resources)
+    with pytest.raises(checks.DeploymentError, match="inactive before release"):
+        checks.validate_qa_aggregate([*resources, "./chat"])
     with pytest.raises(checks.DeploymentError, match="legacy Chat"):
         checks.validate_qa_aggregate([item for item in resources if item != "./chat/legacy"])
 

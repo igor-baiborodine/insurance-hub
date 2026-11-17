@@ -665,7 +665,7 @@ def validate_qa_aggregate(resources: Any) -> None:
         isinstance(resources, list) and all(isinstance(item, str) for item in resources),
         "QA service aggregate resources are invalid",
     )
-    require(resources.count("./chat") == 1, "Go Chat must be active exactly once")
+    require(resources.count("./chat") == 0, "Go Chat must remain inactive before release")
     require(resources.count("./chat/legacy") == 1, "legacy Chat must remain active exactly once")
 
 
