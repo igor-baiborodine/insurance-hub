@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -714,20 +715,19 @@ def validate_legacy_and_route_authority(environment: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    arguments = sys.argv[1:] if argv is None else argv
-    require(
-        len(arguments) == 1 and arguments[0] in {"render", "check"}, "unsupported check operation"
-    )
+    parser = argparse.ArgumentParser(description="Validate Chat deployment manifests")
+    parser.add_argument("operation", choices=("render", "check"))
+    operation = parser.parse_args(argv).operation
     environments = (
-        [os.environ.get("DEPLOY_ENV", "")] if arguments[0] == "render" else ["local-dev", "qa"]
+        [os.environ.get("DEPLOY_ENV", "")] if operation == "render" else ["local-dev", "qa"]
     )
     for environment in environments:
         require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
         text = render(environment)
         validate_render(environment, text)
-        if arguments[0] == "render":
+        if operation == "render":
             sys.stdout.write(text)
-    if arguments[0] == "check":
+    if operation == "check":
         aggregate = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(aggregate.get("resources"))
         for environment in ("local-dev", "qa"):

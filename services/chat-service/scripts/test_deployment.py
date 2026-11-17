@@ -59,6 +59,17 @@ def test_qa_mutation_is_rejected_before_cluster_access() -> None:
     fake.coordinates.assert_not_called()
 
 
+@pytest.mark.parametrize("arguments", ([], ["unsupported"]))
+def test_check_cli_rejects_invalid_usage_with_status_2(
+    arguments: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given / when / then
+    with pytest.raises(SystemExit) as exit_status:
+        checks.main(arguments)
+    assert exit_status.value.code == 2
+    assert "usage:" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
