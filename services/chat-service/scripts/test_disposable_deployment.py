@@ -103,6 +103,45 @@ def test_execute_cleans_namespace_after_partial_failure(monkeypatch: pytest.Monk
     cleanup.assert_called_once_with("kind-local-dev-insurance-hub", "chat-smoke-12345678")
 
 
+def test_execute_cleans_namespace_after_uncertain_creation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setattr(disposable_deployment, "verify_target", lambda _context: None)
+    monkeypatch.setattr(
+        disposable_deployment,
+        "create_namespace",
+        Mock(side_effect=checks.DeploymentError("namespace create response was lost")),
+    )
+    cleanup = Mock()
+    monkeypatch.setattr(disposable_deployment, "delete_namespace", cleanup)
+
+    # when / then
+    with pytest.raises(checks.DeploymentError, match="create response was lost"):
+        disposable_deployment.execute(
+            "kind-local-dev-insurance-hub",
+            "local-dev-insurance-hub",
+            "chat-smoke-12345678",
+            "insurance-hub-chat-api:1.0.0-local.aaaaaaaaaaaa",
+            "a" * 40,
+            [],
+        )
+    cleanup.assert_called_once_with("kind-local-dev-insurance-hub", "chat-smoke-12345678")
+
+
+def test_delete_namespace_rejects_foreign_resource(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    command = Mock(return_value=json.dumps({"metadata": {"labels": {}}}))
+    monkeypatch.setattr(disposable_deployment, "kubectl", command)
+
+    # when / then
+    with pytest.raises(disposable_deployment.DisposableError, match="foreign namespace"):
+        disposable_deployment.delete_namespace(
+            "kind-local-dev-insurance-hub", "chat-smoke-12345678"
+        )
+    assert command.call_count == 1
+
+
 @pytest.mark.parametrize(
     ("liveness", "readiness", "business", "message"),
     [

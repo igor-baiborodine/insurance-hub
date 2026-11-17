@@ -136,6 +136,7 @@ def create_namespace(context: str, namespace: str) -> None:
             "metadata": {
                 "name": namespace,
                 "labels": {"insurance-hub.io/chat-smoke": "owned"},
+                "annotations": {"insurance-hub.io/chat-smoke-owner": namespace},
             },
         },
         sort_keys=False,
@@ -144,6 +145,24 @@ def create_namespace(context: str, namespace: str) -> None:
 
 
 def delete_namespace(context: str, namespace: str) -> None:
+    text = kubectl(
+        context,
+        "default",
+        "get",
+        "namespace",
+        namespace,
+        "--ignore-not-found",
+        "-o",
+        "json",
+    )
+    if not text:
+        return
+    metadata = json.loads(text).get("metadata", {})
+    require(
+        metadata.get("labels", {}).get("insurance-hub.io/chat-smoke") == "owned"
+        and metadata.get("annotations", {}).get("insurance-hub.io/chat-smoke-owner") == namespace,
+        "refusing to delete a foreign namespace",
+    )
     kubectl(
         context,
         "default",
@@ -213,8 +232,8 @@ def execute(
     runtime_image_id = ""
     try:
         verify_target(context)
-        create_namespace(context, namespace)
         created = True
+        create_namespace(context, namespace)
         checks.run(
             ["kind", "load", "docker-image", image, "--name", cluster],
             timeout=120,
