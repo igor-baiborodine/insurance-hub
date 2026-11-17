@@ -218,6 +218,41 @@ def test_live_state_rejects_foreign_same_name_resource_before_apply() -> None:
     apply.assert_not_called()
 
 
+def test_live_state_accepts_kubernetes_api_defaults() -> None:
+    # given
+    items = checks.validate_render("local-dev", checks.render("local-dev"))
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    deployment_item = actual[("deployment", "local-dev-chat-api")]
+    deployment_item["status"] = {"availableReplicas": 1}
+    pod = deployment_item["spec"]["template"]["spec"]
+    pod.update(
+        {
+            "dnsPolicy": "ClusterFirst",
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "serviceAccountName": "default",
+        }
+    )
+    container = pod["containers"][0]
+    container.update(
+        {
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+        }
+    )
+    for probe in ("startupProbe", "livenessProbe", "readinessProbe"):
+        container[probe]["successThreshold"] = 1
+    policy = actual[("networkpolicy", "local-dev-chat-api")]
+    policy["spec"].pop("ingress")
+    policy["spec"].pop("egress")
+    target = object.__new__(checks.Target)
+    target.namespace = "local-dev-all"
+    target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
+
+    # when / then
+    target.live(items, require_deployment=True)
+
+
 def test_stop_scales_only_selected_deployment_and_observes_cleanup() -> None:
     # given
     target = Mock()

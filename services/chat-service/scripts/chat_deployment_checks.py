@@ -83,6 +83,26 @@ def labels_include(actual: Any, expected: dict[str, str]) -> bool:
     )
 
 
+def matching_probe(actual: Any, expected: Any) -> bool:
+    if actual == expected:
+        return True
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    normalized = dict(expected)
+    normalized.setdefault("successThreshold", 1)
+    return actual == normalized
+
+
+def normalized_policy_spec(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    for field in ("ingress", "egress"):
+        if result.get(field) == []:
+            result.pop(field)
+    return result
+
+
 def render(environment: str) -> str:
     record = service_record(ROOT, SERVICE)
     target = target_record(ROOT, record, environment)
@@ -394,10 +414,71 @@ class Target:
                 require(
                     observed.get("replicas") in ({1} if require_deployment else {0, 1})
                     and observed.get("selector") == expected.get("selector")
-                    and observed.get("template", {}).get("spec")
-                    == expected.get("template", {}).get("spec"),
-                    f"live Deployment/{name} differs",
+                    and observed.get("strategy") == expected.get("strategy")
+                    and observed.get("minReadySeconds") == expected.get("minReadySeconds")
+                    and observed.get("progressDeadlineSeconds")
+                    == expected.get("progressDeadlineSeconds"),
+                    f"live Deployment/{name} rollout settings differ",
                 )
+                expected_template = expected.get("template", {})
+                observed_template = observed.get("template", {})
+                require(
+                    labels_include(
+                        observed_template.get("metadata", {}).get("labels"),
+                        expected_template.get("metadata", {}).get("labels", {}),
+                    ),
+                    f"live Deployment/{name} workload labels differ",
+                )
+                expected_pod = expected_template.get("spec", {})
+                observed_pod = observed_template.get("spec", {})
+                require(
+                    observed_pod.get("automountServiceAccountToken") is False
+                    and observed_pod.get("enableServiceLinks") is False
+                    and observed_pod.get("terminationGracePeriodSeconds")
+                    == expected_pod.get("terminationGracePeriodSeconds")
+                    and observed_pod.get("securityContext") == expected_pod.get("securityContext")
+                    and observed_pod.get("serviceAccountName") in (None, "default")
+                    and observed_pod.get("hostNetwork") is not True
+                    and observed_pod.get("hostPID") is not True
+                    and observed_pod.get("hostIPC") is not True
+                    and not observed_pod.get("initContainers")
+                    and not observed_pod.get("volumes"),
+                    f"live Deployment/{name} pod security settings differ",
+                )
+                expected_containers = expected_pod.get("containers", [])
+                observed_containers = observed_pod.get("containers", [])
+                require(
+                    len(expected_containers) == len(observed_containers) == 1,
+                    f"live Deployment/{name} container inventory differs",
+                )
+                expected_container = expected_containers[0]
+                observed_container = observed_containers[0]
+                for field in (
+                    "name",
+                    "image",
+                    "imagePullPolicy",
+                    "securityContext",
+                    "ports",
+                    "env",
+                    "envFrom",
+                    "resources",
+                    "command",
+                    "args",
+                    "workingDir",
+                    "volumeMounts",
+                    "lifecycle",
+                ):
+                    require(
+                        observed_container.get(field) == expected_container.get(field),
+                        f"live Deployment/{name} container {field} differs",
+                    )
+                for field in ("startupProbe", "livenessProbe", "readinessProbe"):
+                    require(
+                        matching_probe(
+                            observed_container.get(field), expected_container.get(field)
+                        ),
+                        f"live Deployment/{name} container {field} differs",
+                    )
                 if require_deployment:
                     require(
                         actual.get("status", {}).get("availableReplicas") == 1,
@@ -420,7 +501,9 @@ class Target:
                 require(actual.get("data") == desired.get("data"), f"live ConfigMap/{name} differs")
             else:
                 require(
-                    kind == "NetworkPolicy" and actual.get("spec") == desired.get("spec"),
+                    kind == "NetworkPolicy"
+                    and normalized_policy_spec(actual.get("spec"))
+                    == normalized_policy_spec(desired.get("spec")),
                     f"live {kind}/{name} differs",
                 )
 
