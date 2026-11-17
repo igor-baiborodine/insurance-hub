@@ -11,9 +11,12 @@ TOOLING_REPOSITORY_ROOT ?= $(INSURANCE_HUB_ROOT)
 COMMON_GO_TOOLING_DIR := $(INSURANCE_HUB_ROOT)/scripts/go/module
 PYTHON_TOOLING_FILES := services/chat-service/scripts/chat_deployment_checks.py \
 	services/chat-service/scripts/deployment.py \
+	services/chat-service/scripts/disposable_deployment.py \
 	services/chat-service/scripts/test_deployment.py \
+	services/chat-service/scripts/test_disposable_deployment.py \
 	services/chat-service/scripts/test_tooling.py
-PYTHON_FAST_TEST_FILES := services/chat-service/scripts/test_deployment.py
+PYTHON_FAST_TEST_FILES := services/chat-service/scripts/test_deployment.py \
+	services/chat-service/scripts/test_disposable_deployment.py
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -43,6 +46,11 @@ SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
 SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
+QUALIFICATION_IMAGE_REF ?=
+QUALIFICATION_SOURCE_REVISION ?=
+QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
+QUALIFICATION_EFFECTIVE_SOURCE_REVISION := $(if $(strip $(QUALIFICATION_SOURCE_REVISION)),$(QUALIFICATION_SOURCE_REVISION),$(SOURCE_REVISION))
+QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
 GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
@@ -52,7 +60,7 @@ export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_RE
 	lint test test-race coverage test-integration build vulncheck check-go-pr check test-tooling \
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
 	image-build image-check _image-check-existing deploy-render deploy-check \
-	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-smoke \
 	python-tooling-format-check \
 	python-tooling-lint python-tooling-test-fast python-check shared-fast-build shared-fast-unit \
 	shared-candidate-format shared-candidate-lint shared-candidate-race \
@@ -175,8 +183,17 @@ deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runt
 
 deploy-test-tooling: python-toolchain-check
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONPATH="$(INSURANCE_HUB_ROOT)" \
-		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m 'not integration' \
-		services/chat-service/scripts/test_deployment.py
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+		-m 'not integration' services/chat-service/scripts/test_deployment.py \
+		services/chat-service/scripts/test_disposable_deployment.py
+
+deploy-smoke: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Smoke Chat in an owned disposable Kind namespace
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" \
+		PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
+		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_EFFECTIVE_SOURCE_REVISION)" \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" -m pytest -q -s \
+		-p no:cacheprovider -m integration \
+		services/chat-service/scripts/test_disposable_deployment.py
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -243,4 +260,5 @@ help:
 		'  make image-check      Build and inspect the nonroot Chat image' \
 		'  make deploy-check     Validate hardened local-dev and QA manifests' \
 		'  make deploy-test-tooling  Exercise fail-closed deployment guards' \
+		'  make deploy-smoke     Smoke the exact image in an owned Kind namespace' \
 		'  make run              Start the two-listener service'

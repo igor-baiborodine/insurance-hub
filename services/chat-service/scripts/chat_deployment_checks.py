@@ -592,6 +592,18 @@ def _http(url: str) -> tuple[int, bytes]:
         return error.code, error.read()
 
 
+def validate_deployed_responses(
+    liveness: tuple[int, bytes],
+    readiness: tuple[int, bytes],
+    business: tuple[int, bytes],
+) -> None:
+    require(liveness == (200, b"live\n"), "deployed liveness contract differs")
+    require(readiness == (200, b"ready\n"), "deployed readiness contract differs")
+    require(
+        business == (404, b"404 page not found\n"), "deployed business not-found contract differs"
+    )
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
     business_port, management_port = loopback_port(), loopback_port()
@@ -628,10 +640,10 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 time.sleep(0.2)
         else:
             raise DeploymentError("deployed readiness was not reachable")
-        require(
-            _http(f"http://127.0.0.1:{business_port}/ws/chat/main/test")
-            == (404, b"404 page not found\n"),
-            "deployed business not-found contract differs",
+        validate_deployed_responses(
+            _http(f"http://127.0.0.1:{management_port}/livez"),
+            _http(f"http://127.0.0.1:{management_port}/readyz"),
+            _http(f"http://127.0.0.1:{business_port}/ws/chat/main/test"),
         )
 
 
