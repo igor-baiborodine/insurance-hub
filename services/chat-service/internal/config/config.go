@@ -17,6 +17,24 @@ const DefaultServiceName = "chat-service"
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"
 
+const (
+	envWebSocketMaxConnections    = "WEBSOCKET_MAX_CONNECTIONS"
+	envWebSocketMaxMessageBytes   = "WEBSOCKET_MAX_MESSAGE_BYTES"
+	envWebSocketOutboundQueueSize = "WEBSOCKET_OUTBOUND_QUEUE_SIZE"
+	envWebSocketWriteTimeout      = "WEBSOCKET_WRITE_TIMEOUT"
+	envWebSocketPingInterval      = "WEBSOCKET_PING_INTERVAL"
+	envWebSocketPongTimeout       = "WEBSOCKET_PONG_TIMEOUT"
+	envWebSocketCloseTimeout      = "WEBSOCKET_CLOSE_TIMEOUT"
+
+	defaultWebSocketMaxConnections    = 128
+	defaultWebSocketMaxMessageBytes   = 32 * 1024
+	defaultWebSocketOutboundQueueSize = 8
+	defaultWebSocketWriteTimeout      = 5 * time.Second
+	defaultWebSocketPingInterval      = 30 * time.Second
+	defaultWebSocketPongTimeout       = 60 * time.Second
+	defaultWebSocketCloseTimeout      = 2 * time.Second
+)
+
 // Config contains the settings parsed and validated once during process startup.
 type Config struct {
 	kitconfig.HTTPServer
@@ -28,6 +46,18 @@ type Config struct {
 	ProbeTimeout       time.Duration
 	ShutdownTimeout    time.Duration
 	LogLevel           slog.Level
+	WebSocket          WebSocketSettings
+}
+
+// WebSocketSettings contains the bounded process-local Chat transport settings.
+type WebSocketSettings struct {
+	MaxConnections    int
+	MaxMessageBytes   int64
+	OutboundQueueSize int
+	WriteTimeout      time.Duration
+	PingInterval      time.Duration
+	PongTimeout       time.Duration
+	CloseTimeout      time.Duration
 }
 
 // Address preserves the shared TCP parser, including ephemeral test ports.
@@ -167,6 +197,10 @@ func load(lookup lookupEnv) (Config, error) {
 			"must exceed OTEL_EXPORTER_OTLP_TIMEOUT",
 		)
 	}
+	webSocket, err := loadWebSocket(lookup, shutdownTimeout, otelTimeout)
+	if err != nil {
+		return Config{}, err
+	}
 
 	httpServer, err := kitconfig.LoadHTTPServer(lookup)
 	if err != nil {
@@ -205,6 +239,99 @@ func load(lookup lookupEnv) (Config, error) {
 		ProbeTimeout:       probeTimeout,
 		ShutdownTimeout:    shutdownTimeout,
 		LogLevel:           logLevel,
+		WebSocket:          webSocket,
+	}, nil
+}
+
+func loadWebSocket(
+	lookup lookupEnv,
+	shutdownTimeout time.Duration,
+	exporterTimeout time.Duration,
+) (WebSocketSettings, error) {
+	maxConnections, err := kitconfig.LoadBoundedInt(
+		lookup,
+		envWebSocketMaxConnections,
+		strconv.Itoa(defaultWebSocketMaxConnections),
+		1,
+		defaultWebSocketMaxConnections,
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	maxMessageBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		envWebSocketMaxMessageBytes,
+		strconv.Itoa(defaultWebSocketMaxMessageBytes),
+		1,
+		defaultWebSocketMaxMessageBytes,
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	outboundQueueSize, err := kitconfig.LoadBoundedInt(
+		lookup,
+		envWebSocketOutboundQueueSize,
+		strconv.Itoa(defaultWebSocketOutboundQueueSize),
+		1,
+		defaultWebSocketOutboundQueueSize,
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	writeTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		envWebSocketWriteTimeout,
+		defaultWebSocketWriteTimeout.String(),
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	pingInterval, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		envWebSocketPingInterval,
+		defaultWebSocketPingInterval.String(),
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	pongTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		envWebSocketPongTimeout,
+		defaultWebSocketPongTimeout.String(),
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	closeTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		envWebSocketCloseTimeout,
+		defaultWebSocketCloseTimeout.String(),
+	)
+	if err != nil {
+		return WebSocketSettings{}, err
+	}
+	if pingInterval >= pongTimeout {
+		return WebSocketSettings{}, kitconfig.Invalid(
+			envWebSocketPingInterval,
+			"must be less than WEBSOCKET_PONG_TIMEOUT",
+		)
+	}
+	serviceBudget := shutdownTimeout - exporterTimeout
+	if writeTimeout > serviceBudget || closeTimeout > serviceBudget-writeTimeout {
+		return WebSocketSettings{}, kitconfig.Invalid(
+			kitconfig.EnvShutdownTimeout,
+			"must reserve WebSocket write and close deadlines after telemetry export",
+		)
+	}
+
+	return WebSocketSettings{
+		MaxConnections:    maxConnections,
+		MaxMessageBytes:   int64(maxMessageBytes),
+		OutboundQueueSize: outboundQueueSize,
+		WriteTimeout:      writeTimeout,
+		PingInterval:      pingInterval,
+		PongTimeout:       pongTimeout,
+		CloseTimeout:      closeTimeout,
 	}, nil
 }
 
