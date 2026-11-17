@@ -130,6 +130,18 @@ def test_qa_render_allows_only_dns_and_alloy_egress() -> None:
         checks.validate_render("qa", rendered.replace("port: 4317", "port: 4318", 1))
 
 
+def test_qa_render_accepts_canonical_future_release_tag() -> None:
+    # given
+    rendered = checks.render("qa")
+    future_release = rendered.replace("chat-api:1.0.0", "chat-api:1.0.1", 1)
+    invalid_release = rendered.replace("chat-api:1.0.0", "chat-api:2.0.0", 1)
+
+    # when / then
+    checks.validate_render("qa", future_release)
+    with pytest.raises(checks.DeploymentError, match="image identity"):
+        checks.validate_render("qa", invalid_release)
+
+
 def test_qa_aggregate_defers_go_activation_and_requires_legacy_chat_once() -> None:
     # given
     resources = yaml.safe_load(

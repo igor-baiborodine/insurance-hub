@@ -252,12 +252,22 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "container inventory differs",
     )
     container = containers[0]
-    expected_image = (
-        f"insurance-hub-chat-api:1.0.0-local.{version[4:]}"
-        if environment == "local-dev"
-        else "ghcr.io/igor-baiborodine/insurance-hub/chat-api:1.0.0"
-    )
-    require(container.get("image") == expected_image, "image identity differs")
+    image = container.get("image", "")
+    if environment == "local-dev":
+        require(
+            image == f"insurance-hub-chat-api:1.0.0-local.{version[4:]}",
+            "image identity differs",
+        )
+    else:
+        require(
+            bool(
+                re.fullmatch(
+                    r"ghcr\.io/igor-baiborodine/insurance-hub/chat-api:1\.[0-9]+\.[0-9]+",
+                    image,
+                )
+            ),
+            "image identity differs",
+        )
     require(
         container.get("imagePullPolicy") == ("Never" if environment == "local-dev" else "Always")
         and container.get("securityContext")
