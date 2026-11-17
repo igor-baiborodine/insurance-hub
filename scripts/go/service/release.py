@@ -223,7 +223,7 @@ def overlay_tag(
         version_index = version_indices[0]
         indent = lines[version_index].split("-", 1)[0]
         newline = "\n" if lines[version_index].endswith("\n") else ""
-        lines[version_index] = f"{indent}- SERVICE_VERSION=git-{source_commit[:12]}{newline}"
+        lines[version_index] = f"{indent}- SERVICE_VERSION={source_version(source_commit)}{newline}"
     return path, "".join(lines)
 
 

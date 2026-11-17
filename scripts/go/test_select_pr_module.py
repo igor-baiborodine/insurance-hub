@@ -133,6 +133,23 @@ def test_document_service_selects_standard_business_service_coverage() -> None:
     assert result["coverage_flag"] == "document-service"
 
 
+def test_chat_service_uses_generic_business_service_selection() -> None:
+    # when
+    result = select_pr_module.selection_outputs(
+        ["services/chat-service/internal/service/service.go"],
+        "a" * 40,
+    )
+
+    # then
+    assert result["module_dir"] == "services/chat-service"
+    assert result["validation_target"] == "check-go-pr"
+    assert result["coverage_files"].split(",") == [
+        "services/chat-service/coverage.txt",
+        "services/chat-service/integration-coverage.txt",
+    ]
+    assert result["coverage_flag"] == "chat-service"
+
+
 @pytest.mark.parametrize(
     "path",
     [

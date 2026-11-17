@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tooling_config import load_tooling_config, validate_catalog_identity
 
 import resolve
 
@@ -193,6 +194,49 @@ def test_document_supports_foundation_capabilities_without_administration() -> N
     for unsupported in ("reader-ensure", "initialize", "resource-ensure"):
         with pytest.raises(resolve.DispatchError, match="does not support capability"):
             resolve.resolve_service(root, script_dir / "catalog.json", "document", unsupported)
+
+
+def test_chat_supports_only_foundation_capabilities_and_canonical_identity() -> None:
+    # given
+    script_dir = Path(resolve.__file__).resolve().parent
+    root = script_dir.parents[2]
+    catalog = resolve.load_catalog(script_dir / "catalog.json")
+    expected = [
+        "image-build",
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling",
+        "deploy-smoke",
+    ]
+
+    # when
+    paths = [
+        resolve.resolve_service(root, script_dir / "catalog.json", "chat", capability)
+        for capability in expected
+    ]
+
+    # then
+    record = catalog["services"]["chat"]
+    config = load_tooling_config(root / "services/chat-service/go-service-tooling.json")
+    validate_catalog_identity(config, "chat", record)
+    assert record["modulePath"] == "services/chat-service"
+    assert record["localImage"] == "insurance-hub-chat-api"
+    assert record["registryImage"].endswith("/chat-api")
+    assert record["capabilities"] == expected
+    assert record["releaseTargets"] == ["qa"]
+    assert "administration" not in record
+    assert all("initialization" not in target for target in record["deploymentTargets"].values())
+    assert paths == ["services/chat-service"] * len(expected)
+    for unsupported in ("reader-ensure", "initialize", "resource-ensure", "deploy-test"):
+        with pytest.raises(resolve.DispatchError, match="does not support capability"):
+            resolve.resolve_service(root, script_dir / "catalog.json", "chat", unsupported)
 
 
 @pytest.mark.parametrize("arguments", [[], ["deploy", "status"]])

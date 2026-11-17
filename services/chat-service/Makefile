@@ -24,6 +24,8 @@ GOVULNCHECK_VERSION := v1.8.0
 SERVICEKIT_VERSION := v1.1.0
 BUILD_EXECUTABLES := server
 TEST_PACKAGES ?= ./...
+COVERAGE_FILE ?= coverage.txt
+INTEGRATION_COVERAGE_FILE ?=
 
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
@@ -42,7 +44,7 @@ GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
-	lint test test-race test-integration build vulncheck check-go-pr check test-tooling \
+	lint test test-race coverage test-integration build vulncheck check-go-pr check test-tooling \
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
 	image-build image-check _image-check-existing python-tooling-format-check \
 	python-tooling-lint python-tooling-test-fast python-check shared-fast-build shared-fast-unit \
@@ -98,9 +100,15 @@ test:
 test-race:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./...
 
+coverage:
+	@test -n "$(strip $(COVERAGE_FILE))" || { echo 'COVERAGE_FILE must not be empty' >&2; exit 1; }
+	GOWORK=off $(GO) test -mod=readonly -count=1 -race -covermode=atomic \
+		-coverprofile="$(COVERAGE_FILE)" ./...
+
 test-integration:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
-		-run '^TestRunServesManagementAndExactBusinessNotFound$$'
+		-run '^TestRunServesManagementAndExactBusinessNotFound$$' \
+		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 build: python-runtime-check
 	@MODULE_ROOT="$(CURDIR)" GO="$(GO)" BUILD_EXECUTABLES="$(BUILD_EXECUTABLES)" \
@@ -172,9 +180,19 @@ shared-fast-build:
 shared-fast-unit:
 	@if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then SERVICEKIT_PHASE=unit PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; else $(MAKE) --no-print-directory test; fi
 
+shared-candidate-format:
+shared-candidate-lint:
+shared-candidate-race:
+shared-candidate-dependency:
+shared-candidate-vulnerability:
 shared-candidate-format shared-candidate-lint shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability:
 	@phase="$(@:shared-candidate-%=%)"; if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then SERVICEKIT_PHASE="$$phase" PYTHONPATH="$(INSURANCE_HUB_ROOT)/scripts/go" "$(PYTHON)" "$(INSURANCE_HUB_ROOT)/scripts/go/shared_cli.py" phase; else case "$$phase" in format) target=format-check;; race) target=test-race;; dependency) target=check-deps;; vulnerability) target=vulncheck;; *) target="$$phase";; esac; $(MAKE) --no-print-directory "$$target"; fi
 
+shared-candidate-generated:
+shared-candidate-breaking:
+shared-candidate-integration:
+shared-candidate-copy:
+shared-candidate-image:
 shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-copy shared-candidate-image:
 	@phase="$(@:shared-candidate-%=%)"; if [ -n "$$SERVICEKIT_CONTEXT_SOCKET" ]; then PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m scripts.go.service.shared_phase --config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; else case "$$phase" in generated) target=candidate-generated-inapplicable;; breaking) target=candidate-breaking-inapplicable;; integration) target=test-integration;; copy) target=candidate-copy-inapplicable;; image) target=image-check;; esac; $(MAKE) --no-print-directory "$$target"; fi
 
@@ -184,7 +202,8 @@ test-tooling: verify-tools python-toolchain-check
 		TOOLS_BIN="$(TOOLS_BIN)" GO="$(GO)" UV="$(UV)" PYTHON="$(PYTHON)" \
 		./scripts/test-tooling.sh
 
-check-go-pr: verify-tools dockerfile-check format-check lint test-race test-integration build check-deps vulncheck python-check check-servicekit
+check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
+check-go-pr: verify-tools dockerfile-check format-check lint coverage test-integration build check-deps vulncheck python-check check-servicekit
 
 check: check-go-pr
 

@@ -28,6 +28,8 @@ def topology(tmp_path: Path, modules: list[dict[str, str]] | None = None) -> Pat
         {"directory": "services/product-service", "role": "business-service"},
         {"directory": "services/policy-search-service", "role": "business-service"},
         {"directory": "services/dashboard-service", "role": "business-service"},
+        {"directory": "services/document-service", "role": "business-service"},
+        {"directory": "services/chat-service", "role": "business-service"},
         {"directory": "libs/servicekit", "role": "public-shared"},
     ]
     path = tmp_path / "go-module-topology.json"
@@ -112,12 +114,14 @@ def test_main_runs_each_module_and_appends_summary(tmp_path: Path) -> None:
 
     # then
     assert status == 0
-    assert len(calls) == 5
+    assert len(calls) == 7
     text = summary.read_text(encoding="utf-8")
     assert "| libs/servicekit | B | 80.0% | 2 |" in text
     assert "| services/product-service | B | 80.0% | 2 |" in text
     assert "| services/policy-search-service | B | 80.0% | 2 |" in text
     assert "| services/dashboard-service | B | 80.0% | 2 |" in text
+    assert "| services/document-service | B | 80.0% | 2 |" in text
+    assert "| services/chat-service | B | 80.0% | 2 |" in text
     assert "| templates/go-service | B | 80.0% | 2 |" in text
 
 
