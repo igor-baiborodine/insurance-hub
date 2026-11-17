@@ -166,7 +166,7 @@ func TestHub_ConcurrentJoinBroadcastLeave(t *testing.T) {
 			defer wait.Done()
 			sessions[index], joinErrors[index] = hub.Join(
 				"Main",
-				string('a'+index),
+				string(rune('a'+index)),
 			)
 		}()
 	}
