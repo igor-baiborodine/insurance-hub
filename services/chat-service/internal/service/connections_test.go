@@ -26,6 +26,27 @@ func (connection *fakeConnection) Wait(ctx context.Context) error {
 	return nil
 }
 
+func TestConnectionRegistry_BeginDrain_RejectsRegistrationBeforeClose(t *testing.T) {
+	// given
+	registry := NewConnectionRegistry()
+	connection := &fakeConnection{}
+	if err := registry.Register(connection); err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	registry.BeginDrain()
+	registrationErr := registry.Register(&fakeConnection{})
+
+	// then
+	if !errors.Is(registrationErr, errConnectionDrainStarted) {
+		t.Fatalf("register during drain = %v", registrationErr)
+	}
+	if connection.closed.Load() != 0 {
+		t.Errorf("close count before drain = %d", connection.closed.Load())
+	}
+}
+
 func TestConnectionRegistry_Drain_ClosesJoinsAndRejectsRegistration(t *testing.T) {
 	// given
 	registry := NewConnectionRegistry()

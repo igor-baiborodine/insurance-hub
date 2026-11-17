@@ -230,6 +230,7 @@ func shutdown(
 ) error {
 	state.SetReady(false)
 	businessHandler.beginDrain()
+	registry.BeginDrain()
 	serviceBudget := settings.ShutdownTimeout - settings.ExporterTimeout
 	serviceCtx, cancelService := context.WithTimeout(context.Background(), serviceBudget)
 	defer cancelService()

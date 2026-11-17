@@ -55,10 +55,17 @@ func (registry *ConnectionRegistry) Draining() bool {
 	return registry.draining
 }
 
+// BeginDrain rejects new connection registrations before server shutdown starts.
+func (registry *ConnectionRegistry) BeginDrain() {
+	registry.mutex.Lock()
+	defer registry.mutex.Unlock()
+	registry.draining = true
+}
+
 // Drain rejects new registrations, closes every snapshot connection, then joins each within ctx.
 func (registry *ConnectionRegistry) Drain(ctx context.Context) error {
+	registry.BeginDrain()
 	registry.mutex.Lock()
-	registry.draining = true
 	connections := make([]TrackedConnection, 0, len(registry.connections))
 	for connection := range registry.connections {
 		connections = append(connections, connection)
