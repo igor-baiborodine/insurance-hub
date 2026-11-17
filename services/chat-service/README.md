@@ -91,6 +91,8 @@ make -C services/chat-service test
 make -C services/chat-service test-tooling
 make -C services/chat-service check FORMAT_SCOPE=all
 make -C services/chat-service image-check
+make go-svc-deploy-check SVC_NAME=chat
+make go-svc-deploy-test-tooling SVC_NAME=chat
 ```
 
 `bootstrap-tools` explicitly installs only the two pinned module tools: `golangci-lint` and
@@ -109,7 +111,15 @@ generated source or published protobuf/gateway contract. There is no active sour
 revision and version labels. The workload is designed for a read-only root filesystem and needs no
 runtime file writes.
 
-The generic service catalog, release, Kubernetes and deployment ownership are added by later C01
-steps. Until route transfer in C03, the Go service must not be made a browser/Nginx Chat upstream.
-Java retirement is a separate, one-time manual C04 operation and never removes legacy source or
-repository manifests.
+The generic service catalog and module-owned deployment guards render hardened, one-replica
+local-dev and QA workloads with distinct business and management Services. Both environments keep
+the Go workload without browser ingress; local-dev is default-denied, and QA adds only DNS and
+Alloy OTLP egress. QA activates both the Go and legacy overlays, while both Vue environments retain
+the legacy Chat URL as their only route authority.
+
+`deploy-check` validates both renders, exact source-derived version mapping, legacy coexistence and
+unchanged Vue authority without contacting a cluster. `deploy-test-tooling` uses fake boundaries to
+exercise target selection, failure and bounded cleanup. Live deployment commands require exact
+catalog coordinates and separate authorization. Until route transfer in C03, the Go service must
+not be made a browser/Nginx Chat upstream. Java retirement is a separate, one-time manual C04
+operation and never removes legacy source or repository manifests.

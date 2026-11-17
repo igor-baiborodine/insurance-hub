@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chat-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: chat-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []

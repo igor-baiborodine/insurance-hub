@@ -1,0 +1,642 @@
+#!/usr/bin/env python3
+"""Chat deployment guards and service-owned lifecycle hooks."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from contextlib import ExitStack
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
+sys.path.insert(0, str(ROOT))
+
+from scripts.go.service.configuration import service_record, target_record  # noqa: E402
+from scripts.go.service.deployment import (  # noqa: E402
+    DeploymentError as SharedDeploymentError,
+)
+from scripts.go.service.tooling_contracts import (  # noqa: E402
+    AdministrationError,
+    OwnedPortForward,
+    PortForwardSpec,
+    loopback_port,
+)
+from scripts.python.process_runner import CommandError, run_command  # noqa: E402
+
+SERVICE = "chat"
+EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
+ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
+
+
+class DeploymentError(RuntimeError):
+    """Chat deployment state differs from the accepted contract."""
+
+
+def require(condition: object, message: str) -> None:
+    if not condition:
+        raise DeploymentError(message)
+
+
+def safe_environment() -> dict[str, str]:
+    allowed = ("HOME", "KUBECONFIG", "PATH", "SSL_CERT_DIR", "SSL_CERT_FILE", "TERM", "TMPDIR")
+    return {name: os.environ[name] for name in allowed if name in os.environ}
+
+
+def run(argv: list[str], *, input_text: str | None = None, timeout: int = 30) -> str:
+    result = run_command(
+        argv,
+        cwd=ROOT,
+        env=safe_environment(),
+        timeout_seconds=timeout,
+        teardown_seconds=10,
+        activity="Chat deployment command",
+        input_text=input_text,
+    )
+    return result.stdout
+
+
+def documents(text: str) -> list[dict[str, Any]]:
+    return [item for item in yaml.safe_load_all(text) if isinstance(item, dict)]
+
+
+def resource(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any]:
+    matches = [
+        item
+        for item in items
+        if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
+    ]
+    require(len(matches) == 1, f"expected exactly one {kind}/{name}")
+    return matches[0]
+
+
+def labels_include(actual: Any, expected: dict[str, str]) -> bool:
+    return isinstance(actual, dict) and all(
+        actual.get(key) == value for key, value in expected.items()
+    )
+
+
+def render(environment: str) -> str:
+    record = service_record(ROOT, SERVICE)
+    target = target_record(ROOT, record, environment)
+    return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
+
+
+def expected_egress(environment: str) -> list[dict[str, Any]]:
+    if environment == "local-dev":
+        return []
+    return [
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                    },
+                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+                }
+            ],
+            "ports": [
+                {"port": 53, "protocol": "UDP"},
+                {"port": 53, "protocol": "TCP"},
+            ],
+        },
+        {
+            "to": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "qa-monitoring"}
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "alloy",
+                            "app.kubernetes.io/instance": "qa-alloy",
+                        }
+                    },
+                }
+            ],
+            "ports": [{"port": 4317, "protocol": "TCP"}],
+        },
+    ]
+
+
+def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
+    require(environment in {"local-dev", "qa"}, "deployment environment is invalid")
+    items = documents(text)
+    require(bool(items), "render produced no resources")
+    require({item.get("kind") for item in items} == EXPECTED_KINDS, "resource kinds differ")
+    require(len(items) == 5, "Chat resource inventory differs")
+    prefix = f"{environment}-"
+    expected_names = {
+        "ConfigMap": {prefix + "chat-config"},
+        "Deployment": {prefix + "chat-api"},
+        "Service": {prefix + "chat-api", prefix + "chat-api-management"},
+        "NetworkPolicy": {prefix + "chat-api"},
+    }
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    for kind, names in expected_names.items():
+        actual = {
+            item.get("metadata", {}).get("name") for item in items if item.get("kind") == kind
+        }
+        require(actual == names, f"{kind} identity differs")
+    for item in items:
+        metadata = item.get("metadata", {})
+        require(metadata.get("namespace") in (None, namespace), "resource namespace differs")
+        require(
+            labels_include(
+                metadata.get("labels"),
+                {
+                    "app.kubernetes.io/name": "chat-api",
+                    "app.kubernetes.io/part-of": "insurance-hub",
+                },
+            ),
+            "resource labels differ",
+        )
+
+    config = resource(items, "ConfigMap", prefix + "chat-config")
+    data = config.get("data", {})
+    expected_config = {
+        "SERVICE_NAME": "chat-service",
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "HEALTH_ADDR": "0.0.0.0:8081",
+        "HTTP_READ_HEADER_TIMEOUT": "5s",
+        "HTTP_READ_TIMEOUT": "10s",
+        "HTTP_WRITE_TIMEOUT": "10s",
+        "HTTP_IDLE_TIMEOUT": "30s",
+        "HTTP_MAX_HEADER_BYTES": "16384",
+        "PROBE_TIMEOUT": "2s",
+        "SHUTDOWN_TIMEOUT": "10s",
+        "LOG_LEVEL": "info",
+        "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
+        "OTEL_EXPORTER_OTLP_TIMEOUT": "2s",
+        "DEPLOYMENT_ENVIRONMENT": environment,
+        "SERVICE_VERSION": data.get("SERVICE_VERSION"),
+    }
+    if environment == "qa":
+        expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
+            "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
+        )
+    require(data == expected_config, "runtime configuration differs")
+    version = data.get("SERVICE_VERSION", "")
+    require(
+        bool(re.fullmatch(r"git-[0-9a-f]{12}", version)) and set(version[4:]) != {"0"},
+        "runtime version is unresolved",
+    )
+
+    deployment = resource(items, "Deployment", prefix + "chat-api")
+    spec = deployment.get("spec", {})
+    require(
+        spec.get("replicas") == 1
+        and spec.get("minReadySeconds") == 5
+        and spec.get("progressDeadlineSeconds") == 180
+        and spec.get("strategy") == {"type": "Recreate"},
+        "rollout settings differ",
+    )
+    selector = {"app.kubernetes.io/name": "chat-api", "app.kubernetes.io/component": "api"}
+    require(spec.get("selector", {}).get("matchLabels") == selector, "workload selector differs")
+    template = spec.get("template", {})
+    require(
+        labels_include(template.get("metadata", {}).get("labels"), selector)
+        and deployment.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version")
+        == version
+        and template.get("metadata", {}).get("labels", {}).get("app.kubernetes.io/version")
+        == version,
+        "workload identity or version differs",
+    )
+    pod = template.get("spec", {})
+    require(
+        pod.get("automountServiceAccountToken") is False
+        and pod.get("enableServiceLinks") is False
+        and pod.get("terminationGracePeriodSeconds") == 30
+        and pod.get("securityContext")
+        == {
+            "runAsNonRoot": True,
+            "runAsUser": 65532,
+            "runAsGroup": 65532,
+            "fsGroup": 65532,
+            "seccompProfile": {"type": "RuntimeDefault"},
+        }
+        and not pod.get("initContainers")
+        and not pod.get("volumes"),
+        "Pod security differs",
+    )
+    containers = pod.get("containers", [])
+    require(
+        len(containers) == 1 and containers[0].get("name") == "chat-api",
+        "container inventory differs",
+    )
+    container = containers[0]
+    expected_image = (
+        f"insurance-hub-chat-api:1.0.0-local.{version[4:]}"
+        if environment == "local-dev"
+        else "ghcr.io/igor-baiborodine/insurance-hub/chat-api:1.0.0"
+    )
+    require(container.get("image") == expected_image, "image identity differs")
+    require(
+        container.get("imagePullPolicy") == ("Never" if environment == "local-dev" else "Always")
+        and container.get("securityContext")
+        == {
+            "allowPrivilegeEscalation": False,
+            "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"]},
+        }
+        and container.get("ports")
+        == [
+            {"name": "http", "containerPort": 8080, "protocol": "TCP"},
+            {"name": "management", "containerPort": 8081, "protocol": "TCP"},
+        ]
+        and container.get("env")
+        == [
+            {
+                "name": "SERVICE_INSTANCE_ID",
+                "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
+            }
+        ]
+        and container.get("envFrom") == [{"configMapRef": {"name": prefix + "chat-config"}}],
+        "container security, ports or configuration differs",
+    )
+    expected_probes = {
+        "startupProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 2, 2, 30),
+        "livenessProbe": ({"path": "/livez", "port": "management", "scheme": "HTTP"}, 10, 2, 3),
+        "readinessProbe": ({"path": "/readyz", "port": "management", "scheme": "HTTP"}, 5, 2, 2),
+    }
+    for name, (http_get, period, timeout, failures) in expected_probes.items():
+        require(
+            container.get(name)
+            == {
+                "httpGet": http_get,
+                "periodSeconds": period,
+                "timeoutSeconds": timeout,
+                "failureThreshold": failures,
+            },
+            f"{name} differs",
+        )
+
+    business = resource(items, "Service", prefix + "chat-api")
+    management = resource(items, "Service", prefix + "chat-api-management")
+    require(
+        business.get("spec", {}).get("type") == "ClusterIP"
+        and business.get("spec", {}).get("selector") == selector
+        and business.get("spec", {}).get("ports")
+        == [{"name": "http", "port": 80, "protocol": "TCP", "targetPort": "http"}]
+        and management.get("spec", {}).get("type") == "ClusterIP"
+        and management.get("spec", {}).get("selector") == selector
+        and management.get("spec", {}).get("ports")
+        == [{"name": "management", "port": 8081, "protocol": "TCP", "targetPort": "management"}],
+        "Service contract differs",
+    )
+    policy = resource(items, "NetworkPolicy", prefix + "chat-api")
+    policy_spec = policy.get("spec", {})
+    require(
+        policy_spec.get("podSelector", {}).get("matchLabels") == selector
+        and policy_spec.get("policyTypes") == ["Ingress", "Egress"]
+        and policy_spec.get("ingress", []) == []
+        and policy_spec.get("egress", []) == expected_egress(environment),
+        "NetworkPolicy differs",
+    )
+    return items
+
+
+class Target:
+    """Exact catalog target selected before cluster access."""
+
+    def __init__(self) -> None:
+        self.service = SERVICE
+        self.record = service_record(ROOT, SERVICE)
+        self.environment = os.environ.get("DEPLOY_ENV", "")
+        require(self.environment in self.record.get("environments", []), "DEPLOY_ENV is invalid")
+        self.configuration = target_record(ROOT, self.record, self.environment)
+        expected = {
+            "DEPLOY_CONTEXT": self.configuration["context"],
+            "DEPLOY_SVC_NS": self.configuration["namespace"],
+            "DEPLOY_DATA_NS": self.configuration["dataNamespace"],
+        }
+        for name, value in expected.items():
+            require(os.environ.get(name, "") == value, f"{name} differs from the catalog")
+        self.context = expected["DEPLOY_CONTEXT"]
+        self.namespace = expected["DEPLOY_SVC_NS"]
+        self.data_namespace = expected["DEPLOY_DATA_NS"]
+        self.deployment = f"{self.environment}-chat-api"
+        self.business = f"{self.environment}-chat-api"
+        self.management = f"{self.environment}-chat-api-management"
+        self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
+
+    def kubectl(self, *args: str, input_text: str | None = None, timeout: int = 30) -> str:
+        return run(
+            [self.kubectl_binary, "--context", self.context, "--namespace", self.namespace, *args],
+            input_text=input_text,
+            timeout=timeout,
+        )
+
+    def json(self, *args: str) -> dict[str, Any]:
+        return json.loads(self.kubectl(*args, "-o", "json") or "{}")
+
+    def coordinates(self) -> None:
+        require(
+            run([self.kubectl_binary, "config", "current-context"]).strip() == self.context,
+            "active Kubernetes context differs",
+        )
+        namespace = self.json("get", "namespace", self.namespace)
+        require(namespace.get("metadata", {}).get("name") == self.namespace, "namespace differs")
+
+    def rendered(self) -> tuple[str, list[dict[str, Any]], str]:
+        text = render(self.environment)
+        items = validate_render(self.environment, text)
+        deployment = resource(items, "Deployment", self.deployment)
+        image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+        requested = os.environ.get("DEPLOY_IMAGE_REF", "")
+        if requested:
+            require(self.environment == "local-dev", "DEPLOY_IMAGE_REF is direct-local only")
+            require(
+                bool(
+                    re.fullmatch(r"insurance-hub-chat-api:1\.0\.0-local\.[0-9a-f]{12}", requested)
+                ),
+                "DEPLOY_IMAGE_REF differs",
+            )
+            version = "git-" + requested.rsplit(".", 1)[1]
+            deployment["spec"]["template"]["spec"]["containers"][0]["image"] = requested
+            deployment["metadata"]["labels"]["app.kubernetes.io/version"] = version
+            deployment["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+                version
+            )
+            resource(items, "ConfigMap", f"{self.environment}-chat-config")["data"][
+                "SERVICE_VERSION"
+            ] = version
+            text = yaml.safe_dump_all(items, explicit_start=True, sort_keys=False)
+            image = requested
+        return text, items, image
+
+    def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
+        for desired in items:
+            kind = str(desired["kind"])
+            name = str(desired["metadata"]["name"])
+            actual = self.json("get", kind.lower(), name, "--ignore-not-found")
+            if not actual:
+                require(not require_deployment, f"{kind}/{name} is absent")
+                continue
+            require(
+                actual.get("kind") == kind
+                and actual.get("metadata", {}).get("name") == name
+                and actual.get("metadata", {}).get("namespace") == self.namespace
+                and not actual.get("metadata", {}).get("ownerReferences")
+                and not actual.get("metadata", {}).get("deletionTimestamp"),
+                f"live {kind}/{name} identity differs",
+            )
+            if kind == "Deployment":
+                expected = desired.get("spec", {})
+                observed = actual.get("spec", {})
+                require(
+                    observed.get("replicas") in ({1} if require_deployment else {0, 1})
+                    and observed.get("selector") == expected.get("selector")
+                    and observed.get("template", {}).get("spec")
+                    == expected.get("template", {}).get("spec"),
+                    f"live Deployment/{name} differs",
+                )
+                if require_deployment:
+                    require(
+                        actual.get("status", {}).get("availableReplicas") == 1,
+                        f"live Deployment/{name} is not available",
+                    )
+            elif kind == "Service":
+                observed = actual.get("spec", {})
+                expected = desired.get("spec", {})
+                require(
+                    observed.get("type") == "ClusterIP"
+                    and observed.get("selector") == expected.get("selector")
+                    and observed.get("ports") == expected.get("ports")
+                    and not any(
+                        field in observed
+                        for field in ("externalIPs", "loadBalancerIP", "externalName")
+                    ),
+                    f"live Service/{name} differs or is externally exposed",
+                )
+            elif kind == "ConfigMap":
+                require(actual.get("data") == desired.get("data"), f"live ConfigMap/{name} differs")
+            else:
+                require(
+                    kind == "NetworkPolicy" and actual.get("spec") == desired.get("spec"),
+                    f"live {kind}/{name} differs",
+                )
+
+
+def check_render() -> None:
+    environment = os.environ.get("DEPLOY_ENV", "")
+    validate_render(environment, render(environment))
+
+
+def secret_and_image(target: Target, image: str) -> None:
+    require(not os.environ.get("DEPLOY_SECRET"), "Chat accepts no deployment Secret")
+    if target.configuration["mode"] == "flux":
+        require(
+            bool(
+                re.fullmatch(
+                    r"ghcr\.io/igor-baiborodine/insurance-hub/chat-api:1\.[0-9]+\.[0-9]+", image
+                )
+            ),
+            "QA image tag differs",
+        )
+        return
+    require(
+        bool(re.fullmatch(r"insurance-hub-chat-api:1\.0\.0-local\.[0-9a-f]{12}", image)),
+        "local image tag differs",
+    )
+    details = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
+    require(len(details) == 1, "local image inspect differs")
+    revision = (
+        details[0].get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision", "")
+    )
+    require(
+        bool(re.fullmatch(r"[0-9a-f]{40}", revision)) and revision[:12] == image.rsplit(".", 1)[1],
+        "image source revision differs",
+    )
+
+
+def rollout(target: Target) -> None:
+    seconds = ROLLOUT_TIMEOUT_SECONDS[target.environment]
+    target.kubectl(
+        "rollout",
+        "status",
+        f"deployment/{target.deployment}",
+        f"--timeout={seconds}s",
+        timeout=seconds + 30,
+    )
+
+
+def check_requested_route(target: Target) -> None:
+    resources = run(
+        [
+            target.kubectl_binary,
+            "--context",
+            target.context,
+            "api-resources",
+            "--verbs=list",
+            "-o",
+            "name",
+        ]
+    )
+    for kind in ("ingresses.networking.k8s.io", "httproutes.gateway.networking.k8s.io"):
+        if kind not in resources.splitlines():
+            continue
+        listing = run(
+            [
+                target.kubectl_binary,
+                "--context",
+                target.context,
+                "get",
+                kind,
+                "--all-namespaces",
+                "-o",
+                "json",
+            ]
+        )
+        require(
+            target.business not in listing and target.management not in listing,
+            "public route references Go Chat",
+        )
+
+
+def _http(url: str) -> tuple[int, bytes]:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def verify(target: Target, items: list[dict[str, Any]]) -> None:
+    target.live(items, require_deployment=True)
+    business_port, management_port = loopback_port(), loopback_port()
+    with ExitStack() as forwards:
+        for service, local_port, remote_port in (
+            (target.business, business_port, 80),
+            (target.management, management_port, 8081),
+        ):
+            try:
+                forwards.enter_context(
+                    OwnedPortForward(
+                        PortForwardSpec(
+                            context=target.context,
+                            namespace=target.namespace,
+                            resource=f"service/{service}",
+                            local_port=local_port,
+                            remote_port=remote_port,
+                        ),
+                        cwd=ROOT,
+                        env=safe_environment(),
+                        startup_seconds=20,
+                        teardown_seconds=5,
+                        kubectl=target.kubectl_binary,
+                    )
+                )
+            except AdministrationError as error:
+                raise DeploymentError(str(error)) from error
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                if _http(f"http://127.0.0.1:{management_port}/readyz") == (200, b"ready\n"):
+                    break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            raise DeploymentError("deployed readiness was not reachable")
+        require(
+            _http(f"http://127.0.0.1:{business_port}/ws/chat/main/test")
+            == (404, b"404 page not found\n"),
+            "deployed business not-found contract differs",
+        )
+
+
+def stop(target: Target, _items: list[dict[str, Any]]) -> None:
+    target.kubectl("scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s")
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if (
+            target.json("get", "deployment", target.deployment).get("status", {}).get("replicas", 0)
+            == 0
+        ):
+            return
+        time.sleep(1)
+    raise DeploymentError("Chat stop exceeded 90 seconds")
+
+
+def validate_qa_aggregate(resources: Any) -> None:
+    require(
+        isinstance(resources, list) and all(isinstance(item, str) for item in resources),
+        "QA service aggregate resources are invalid",
+    )
+    require(resources.count("./chat") == 1, "Go Chat must be active exactly once")
+    require(resources.count("./chat/legacy") == 1, "legacy Chat must remain active exactly once")
+
+
+def validate_legacy_and_route_authority(environment: str) -> None:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"
+    items = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
+    deployment = resource(items, "Deployment", f"{environment}-chat-api-legacy")
+    service = resource(items, "Service", f"{environment}-chat-api-legacy")
+    selector = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
+    require(
+        len(items) == 2
+        and selector == service.get("spec", {}).get("selector")
+        and selector.get("app.kubernetes.io/name") == "chat-api-legacy"
+        and selector.get("app.kubernetes.io/name") != "chat-api",
+        "legacy Chat identity or selector separation differs",
+    )
+    vue = yaml.safe_load(
+        (ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml").read_text()
+    )
+    generators = vue.get("configMapGenerator", [])
+    values = [
+        literal
+        for generator in generators
+        for literal in generator.get("literals", [])
+        if literal.startswith("CHAT_URL=")
+    ]
+    require(
+        values == [f"CHAT_URL=http://{environment}-chat-api-legacy.{namespace}.svc.cluster.local"],
+        "Vue Chat route authority differs",
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    require(
+        len(arguments) == 1 and arguments[0] in {"render", "check"}, "unsupported check operation"
+    )
+    environments = (
+        [os.environ.get("DEPLOY_ENV", "")] if arguments[0] == "render" else ["local-dev", "qa"]
+    )
+    for environment in environments:
+        require(environment in {"local-dev", "qa"}, "DEPLOY_ENV is invalid")
+        text = render(environment)
+        validate_render(environment, text)
+        if arguments[0] == "render":
+            sys.stdout.write(text)
+    if arguments[0] == "check":
+        aggregate = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
+        validate_qa_aggregate(aggregate.get("resources"))
+        for environment in ("local-dev", "qa"):
+            validate_legacy_and_route_authority(environment)
+        print("chat-deployment-check: local-dev/QA renders and coexistence passed")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (
+        DeploymentError,
+        SharedDeploymentError,
+        AdministrationError,
+        CommandError,
+        OSError,
+        ValueError,
+    ) as error:
+        print(f"chat-deployment-check: {error}", file=sys.stderr)
+        raise SystemExit(1) from error

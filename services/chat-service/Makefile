@@ -2,13 +2,18 @@
 
 GO ?= go
 DOCKER ?= docker
+KUBECTL ?= kubectl
+DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(INSURANCE_HUB_ROOT)
 COMMON_GO_TOOLING_DIR := $(INSURANCE_HUB_ROOT)/scripts/go/module
-PYTHON_TOOLING_FILES := services/chat-service/scripts/test_tooling.py
-PYTHON_FAST_TEST_FILES :=
+PYTHON_TOOLING_FILES := services/chat-service/scripts/chat_deployment_checks.py \
+	services/chat-service/scripts/deployment.py \
+	services/chat-service/scripts/test_deployment.py \
+	services/chat-service/scripts/test_tooling.py
+PYTHON_FAST_TEST_FILES := services/chat-service/scripts/test_deployment.py
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -46,7 +51,9 @@ export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_RE
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	lint test test-race coverage test-integration build vulncheck check-go-pr check test-tooling \
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
-	image-build image-check _image-check-existing python-tooling-format-check \
+	image-build image-check _image-check-existing deploy-render deploy-check \
+	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling \
+	python-tooling-format-check \
 	python-tooling-lint python-tooling-test-fast python-check shared-fast-build shared-fast-unit \
 	shared-candidate-format shared-candidate-lint shared-candidate-race \
 	shared-candidate-dependency shared-candidate-vulnerability shared-candidate-generated \
@@ -128,7 +135,8 @@ python-tooling-lint: python-toolchain-check
 		--config "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" -- $(PYTHON_TOOLING_FILES)
 
 python-tooling-test-fast:
-	@true
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" \
+		-m pytest -q -m 'not integration and not acceptance' $(PYTHON_FAST_TEST_FILES)
 
 python-check: python-tooling-format-check python-tooling-lint python-tooling-test-fast
 
@@ -152,6 +160,23 @@ image-check: image-build
 _image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
 		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
+
+deploy-render: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/chat_deployment_checks.py render
+
+deploy-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/chat_deployment_checks.py check
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/deployment.py '$@'
+
+deploy-test-tooling: python-toolchain-check
+	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONPATH="$(INSURANCE_HUB_ROOT)" \
+		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -m 'not integration' \
+		services/chat-service/scripts/test_deployment.py
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -216,4 +241,6 @@ help:
 		'  make check            Validate the owned module, runtime and image source' \
 		'  make test-tooling     Exercise focused controlled tooling defects' \
 		'  make image-check      Build and inspect the nonroot Chat image' \
+		'  make deploy-check     Validate hardened local-dev and QA manifests' \
+		'  make deploy-test-tooling  Exercise fail-closed deployment guards' \
 		'  make run              Start the two-listener service'
