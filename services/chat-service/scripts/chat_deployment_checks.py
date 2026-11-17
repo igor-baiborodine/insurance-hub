@@ -614,6 +614,18 @@ def validate_deployed_responses(
     )
 
 
+def wait_for_readiness(url: str, timeout_seconds: float = 20, retry_seconds: float = 0.2) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            if _http(url) == (200, b"ready\n"):
+                return
+        except OSError:
+            pass
+        time.sleep(retry_seconds)
+    raise DeploymentError("deployed readiness was not reachable")
+
+
 def verify(target: Target, items: list[dict[str, Any]]) -> None:
     target.live(items, require_deployment=True)
     business_port, management_port = loopback_port(), loopback_port()
@@ -641,15 +653,7 @@ def verify(target: Target, items: list[dict[str, Any]]) -> None:
                 )
             except AdministrationError as error:
                 raise DeploymentError(str(error)) from error
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            try:
-                if _http(f"http://127.0.0.1:{management_port}/readyz") == (200, b"ready\n"):
-                    break
-            except OSError:
-                time.sleep(0.2)
-        else:
-            raise DeploymentError("deployed readiness was not reachable")
+        wait_for_readiness(f"http://127.0.0.1:{management_port}/readyz")
         validate_deployed_responses(
             _http(f"http://127.0.0.1:{management_port}/livez"),
             _http(f"http://127.0.0.1:{management_port}/readyz"),

@@ -283,6 +283,19 @@ def test_stop_scales_only_selected_deployment_and_observes_cleanup() -> None:
     target.json.assert_called_once_with("get", "deployment", "local-dev-chat-api")
 
 
+def test_wait_for_readiness_delays_after_unready_response() -> None:
+    # given
+    responses = Mock(side_effect=[(503, b"not ready\n"), (200, b"ready\n")])
+
+    # when
+    with patch.object(checks, "_http", responses), patch.object(checks.time, "sleep") as sleep:
+        checks.wait_for_readiness("http://127.0.0.1:8081/readyz")
+
+    # then
+    assert responses.call_count == 2
+    sleep.assert_called_once_with(0.2)
+
+
 def test_stop_is_bounded_when_cleanup_does_not_converge() -> None:
     # given
     target = Mock()
