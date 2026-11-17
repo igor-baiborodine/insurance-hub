@@ -195,7 +195,6 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         "SHUTDOWN_TIMEOUT": "10s",
         "LOG_LEVEL": "info",
         "OTEL_ENABLED": "false" if environment == "local-dev" else "true",
-        "OTEL_EXPORTER_OTLP_TIMEOUT": "2s",
         "DEPLOYMENT_ENVIRONMENT": environment,
         "SERVICE_VERSION": data.get("SERVICE_VERSION"),
     }
@@ -203,6 +202,10 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
         expected_config["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
         )
+    require(
+        "OTEL_EXPORTER_OTLP_TIMEOUT" not in data,
+        "exporter timeout must use the application default",
+    )
     require(data == expected_config, "runtime configuration differs")
     version = data.get("SERVICE_VERSION", "")
     require(

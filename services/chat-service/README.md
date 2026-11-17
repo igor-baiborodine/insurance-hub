@@ -89,7 +89,7 @@ without logging raw configuration values.
 | `LOG_LEVEL` | `INFO`; a supported structured-log level. |
 | `OTEL_ENABLED` | `false`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Required only when telemetry is enabled. |
-| `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s`; positive and reserved from shutdown. |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | Application default `2s`; positive and reserved from shutdown. Deployed configuration omits the override and guards reject one so the OpenTelemetry SDK cannot independently reinterpret it. |
 | `DEPLOYMENT_ENVIRONMENT` | Defaults to `development`; explicit when telemetry is enabled. |
 | `SERVICE_VERSION` | Development default locally; otherwise `git-` plus 12 nonzero-capable lowercase hexadecimal characters. |
 | `SERVICE_INSTANCE_ID` | Local process identity by default; explicit when telemetry is enabled. |
