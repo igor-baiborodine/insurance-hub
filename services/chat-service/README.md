@@ -7,6 +7,7 @@
   - [Configuration](#configuration)
   - [Development and validation](#development-and-validation)
   - [Image and delivery boundary](#image-and-delivery-boundary)
+    - [Live deployment operations](#live-deployment-operations)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -123,6 +124,48 @@ unchanged Vue authority without contacting a cluster. `deploy-test-tooling` uses
 exercise target selection, failure and bounded cleanup. `deploy-smoke` builds the exact candidate,
 loads it into the cataloged local Kind cluster, verifies it in a uniquely owned namespace and
 deletes that namespace within a fixed deadline. It does not touch the shared local-dev namespace.
-Live deployment commands require exact catalog coordinates and separate authorization. Until route
-transfer in C03, the Go service must not be made a browser/Nginx Chat upstream. Java retirement is
-a separate, one-time manual C04 operation and never removes legacy source or repository manifests.
+
+### Live deployment operations
+
+Live commands require separate authorization and these exact catalog coordinates:
+
+| Target | Mode | Context | Service namespace | Data namespace |
+| --- | --- | --- | --- | --- |
+| local-dev | direct | `kind-local-dev-insurance-hub` | `local-dev-all` | `local-dev-all` |
+| QA | Flux | `qa-insurance-hub` | `qa-svc` | `qa-data` |
+
+For local-dev, first verify the full candidate revision and build its exact local image. The image
+override is accepted only for the direct target and must end with the first 12 characters of that
+revision:
+
+```bash
+source_revision=$(git rev-parse --verify 'HEAD^{commit}')
+source_short=$(git rev-parse --short=12 'HEAD^{commit}')
+image_ref="insurance-hub-chat-api:1.0.0-local.$source_short"
+make go-svc-image-build SVC_NAME=chat
+
+env DEPLOY_ENV=local-dev \
+  DEPLOY_CONTEXT=kind-local-dev-insurance-hub \
+  DEPLOY_SVC_NS=local-dev-all \
+  DEPLOY_DATA_NS=local-dev-all \
+  DEPLOY_IMAGE_REF="$image_ref" \
+  make go-svc-deploy-preflight SVC_NAME=chat
+```
+
+`go-svc-deploy-status` and `go-svc-deploy-verify` observe the selected workload. The following
+commands mutate only the cataloged direct target and require explicit local-dev authority:
+`go-svc-image-load` changes the Kind node cache, `go-svc-deploy` server-side applies the rendered Go
+resources, and `go-svc-stop` scales only `local-dev-chat-api` to zero. Supply the same five
+environment values to every command. Rerun preflight after an uncertain failure; use status and
+verify to establish the postcondition before retrying. Stop never deletes the namespace, legacy
+Chat resources or repository manifests.
+
+QA is Flux-owned. The generic release publishes the canonical image and activates `./chat`; do not
+use `go-svc-image-load`, `go-svc-deploy` or `go-svc-stop` for QA. After the release and with
+separate read authority, use the exact QA coordinates above with `go-svc-deploy-status` and
+`go-svc-deploy-verify`. Registry digest, Flux revision and runtime identity evidence belong to the
+post-release verification step.
+
+Until route transfer in C03, the Go service must not be made a browser/Nginx Chat upstream. Java
+retirement is a separate, one-time manual C04 operation and never removes legacy source or
+repository manifests.
