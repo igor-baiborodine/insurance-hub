@@ -101,6 +101,13 @@ func TestCloseReasonForConnection_MapsOnlyBoundedReasons(t *testing.T) {
 		want    CloseReason
 	}{
 		{"normal", gorilla.CloseNormalClosure, chat.RemovalLeft, CloseReasonNormal},
+		{"client going away", gorilla.CloseGoingAway, chat.RemovalLeft, CloseReasonNormal},
+		{
+			"client omitted status",
+			gorilla.CloseNoStatusReceived,
+			chat.RemovalLeft,
+			CloseReasonNormal,
+		},
 		{
 			"unsupported",
 			gorilla.CloseUnsupportedData,

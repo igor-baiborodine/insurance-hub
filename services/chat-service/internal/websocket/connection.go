@@ -212,7 +212,7 @@ func closeReasonForConnection(code int, removal chat.RemovalReason) CloseReason 
 	default:
 	}
 	switch code {
-	case gorilla.CloseNormalClosure:
+	case gorilla.CloseNormalClosure, gorilla.CloseGoingAway, gorilla.CloseNoStatusReceived:
 		return CloseReasonNormal
 	case gorilla.CloseUnsupportedData:
 		return CloseReasonUnsupportedData
@@ -220,8 +220,6 @@ func closeReasonForConnection(code int, removal chat.RemovalReason) CloseReason 
 		return CloseReasonMessageTooLarge
 	case gorilla.CloseTryAgainLater:
 		return CloseReasonSlowPeer
-	case gorilla.CloseGoingAway:
-		return CloseReasonDraining
 	default:
 		return CloseReasonTransportFailure
 	}
