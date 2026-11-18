@@ -29,6 +29,7 @@ MAIN_COVERAGE_MODULES = (
     ("services/policy-search-service", "business-service", "policy-search-service"),
     ("services/dashboard-service", "business-service", "dashboard-service"),
     ("services/document-service", "business-service", "document-service"),
+    ("services/chat-service", "business-service", "chat-service"),
 )
 MAIN_COVERAGE_PATHS = (
     "libs/servicekit/**",
