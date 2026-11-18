@@ -38,6 +38,8 @@ SERVICEKIT_VERSION := v1.1.0
 BUILD_EXECUTABLES := server
 TEST_PACKAGES ?= ./...
 COVERAGE_FILE ?= coverage.txt
+COVERAGE_MINIMUM ?= 75
+COVERAGE_EXCLUDE_PATHS := internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
@@ -76,7 +78,7 @@ export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_RE
 
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	capture-java-parity validate-java-parity verify-live-java-parity \
-	lint test test-race coverage test-integration build vulncheck check-go-pr check test-tooling \
+	lint test test-race coverage coverage-validate coverage-check test-integration build vulncheck check-go-pr check test-tooling \
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-smoke \
@@ -163,8 +165,17 @@ test-race:
 
 coverage:
 	@test -n "$(strip $(COVERAGE_FILE))" || { echo 'COVERAGE_FILE must not be empty' >&2; exit 1; }
+	@mkdir -p "$(dir $(COVERAGE_FILE))"
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -covermode=atomic \
 		-coverprofile="$(COVERAGE_FILE)" ./...
+
+coverage-validate: python-runtime-check
+	@module_path="$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Path}}')"; \
+		PYTHON="$(PYTHON)" "$(COMMON_GO_TOOLING_DIR)/check-coverage.sh" \
+		"$(COVERAGE_FILE)" "$(COVERAGE_MINIMUM)" "$$module_path" $(COVERAGE_EXCLUDE_PATHS)
+
+coverage-check: coverage
+	@$(MAKE) --no-print-directory coverage-validate
 
 test-integration:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race ./internal/service \
@@ -310,7 +321,7 @@ test-tooling: verify-tools python-toolchain-check
 		./scripts/test-tooling.sh
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
-check-go-pr: verify-tools dockerfile-check format-check lint coverage test-integration build check-deps vulncheck python-check check-servicekit
+check-go-pr: verify-tools dockerfile-check format-check lint coverage-check test-integration build check-deps vulncheck python-check check-servicekit
 
 check: check-go-pr
 
@@ -323,6 +334,7 @@ help:
 		'  make capture-java-parity   Capture the accepted Java WebSocket oracle' \
 		'  make validate-java-parity  Validate the immutable Java parity fixture' \
 		'  make verify-live-java-parity  Compare a live endpoint with the Java fixture' \
+		'  make coverage-check  Generate race coverage and enforce the 75% module threshold' \
 		'  make check            Validate the owned module, runtime and image source' \
 		'  make test-tooling     Exercise focused controlled tooling defects' \
 		'  make image-check      Build and inspect the nonroot Chat image' \
