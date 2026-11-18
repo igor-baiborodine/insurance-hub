@@ -407,6 +407,27 @@ class Target:
         return text, items, image
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
+        desired_deployment = resource(items, "Deployment", self.deployment)
+        desired_config = resource(items, "ConfigMap", f"{self.environment}-chat-config")
+        desired_image = desired_deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+        desired_version = desired_config["data"]["SERVICE_VERSION"]
+        previous_image = os.environ.get("DEPLOY_PREVIOUS_IMAGE_REF", "")
+        if previous_image:
+            require(
+                self.configuration["mode"] == "direct"
+                and bool(
+                    re.fullmatch(
+                        r"insurance-hub-chat-api:1\.0\.0-local\.[0-9a-f]{12}", previous_image
+                    )
+                ),
+                "DEPLOY_PREVIOUS_IMAGE_REF is valid only for a direct local rollout",
+            )
+        allowed_image_versions = {desired_image: desired_version}
+        if previous_image and not require_deployment:
+            allowed_image_versions[previous_image] = "git-" + previous_image.rsplit(".", 1)[1]
+        observed_image = ""
+        observed_versions: set[str] = set()
+
         for desired in items:
             kind = str(desired["kind"])
             name = str(desired["metadata"]["name"])
@@ -414,15 +435,32 @@ class Target:
             if not actual:
                 require(not require_deployment, f"{kind}/{name} is absent")
                 continue
+            desired_labels = desired.get("metadata", {}).get("labels", {})
+            stable_labels = {
+                key: value
+                for key, value in desired_labels.items()
+                if key != "app.kubernetes.io/version"
+            }
             require(
                 actual.get("kind") == kind
                 and actual.get("metadata", {}).get("name") == name
                 and actual.get("metadata", {}).get("namespace") == self.namespace
+                and labels_include(actual.get("metadata", {}).get("labels"), stable_labels)
                 and not actual.get("metadata", {}).get("ownerReferences")
                 and not actual.get("metadata", {}).get("deletionTimestamp"),
                 f"live {kind}/{name} identity differs",
             )
             if kind == "Deployment":
+                observed_version = (
+                    actual.get("metadata", {})
+                    .get("labels", {})
+                    .get("app.kubernetes.io/version", "")
+                )
+                require(
+                    observed_version in allowed_image_versions.values(),
+                    f"live Deployment/{name} version differs",
+                )
+                observed_versions.add(observed_version)
                 expected = desired.get("spec", {})
                 observed = actual.get("spec", {})
                 require(
@@ -436,13 +474,30 @@ class Target:
                 )
                 expected_template = expected.get("template", {})
                 observed_template = observed.get("template", {})
+                expected_labels = {
+                    key: value
+                    for key, value in expected_template.get("metadata", {})
+                    .get("labels", {})
+                    .items()
+                    if key != "app.kubernetes.io/version"
+                }
                 require(
                     labels_include(
                         observed_template.get("metadata", {}).get("labels"),
-                        expected_template.get("metadata", {}).get("labels", {}),
+                        expected_labels,
                     ),
                     f"live Deployment/{name} workload labels differ",
                 )
+                observed_workload_version = (
+                    observed_template.get("metadata", {})
+                    .get("labels", {})
+                    .get("app.kubernetes.io/version", "")
+                )
+                require(
+                    observed_workload_version in allowed_image_versions.values(),
+                    f"live Deployment/{name} workload version differs",
+                )
+                observed_versions.add(observed_workload_version)
                 expected_pod = expected_template.get("spec", {})
                 observed_pod = observed_template.get("spec", {})
                 require(
@@ -467,6 +522,7 @@ class Target:
                 )
                 expected_container = expected_containers[0]
                 observed_container = observed_containers[0]
+                observed_image = observed_container.get("image", "")
                 for field in (
                     "name",
                     "image",
@@ -482,10 +538,16 @@ class Target:
                     "volumeMounts",
                     "lifecycle",
                 ):
-                    require(
-                        observed_container.get(field) == expected_container.get(field),
-                        f"live Deployment/{name} container {field} differs",
-                    )
+                    if field == "image":
+                        require(
+                            observed_container.get(field) in allowed_image_versions,
+                            f"live Deployment/{name} container image differs",
+                        )
+                    else:
+                        require(
+                            observed_container.get(field) == expected_container.get(field),
+                            f"live Deployment/{name} container {field} differs",
+                        )
                 for field in ("startupProbe", "livenessProbe", "readinessProbe"):
                     require(
                         matching_probe(
@@ -512,7 +574,23 @@ class Target:
                     f"live Service/{name} differs or is externally exposed",
                 )
             elif kind == "ConfigMap":
-                require(actual.get("data") == desired.get("data"), f"live ConfigMap/{name} differs")
+                actual_data = actual.get("data", {})
+                desired_data = desired.get("data", {})
+                actual_stable_data = {
+                    key: value for key, value in actual_data.items() if key != "SERVICE_VERSION"
+                }
+                desired_stable_data = {
+                    key: value for key, value in desired_data.items() if key != "SERVICE_VERSION"
+                }
+                observed_version = actual_data.get("SERVICE_VERSION", "")
+                require(
+                    actual_stable_data == desired_stable_data
+                    and observed_version in allowed_image_versions.values()
+                    and not actual.get("binaryData")
+                    and actual.get("immutable") in (None, False),
+                    f"live ConfigMap/{name} differs",
+                )
+                observed_versions.add(observed_version)
             else:
                 require(
                     kind == "NetworkPolicy"
@@ -520,6 +598,12 @@ class Target:
                     == normalized_policy_spec(desired.get("spec")),
                     f"live {kind}/{name} differs",
                 )
+
+        if observed_image:
+            require(
+                observed_versions == {allowed_image_versions[observed_image]},
+                "live Chat image and version identities differ",
+            )
 
 
 def check_render() -> None:

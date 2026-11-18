@@ -206,7 +206,7 @@
     },
     "DocumentTelemetryBacklog": {
       "basis": "unchanged Dashboard shared-Alloy contract",
-      "remote_write_lag_seconds": 30,
+      "remote_write_lag_seconds": 60,
       "queue_ratio": 0.8,
       "for": "2m",
       "severity": "warning",

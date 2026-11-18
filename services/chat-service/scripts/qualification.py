@@ -109,6 +109,7 @@ class Target:
 
 
 JsonGetter = Callable[[Target, str, str, str], dict[str, Any]]
+CandidateImageInspector = Callable[[Target], dict[str, str]]
 
 
 def kubectl_json(target: Target, kind: str, name: str, selector: str = "") -> dict[str, Any]:
@@ -140,6 +141,50 @@ def kubectl_json(target: Target, kind: str, name: str, selector: str = "") -> di
         raise QualificationError("qualification target returned invalid JSON") from error
     require(isinstance(value, dict), "qualification target JSON is not an object")
     return value
+
+
+def inspect_candidate_image(target: Target, docker: str = "docker") -> dict[str, str]:
+    reference = f"insurance-hub-chat-api:1.0.0-local.{target.source_revision[:12]}"
+    environment = child_environment(preferred_executables=(docker,))
+    output = run(
+        [docker, "image", "inspect", reference],
+        cwd=ROOT,
+        env=environment,
+        timeout_seconds=15,
+        activity="inspect local Chat qualification candidate",
+        capture=True,
+    )
+    try:
+        values = json.loads(output)
+    except json.JSONDecodeError as error:
+        raise QualificationError("local Chat candidate inspection returned invalid JSON") from error
+    require(isinstance(values, list) and len(values) == 1, "local Chat candidate is absent")
+    item = values[0]
+    require(isinstance(item, Mapping), "local Chat candidate inspection is invalid")
+    config = item.get("Config")
+    require(isinstance(config, Mapping), "local Chat candidate configuration is absent")
+    labels = config.get("Labels")
+    require(isinstance(labels, Mapping), "local Chat candidate labels are absent")
+    require(
+        labels.get("org.opencontainers.image.revision") == target.source_revision
+        and labels.get("org.opencontainers.image.version") == target.version,
+        "local Chat candidate OCI identity differs",
+    )
+    image_id = item.get("Id", "")
+    require(
+        isinstance(image_id, str) and bool(IMAGE_DIGEST.fullmatch(image_id)),
+        "local Chat candidate image ID is invalid",
+    )
+    repo_digests = item.get("RepoDigests", [])
+    require(
+        isinstance(repo_digests, list)
+        and any(
+            isinstance(value, str) and value.endswith(f"@{target.image_digest}")
+            for value in repo_digests
+        ),
+        "local Chat candidate registry digest differs",
+    )
+    return {"local_image_reference": reference, "local_image_id": image_id}
 
 
 def nested(value: Mapping[str, Any], *path: str) -> Any:
@@ -178,7 +223,11 @@ def inspect_nginx_image(docker: str, image: str, environment: Mapping[str, str])
     return image_id
 
 
-def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) -> dict[str, str]:
+def validate_live_identity(
+    target: Target,
+    get_json: JsonGetter = kubectl_json,
+    candidate_image_inspector: CandidateImageInspector | None = None,
+) -> dict[str, str]:
     deployment = get_json(target, "deployment", target.deployment, "")
     deployment_uid = nested(deployment, "metadata", "uid")
     require(
@@ -213,10 +262,19 @@ def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) 
     status = statuses[0]
     require(status.get("ready") is True, "Chat container is not ready")
     image_id = status.get("imageID")
-    require(
-        isinstance(image_id, str) and image_id.endswith(f"@{target.image_digest}"),
-        "Chat Pod image digest differs",
-    )
+    candidate_evidence: dict[str, str] = {}
+    if target.environment == "local-dev":
+        inspector = candidate_image_inspector or inspect_candidate_image
+        candidate_evidence = inspector(target)
+        require(
+            isinstance(image_id, str) and image_id == candidate_evidence.get("local_image_id"),
+            "Chat Pod image content differs from the local registry candidate",
+        )
+    else:
+        require(
+            isinstance(image_id, str) and image_id.endswith(f"@{target.image_digest}"),
+            "Chat Pod image digest differs",
+        )
 
     vue_deployment_name = f"{target.environment}-web-vue-legacy"
     vue_deployment = get_json(target, "deployment", vue_deployment_name, "")
@@ -242,6 +300,7 @@ def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) 
         "deployment_uid": deployment_uid,
         "pod_uid": pod_uid,
         "pod_image_id": image_id,
+        **candidate_evidence,
         "runtime_service_version": target.version,
         "runtime_service_instance": pod_uid,
         "public_chat_url": expected_chat_url,
@@ -455,10 +514,14 @@ def qualify(
     waiter: Callable[[int, OwnedProcess], None] = wait_for_nginx,
     verifier: Callable[[int, str, Mapping[str, str]], None] = verify_parity,
     nginx_image_inspector: Callable[[str, str, Mapping[str, str]], str] = inspect_nginx_image,
+    candidate_image_inspector: CandidateImageInspector | None = None,
     clock: Callable[[], str] = utc_timestamp,
 ) -> None:
     started_at = clock()
-    evidence = validate_live_identity(target, get_json)
+    inspector = candidate_image_inspector or (
+        lambda selected: inspect_candidate_image(selected, arguments.docker)
+    )
+    evidence = validate_live_identity(target, get_json, inspector)
     require(
         arguments.confirm == f"run-{target.environment}-chat-private-qualification",
         "qualification confirmation differs",
@@ -559,7 +622,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         target = Target.validated(arguments)
         if arguments.action == "preflight":
-            print(json.dumps(validate_live_identity(target), sort_keys=True))
+
+            def inspector(selected: Target) -> dict[str, str]:
+                return inspect_candidate_image(selected, arguments.docker)
+
+            print(
+                json.dumps(
+                    validate_live_identity(target, candidate_image_inspector=inspector),
+                    sort_keys=True,
+                )
+            )
         else:
             qualify(target, arguments)
     except (

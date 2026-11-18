@@ -244,7 +244,7 @@ deploy-smoke: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Smok
 
 qualification-preflight: python-runtime-check ## Read exact live Chat and public-route identity before private qualification
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		KUBECTL="$(KUBECTL)" "$(PYTHON)" scripts/qualification.py preflight \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/qualification.py preflight \
 		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
 		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
 		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \

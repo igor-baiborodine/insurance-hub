@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import urllib.parse
 from argparse import Namespace
 from contextlib import nullcontext
 from pathlib import Path
@@ -561,6 +562,133 @@ class TestProductObservabilityVerification:
             "Dashboard request_sales_trends metric",
             "Dashboard dependency_sales_trends metric",
         ]
+
+    def test_chat_probe_resolves_its_own_target_and_safe_reads(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "chat")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with (
+            mock.patch.object(verifier, "request_text", side_effect=["live\n", "ready\n"]),
+            mock.patch.object(verifier, "request_status", return_value=400) as request,
+        ):
+            handshakes = probe.workload(
+                {"health": 1001, "chat": 1002},
+                "c" * 32,
+                {},
+            )
+
+        # then
+        assert probe.service == "chat"
+        assert services == [
+            ("chat", "qa-svc", "qa-chat-api", 80),
+            ("health", "qa-svc", "qa-chat-api-management", 8081),
+        ]
+        assert handshakes == 1
+        assert request.call_args.args == (
+            "http://127.0.0.1:1002/ws/chat/main/observability",
+            {"traceparent": "00-" + "c" * 32 + "-0123456789abcdef-01"},
+        )
+
+    def test_chat_enabled_signals_require_idle_and_correlate_safe_trace(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "chat")
+        trace_id = "d" * 32
+        log_results = [
+            {
+                "values": [
+                    [
+                        "2",
+                        json.dumps(
+                            {
+                                "msg": "chat WebSocket handshake completed",
+                                "outcome": "upgrade_failed",
+                                "trace_id": trace_id,
+                            }
+                        ),
+                    ]
+                ]
+            }
+        ]
+
+        def observed_signal(description: str, _probe: object) -> object:
+            if description == "Chat active-connection metric":
+                return [{"value": [0, "0"]}]
+            if description == "correlated Chat handshake logs":
+                return _probe()
+            if description == "correlated Chat handshake trace":
+                return [{"trace": "observed"}]
+            raise AssertionError(description)
+
+        def backend_response(url: str) -> dict[str, object]:
+            if "/loki/api/v1/query_range" in url:
+                return {"data": {"result": log_results}}
+            return {"data": {"result": [{"value": [0, "0"]}]}}
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(
+                verifier,
+                "request_json",
+                side_effect=backend_response,
+            ) as request,
+        ):
+            result = verifier.verify_chat_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {},
+            )
+
+        # then
+        assert result == {
+            "active_connections": 0,
+            "handshake_log_streams": 1,
+            "handshake_trace_id": trace_id,
+            "trace_batches": 1,
+            "firing_alerts": 0,
+        }
+        log_url = next(
+            call.args[0]
+            for call in request.call_args_list
+            if "/loki/api/v1/query_range" in call.args[0]
+        )
+        log_query = urllib.parse.parse_qs(urllib.parse.urlparse(log_url).query)["query"][0]
+        assert 'service_implementation="go"} | json' in log_query
+        assert 'service_implementation="go"}}' not in log_query
+
+    @pytest.mark.parametrize("active", ([], [{"value": [0, "1"]}]))
+    def test_chat_enabled_signals_reject_missing_or_non_idle_metric(
+        self, active: list[dict[str, object]]
+    ) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "chat")
+
+        # when / then
+        with (
+            mock.patch.object(verifier, "wait_for", return_value=active),
+            pytest.raises(verifier.VerificationError, match="missing or ambiguous|healthy idle"),
+        ):
+            verifier.verify_chat_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {},
+            )
+
+    def test_chat_log_correlation_rejects_missing_safe_trace_id(self) -> None:
+        # when / then
+        with pytest.raises(verifier.VerificationError, match="no safe trace ID"):
+            verifier.chat_log_trace_id(
+                [{"values": [["1", json.dumps({"msg": "handshake"})]]}],
+                "trace_id",
+            )
 
     def test_policy_search_probe_rejects_empty_results(self) -> None:
         responses = ["live\n", "ready\n", "{}"]

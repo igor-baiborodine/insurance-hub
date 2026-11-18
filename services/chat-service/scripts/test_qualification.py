@@ -115,6 +115,23 @@ def getter_for(values: dict[tuple[str, str], dict[str, object]]):
     return get_json
 
 
+def candidate_image(target: qualification.Target) -> dict[str, str]:
+    return {
+        "local_image_reference": (
+            f"insurance-hub-chat-api:1.0.0-local.{target.source_revision[:12]}"
+        ),
+        "local_image_id": f"sha256:{'d' * 64}",
+    }
+
+
+def local_documents(target: qualification.Target) -> dict[tuple[str, str], dict[str, object]]:
+    values = documents(target)
+    values[("pods", "")]["items"][0]["status"]["containerStatuses"][0]["imageID"] = candidate_image(
+        target
+    )["local_image_id"]
+    return values
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -142,9 +159,12 @@ def test_target_rejects_wrong_coordinates_before_target_access(
 def test_live_identity_accepts_exact_candidate_and_public_java_route() -> None:
     # given
     target = qualification.Target.validated(arguments())
+    values = local_documents(target)
 
     # when
-    evidence = qualification.validate_live_identity(target, getter_for(documents(target)))
+    evidence = qualification.validate_live_identity(
+        target, getter_for(values), candidate_image_inspector=candidate_image
+    )
 
     # then
     assert evidence["source_revision"] == "a" * 40
@@ -152,6 +172,8 @@ def test_live_identity_accepts_exact_candidate_and_public_java_route() -> None:
     assert evidence["image_digest"] == f"sha256:{'b' * 64}"
     assert evidence["deployment_uid"] == "deployment-uid"
     assert evidence["pod_uid"] == "pod-uid"
+    assert evidence["local_image_id"] == f"sha256:{'d' * 64}"
+    assert evidence["pod_image_id"] == evidence["local_image_id"]
     assert evidence["runtime_service_version"] == "git-aaaaaaaaaaaa"
     assert evidence["runtime_service_instance"] == "pod-uid"
     assert evidence["public_chat_url"].startswith("http://local-dev-chat-api-legacy.")
@@ -161,10 +183,10 @@ def test_live_identity_accepts_exact_candidate_and_public_java_route() -> None:
 def test_live_identity_rejects_candidate_or_route_drift(mutation: str) -> None:
     # given
     target = qualification.Target.validated(arguments())
-    values = documents(target)
+    values = local_documents(target)
     if mutation == "digest":
         values[("pods", "")]["items"][0]["status"]["containerStatuses"][0]["imageID"] = (
-            f"docker-pullable://example.invalid/chat-api@sha256:{'c' * 64}"
+            f"sha256:{'c' * 64}"
         )
     elif mutation == "version":
         values[("configmap", "local-dev-chat-config")]["data"]["SERVICE_VERSION"] = (
@@ -179,7 +201,99 @@ def test_live_identity_rejects_candidate_or_route_drift(mutation: str) -> None:
 
     # when / then
     with pytest.raises(qualification.QualificationError):
-        qualification.validate_live_identity(target, getter_for(values))
+        qualification.validate_live_identity(
+            target, getter_for(values), candidate_image_inspector=candidate_image
+        )
+
+
+def test_qa_live_identity_requires_the_registry_digest_without_local_docker() -> None:
+    # given
+    target = qualification.Target.validated(
+        arguments(
+            environment="qa",
+            context="qa-insurance-hub",
+            namespace="qa-svc",
+            service="qa-chat-api",
+            confirm="run-qa-chat-private-qualification",
+        )
+    )
+    inspector = Mock(side_effect=AssertionError("QA must not inspect local Docker candidate"))
+
+    # when
+    evidence = qualification.validate_live_identity(
+        target, getter_for(documents(target)), candidate_image_inspector=inspector
+    )
+
+    # then
+    assert evidence["pod_image_id"].endswith(f"@{target.image_digest}")
+    inspector.assert_not_called()
+
+
+def test_local_candidate_inspection_links_registry_and_content_identities() -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    image_id = f"sha256:{'d' * 64}"
+    inspected = json.dumps(
+        [
+            {
+                "Id": image_id,
+                "RepoDigests": [f"example.invalid/chat-api@{target.image_digest}"],
+                "Config": {
+                    "Labels": {
+                        "org.opencontainers.image.revision": target.source_revision,
+                        "org.opencontainers.image.version": target.version,
+                    }
+                },
+            }
+        ]
+    )
+
+    # when
+    with patch.object(qualification, "run", return_value=inspected) as run_command:
+        evidence = qualification.inspect_candidate_image(target, "docker")
+
+    # then
+    assert evidence == {
+        "local_image_reference": "insurance-hub-chat-api:1.0.0-local.aaaaaaaaaaaa",
+        "local_image_id": image_id,
+    }
+    run_command.assert_called_once()
+    assert run_command.call_args.args[0] == [
+        "docker",
+        "image",
+        "inspect",
+        "insurance-hub-chat-api:1.0.0-local.aaaaaaaaaaaa",
+    ]
+
+
+@pytest.mark.parametrize("mutation", ["revision", "version", "registry-digest", "image-id"])
+def test_local_candidate_inspection_rejects_identity_drift(mutation: str) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    labels = {
+        "org.opencontainers.image.revision": target.source_revision,
+        "org.opencontainers.image.version": target.version,
+    }
+    item: dict[str, object] = {
+        "Id": f"sha256:{'d' * 64}",
+        "RepoDigests": [f"example.invalid/chat-api@{target.image_digest}"],
+        "Config": {"Labels": labels},
+    }
+    if mutation == "revision":
+        labels["org.opencontainers.image.revision"] = "c" * 40
+    elif mutation == "version":
+        labels["org.opencontainers.image.version"] = "git-cccccccccccc"
+    elif mutation == "registry-digest":
+        item["RepoDigests"] = [f"example.invalid/chat-api@sha256:{'c' * 64}"]
+    else:
+        item["Id"] = "sha256:short"
+
+    # when / then
+    with (
+        patch.object(qualification, "run", return_value=json.dumps([item])),
+        pytest.raises(qualification.QualificationError),
+    ):
+        qualification.inspect_candidate_image(target, "docker")
 
 
 def test_nginx_command_binds_only_loopback_and_uses_unchanged_image() -> None:
@@ -298,7 +412,7 @@ def test_qualify_runs_real_clients_through_nginx_and_cleans_after_failure() -> N
         qualification.qualify(
             target,
             arguments(),
-            get_json=getter_for(documents(target)),
+            get_json=getter_for(local_documents(target)),
             forward_type=Forward,
             relay_type=Relay,
             nginx_type=Nginx,
@@ -306,6 +420,7 @@ def test_qualify_runs_real_clients_through_nginx_and_cleans_after_failure() -> N
             waiter=lambda _port, _process: None,
             verifier=fail_verification,
             nginx_image_inspector=lambda _docker, _image, _environment: f"sha256:{'c' * 64}",
+            candidate_image_inspector=candidate_image,
             clock=lambda: "2026-11-18T00:00:00Z",
         )
     assert events == [
@@ -348,7 +463,7 @@ def test_qualify_reports_identity_and_pass_only_after_cleanup(
         qualification.qualify(
             target,
             arguments(),
-            get_json=getter_for(documents(target)),
+            get_json=getter_for(local_documents(target)),
             forward_type=resource_type("forward"),
             relay_type=resource_type("relay"),
             nginx_type=resource_type("nginx"),
@@ -356,6 +471,7 @@ def test_qualify_reports_identity_and_pass_only_after_cleanup(
             waiter=lambda _port, _process: None,
             verifier=lambda _port, _make, _environment: events.append("verify"),
             nginx_image_inspector=lambda _docker, _image, _environment: f"sha256:{'c' * 64}",
+            candidate_image_inspector=candidate_image,
             clock=lambda: next(times),
         )
 
