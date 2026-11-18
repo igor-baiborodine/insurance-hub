@@ -100,16 +100,22 @@ export DEPLOY_CONTEXT=kind-local-dev-insurance-hub
 export DEPLOY_SVC_NS=local-dev-all
 export DEPLOY_DATA_NS=local-dev-all
 : "${DEPLOY_IMAGE_REF:?set the exact accepted source-derived image reference}"
+export DEPLOY_PREVIOUS_IMAGE_REF="$(kubectl --context "$DEPLOY_CONTEXT" \
+  -n "$DEPLOY_SVC_NS" get deployment/local-dev-chat-api \
+  -o jsonpath='{.spec.template.spec.containers[0].image}')"
 make go-svc-deploy-preflight SVC_NAME=chat
 make go-svc-image-load SVC_NAME=chat
 make go-svc-deploy SVC_NAME=chat
+unset DEPLOY_PREVIOUS_IMAGE_REF
 make go-svc-deploy-status SVC_NAME=chat
 make go-svc-deploy-verify SVC_NAME=chat
 ```
 
 `go-svc-stop SVC_NAME=chat` scales only `local-dev-chat-api` to zero. It does not remove Java,
-the namespace or repository assets. Capture the accepted predecessor image before replacement and
-use the same guarded sequence to recover it after an unsuccessful qualification.
+the namespace or repository assets. The predecessor input is accepted only during the guarded
+preflight/load/deploy sequence, must be an exact source-derived local Chat image and never weakens
+final status or verification. Use the captured predecessor and the same guarded sequence to recover
+it after an unsuccessful qualification.
 
 ## Observe QA
 

@@ -316,11 +316,83 @@ def test_live_state_accepts_kubernetes_api_defaults() -> None:
     policy["spec"].pop("ingress")
     policy["spec"].pop("egress")
     target = object.__new__(checks.Target)
+    target.environment = "local-dev"
     target.namespace = "local-dev-all"
+    target.deployment = "local-dev-chat-api"
+    target.configuration = {"mode": "direct"}
     target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
 
     # when / then
     target.live(items, require_deployment=True)
+
+
+def predecessor_live_state() -> tuple[
+    list[dict[str, object]], checks.Target, dict[tuple[str, str], dict[str, object]], str
+]:
+    items = checks.validate_render("local-dev", checks.render("local-dev"))
+    actual = {(item["kind"].lower(), item["metadata"]["name"]): deepcopy(item) for item in items}
+    previous_image = "insurance-hub-chat-api:1.0.0-local.1e5b624de391"
+    previous_version = "git-1e5b624de391"
+    deployment_item = actual[("deployment", "local-dev-chat-api")]
+    deployment_item["metadata"]["labels"]["app.kubernetes.io/version"] = previous_version
+    deployment_item["spec"]["template"]["spec"]["containers"][0]["image"] = previous_image
+    deployment_item["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/version"] = (
+        previous_version
+    )
+    actual[("configmap", "local-dev-chat-config")]["data"]["SERVICE_VERSION"] = previous_version
+    target = object.__new__(checks.Target)
+    target.environment = "local-dev"
+    target.namespace = "local-dev-all"
+    target.deployment = "local-dev-chat-api"
+    target.configuration = {"mode": "direct"}
+    target.json = Mock(side_effect=lambda _get, kind, name, _ignore: actual[(kind, name)])
+    return items, target, actual, previous_image
+
+
+def test_live_state_accepts_declared_predecessor_only_before_replacement() -> None:
+    # given
+    items, target, _actual, previous_image = predecessor_live_state()
+
+    # when / then
+    with patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True):
+        target.live(items, require_deployment=False)
+        with pytest.raises(checks.DeploymentError, match="differs"):
+            target.live(items, require_deployment=True)
+
+
+@pytest.mark.parametrize(
+    "previous_image",
+    [
+        "insurance-hub-chat-api:latest",
+        "insurance-hub-dashboard-api:1.0.0-local.1e5b624de391",
+    ],
+)
+def test_live_state_rejects_invalid_predecessor(previous_image: str) -> None:
+    # given
+    items, target, _actual, _accepted = predecessor_live_state()
+
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        # when / then
+        pytest.raises(checks.DeploymentError, match="valid only for a direct local rollout"),
+    ):
+        target.live(items, require_deployment=False)
+
+
+def test_live_state_rejects_mixed_predecessor_version_identity() -> None:
+    # given
+    items, target, actual, previous_image = predecessor_live_state()
+    desired = checks.resource(items, "ConfigMap", "local-dev-chat-config")
+    actual[("configmap", "local-dev-chat-config")]["data"]["SERVICE_VERSION"] = desired["data"][
+        "SERVICE_VERSION"
+    ]
+
+    # when / then
+    with (
+        patch.dict(os.environ, {"DEPLOY_PREVIOUS_IMAGE_REF": previous_image}, clear=True),
+        pytest.raises(checks.DeploymentError, match="image and version identities differ"),
+    ):
+        target.live(items, require_deployment=False)
 
 
 def test_stop_scales_only_selected_deployment_and_observes_cleanup() -> None:
