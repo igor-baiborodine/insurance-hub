@@ -209,7 +209,7 @@ Retain no credentials or message payloads. Record:
 
 - intended base/head, full source revision and `git-<12>` version;
 - mutable and digest-qualified image references, OCI revision/version and registry digest;
-- environment, context, namespace, Go Service and unchanged public Java `CHAT_URL`;
+- environment, context, namespace, Go Service and observed before/after `CHAT_URL`;
 - Flux source/applied revisions in QA;
 - Deployment UID, one ready Pod UID, actual Pod image ID and runtime service version/instance;
 - local unchanged Nginx image ID, loopback Nginx endpoint, owner start/end times and cleanup result;
@@ -222,6 +222,13 @@ cleanup fields are present. Browser-test evidence is neither required nor accept
 does not transfer the public route or authorize Java retirement.
 
 ## Verify the deployed public route
+
+PR1 source selects
+`http://local-dev-chat-api.local-dev-all.svc.cluster.local` only in the local-dev Vue overlay. QA
+source remains on `http://qa-chat-api-legacy.qa-svc.svc.cluster.local`. Merging PR1 changes desired
+source only: local-dev is directly managed and still requires a separately authorized
+`make -C k8s svc-deploy SVC_NAME=web-vue` operation. Do not publish a QA route change until that
+local-dev operation is accepted.
 
 The route-transfer owner is read-only: it never applies a manifest, reconciles Flux, changes a
 workload or restores Java. It reads the exact Go candidate and deployment-derived Vue ConfigMap,
