@@ -169,12 +169,12 @@
       "id": 8,
       "targets": [
         {
-          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"}[$__rate_interval]))",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",container=\"chat-api\"}[$__rate_interval]))",
           "legendFormat": "CPU cores",
           "refId": "A"
         },
         {
-          "expr": "sum(container_memory_working_set_bytes{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"})",
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",container=\"chat-api\"})",
           "legendFormat": "working set bytes",
           "refId": "B"
         }
@@ -200,12 +200,12 @@
           "refId": "B"
         },
         {
-          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",condition=\"true\"})",
+          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",condition=\"true\"})",
           "legendFormat": "ready",
           "refId": "C"
         },
         {
-          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"}[$__rate_interval]))",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",container=\"chat-api\"}[$__rate_interval]))",
           "legendFormat": "restarts",
           "refId": "D"
         }
@@ -289,7 +289,7 @@
     {
       "id": 13,
       "options": {
-        "content": "Use `trace_id` from a Chat handshake log to open the matching Tempo trace. Healthy idle means the active-session series is present with value zero; an available deployment without that series is missing telemetry. Keep selectors on `qa-chat-api` and exclude legacy Pods.",
+        "content": "Use `trace_id` from a Chat handshake log to open the matching Tempo trace. Healthy idle means the active-session series is present with value zero; an available deployment without that series is missing telemetry. Keep selectors on `qa-chat-api` Pods.",
         "mode": "markdown"
       },
       "title": "Investigation workflow",

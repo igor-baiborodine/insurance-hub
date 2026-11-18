@@ -51,8 +51,8 @@ groups:
           description: Chat memory exceeded 102.4MiB or CPU exceeded 160 millicores.
           runbook_action: Inspect active sessions, runtime memory, throttling, Pod events and recent rollout changes.
         expr: >-
-          sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}) > 107374182.4
-          or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}[5m])) > 0.16
+          sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-chat-api-.*",container="chat-api"}) > 107374182.4
+          or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-chat-api-.*",container="chat-api"}[5m])) > 0.16
         for: 5m
         labels:
           service: chat-service
@@ -114,7 +114,7 @@ groups:
           description: A Go Chat container restarted during the last 15 minutes.
           runbook_action: Inspect prior state, safe lifecycle logs, Pod events, resource pressure and rollout identity.
         expr: >-
-          sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-chat-api-.*",pod!~"qa-chat-api-legacy-.*",container="chat-api"}[15m])) > 0
+          sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-chat-api-.*",container="chat-api"}[15m])) > 0
         labels:
           service: chat-service
           severity: warning

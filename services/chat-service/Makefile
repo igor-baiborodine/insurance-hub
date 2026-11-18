@@ -3,7 +3,6 @@
 GO ?= go
 DOCKER ?= docker
 KUBECTL ?= kubectl
-SOCAT ?= socat
 DEPLOY_ENV ?=
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
@@ -13,14 +12,11 @@ COMMON_GO_TOOLING_DIR := $(INSURANCE_HUB_ROOT)/scripts/go/module
 PYTHON_TOOLING_FILES := services/chat-service/scripts/chat_deployment_checks.py \
 	services/chat-service/scripts/deployment.py \
 	services/chat-service/scripts/disposable_deployment.py \
-	services/chat-service/scripts/qualification.py \
 	services/chat-service/scripts/test_deployment.py \
 	services/chat-service/scripts/test_disposable_deployment.py \
-	services/chat-service/scripts/test_qualification.py \
 	services/chat-service/scripts/test_tooling.py
 PYTHON_FAST_TEST_FILES := services/chat-service/scripts/test_deployment.py \
-	services/chat-service/scripts/test_disposable_deployment.py \
-	services/chat-service/scripts/test_qualification.py
+	services/chat-service/scripts/test_disposable_deployment.py
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -53,37 +49,21 @@ SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
 SOURCE_VERSION ?= $(HEAD_VERSION)
 IMAGE_TAG ?= 1.0.0-local.$(HEAD_SHORT)
 IMAGE_REF ?= $(IMAGE_NAME):$(IMAGE_TAG)
-QUALIFICATION_IMAGE_REF ?=
-QUALIFICATION_SOURCE_REVISION ?=
-QUALIFICATION_ENV ?=
-QUALIFICATION_CONTEXT ?=
-QUALIFICATION_NAMESPACE ?=
-QUALIFICATION_SERVICE ?=
-QUALIFICATION_IMAGE_DIGEST ?=
-QUALIFICATION_NGINX_IMAGE ?= insurance-hub-web-vue-legacy:latest
-CHAT_QUALIFICATION_CONFIRM ?=
-CHAT_ROUTE_TRANSFER_CONFIRM ?=
-QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
-QUALIFICATION_EFFECTIVE_SOURCE_REVISION := $(if $(strip $(QUALIFICATION_SOURCE_REVISION)),$(QUALIFICATION_SOURCE_REVISION),$(SOURCE_REVISION))
-QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
-JAVA_PARITY_ENDPOINT ?= ws://localhost:8080
-JAVA_PARITY_SOURCE_REVISION ?= $(HEAD_REVISION)
-JAVA_PARITY_SOURCE_FILE ?= ../../legacy/chat-service/src/main/java/pl/altkom/asc/lab/micronaut/poc/chat/service/infrastructure/adapters/web/ChatWebSocket.java
-JAVA_PARITY_BUILD_ARTIFACT ?= ../../legacy/chat-service/target/chat-service-1.0.0-SNAPSHOT.jar
-JAVA_PARITY_FIXTURE ?= internal/chat/testdata/java-parity.json
-JAVA_PARITY_PROVENANCE ?= internal/chat/testdata/java-parity-provenance.json
+DEPLOYMENT_SMOKE_IMAGE_REF ?=
+DEPLOYMENT_SMOKE_SOURCE_REVISION ?=
+DEPLOYMENT_SMOKE_EFFECTIVE_IMAGE_REF := $(or $(strip $(DEPLOYMENT_SMOKE_IMAGE_REF)),$(IMAGE_REF))
+DEPLOYMENT_SMOKE_EFFECTIVE_SOURCE_REVISION := $(or $(strip $(DEPLOYMENT_SMOKE_SOURCE_REVISION)),$(SOURCE_REVISION))
+DEPLOYMENT_SMOKE_IMAGE_PREREQUISITE := $(if $(strip $(DEPLOYMENT_SMOKE_IMAGE_REF)),,image-build)
 TARGET_PLATFORM ?= linux/amd64
 GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
 .PHONY: bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
-	capture-java-parity validate-java-parity verify-live-java-parity \
 	lint test test-race coverage coverage-validate coverage-check test-integration build vulncheck check-go-pr check test-tooling \
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-smoke \
-	qualification-preflight qualification-run route-transfer-preflight route-transfer-verify \
 	python-tooling-format-check \
 	python-tooling-lint python-tooling-test-fast python-check shared-fast-build shared-fast-unit \
 	shared-candidate-format shared-candidate-lint shared-candidate-race \
@@ -123,31 +103,6 @@ update-deps:
 	GOWORK=off $(GO) get github.com/gorilla/websocket@$(GORILLA_WEBSOCKET_VERSION)
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
-
-capture-java-parity:
-	@test -n "$(strip $(JAVA_PARITY_SOURCE_REVISION))" || { echo 'JAVA_PARITY_SOURCE_REVISION must not be empty' >&2; exit 1; }
-	GOWORK=off $(GO) run -mod=readonly ./cmd/java-parity-capture \
-		--mode capture \
-		--endpoint "$(JAVA_PARITY_ENDPOINT)" \
-		--source-revision "$(JAVA_PARITY_SOURCE_REVISION)" \
-		--source-file "$(JAVA_PARITY_SOURCE_FILE)" \
-		--build-artifact "$(JAVA_PARITY_BUILD_ARTIFACT)" \
-		--fixture "$(JAVA_PARITY_FIXTURE)" \
-		--provenance "$(JAVA_PARITY_PROVENANCE)" \
-		--capture-command "make -C services/chat-service capture-java-parity JAVA_PARITY_SOURCE_REVISION=$(JAVA_PARITY_SOURCE_REVISION)"
-
-validate-java-parity:
-	GOWORK=off $(GO) run -mod=readonly ./cmd/java-parity-capture \
-		--mode validate \
-		--fixture "$(JAVA_PARITY_FIXTURE)" \
-		--provenance "$(JAVA_PARITY_PROVENANCE)"
-
-verify-live-java-parity:
-	GOWORK=off $(GO) run -mod=readonly ./cmd/java-parity-capture \
-		--mode verify-live \
-		--endpoint "$(JAVA_PARITY_ENDPOINT)" \
-		--fixture "$(JAVA_PARITY_FIXTURE)" \
-		--provenance "$(JAVA_PARITY_PROVENANCE)"
 
 check-deps: verify-tools
 	@MODULE_ROOT="$(CURDIR)" COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
@@ -243,54 +198,15 @@ deploy-test-tooling: python-toolchain-check
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONPATH="$(INSURANCE_HUB_ROOT)" \
 		PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
 		-m 'not integration' services/chat-service/scripts/test_deployment.py \
-		services/chat-service/scripts/test_disposable_deployment.py \
-		services/chat-service/scripts/test_qualification.py
+		services/chat-service/scripts/test_disposable_deployment.py
 
-deploy-smoke: python-toolchain-check $(QUALIFICATION_IMAGE_PREREQUISITE) ## Smoke Chat in an owned disposable Kind namespace
+deploy-smoke: python-toolchain-check $(DEPLOYMENT_SMOKE_IMAGE_PREREQUISITE) ## Smoke Chat in an owned disposable Kind namespace
 	@cd "$(PYTHON_REPOSITORY_ROOT)" && PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" \
-		PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(QUALIFICATION_EFFECTIVE_IMAGE_REF)" \
-		QUALIFICATION_SOURCE_REVISION="$(QUALIFICATION_EFFECTIVE_SOURCE_REVISION)" \
+		PYTHONDONTWRITEBYTECODE=1 IMAGE_REF="$(DEPLOYMENT_SMOKE_EFFECTIVE_IMAGE_REF)" \
+		DEPLOYMENT_SMOKE_SOURCE_REVISION="$(DEPLOYMENT_SMOKE_EFFECTIVE_SOURCE_REVISION)" \
 		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" -m pytest -q -s \
 		-p no:cacheprovider -m integration \
 		services/chat-service/scripts/test_disposable_deployment.py
-
-qualification-preflight: python-runtime-check ## Read exact live Chat and public-route identity before private qualification
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" "$(PYTHON)" scripts/qualification.py preflight \
-		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
-		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
-		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
-		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)"
-
-qualification-run: python-runtime-check ## Run real clients through loopback Nginx; contacts live target and needs explicit authority
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" MAKE="$(MAKE)" SOCAT="$(SOCAT)" \
-		"$(PYTHON)" scripts/qualification.py run \
-		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
-		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
-		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
-		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
-		--nginx-image "$(QUALIFICATION_NGINX_IMAGE)" --confirm "$(CHAT_QUALIFICATION_CONFIRM)"
-
-route-transfer-preflight: python-runtime-check ## Guard Java public authority and verify parity through deployed Vue/Nginx
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" MAKE="$(MAKE)" \
-		"$(PYTHON)" scripts/qualification.py route-transfer-preflight \
-		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
-		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
-		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
-		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
-		--confirm "$(CHAT_ROUTE_TRANSFER_CONFIRM)"
-
-route-transfer-verify: python-runtime-check ## Guard Go public authority and verify parity through deployed Vue/Nginx
-	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
-		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" MAKE="$(MAKE)" \
-		"$(PYTHON)" scripts/qualification.py route-transfer-verify \
-		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
-		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
-		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
-		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
-		--confirm "$(CHAT_ROUTE_TRANSFER_CONFIRM)"
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -352,9 +268,6 @@ run:
 help:
 	@printf '%s\n' 'Chat service commands:' \
 		'  make bootstrap-tools  Install the pinned Go and Python tools explicitly' \
-		'  make capture-java-parity   Capture the accepted Java WebSocket oracle' \
-		'  make validate-java-parity  Validate the immutable Java parity fixture' \
-		'  make verify-live-java-parity  Compare a live endpoint with the Java fixture' \
 		'  make coverage-check  Generate race coverage and enforce the 75% module threshold' \
 		'  make check            Validate the owned module, runtime and image source' \
 		'  make test-tooling     Exercise focused controlled tooling defects' \
@@ -362,8 +275,4 @@ help:
 		'  make deploy-check     Validate hardened local-dev and QA manifests' \
 		'  make deploy-test-tooling  Exercise fail-closed deployment guards' \
 		'  make deploy-smoke     Smoke the exact image in an owned Kind namespace' \
-		'  make qualification-preflight  Read exact live Chat/public-route identity' \
-		'  make qualification-run  Verify live parity through authorized loopback Nginx' \
-		'  make route-transfer-preflight  Guard Java authority and deployed-path parity' \
-		'  make route-transfer-verify  Guard Go authority and deployed-path parity' \
 		'  make run              Start the two-listener service'

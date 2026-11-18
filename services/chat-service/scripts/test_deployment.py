@@ -213,8 +213,8 @@ def test_qa_aggregate_accepts_only_the_final_go_state() -> None:
     [
         (["./chat", "./chat", "./product"], "exactly once"),
         (["./product"], "exactly once"),
-        (["./chat", "./chat/legacy", "./product"], "only the Go Chat"),
-        (["./chat/legacy", {"path": "./chat"}], "resources are invalid"),
+        (["./chat", "./chat/extra", "./product"], "only the Go Chat"),
+        (["./chat/extra", {"path": "./chat"}], "resources are invalid"),
     ],
 )
 def test_qa_aggregate_rejects_ambiguous_activation(resources: list[object], message: str) -> None:
@@ -236,8 +236,8 @@ def test_qa_aggregate_current_repository_state_is_valid() -> None:
 @pytest.mark.parametrize(
     ("environment", "wrong_route"),
     [
-        ("local-dev", "http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local"),
-        ("qa", "http://qa-chat-api-legacy.qa-svc.svc.cluster.local"),
+        ("local-dev", "http://foreign-chat-api.local-dev-all.svc.cluster.local"),
+        ("qa", "http://foreign-chat-api.qa-svc.svc.cluster.local"),
     ],
 )
 def test_vue_route_authority_matches_the_final_go_state(
@@ -245,24 +245,16 @@ def test_vue_route_authority_matches_the_final_go_state(
     wrong_route: str,
 ) -> None:
     # given
-    legacy = checks.run(
-        [
-            os.environ.get("KUBECTL", "kubectl"),
-            "kustomize",
-            str(checks.ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"),
-        ]
-    )
     path = checks.ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml"
     expected = checks.EXPECTED_CHAT_ROUTES[environment]
     changed = path.read_text().replace(expected, wrong_route)
 
     # when / then
     with (
-        patch.object(checks, "run", return_value=legacy),
         patch.object(checks.Path, "read_text", return_value=changed),
         pytest.raises(checks.DeploymentError, match="route authority"),
     ):
-        checks.validate_legacy_and_route_authority(environment)
+        checks.validate_route_authority(environment)
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
@@ -274,19 +266,12 @@ def test_route_rejects_ambiguous_or_wrong_go_authority(
     # given
     namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
     wrong_namespace = "qa-svc" if environment == "local-dev" else "local-dev-all"
-    legacy = checks.run(
-        [
-            os.environ.get("KUBECTL", "kubectl"),
-            "kustomize",
-            str(checks.ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"),
-        ]
-    )
     path = checks.ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml"
     changed = path.read_text()
     if mutation == "multiple":
         changed = changed.replace(
             "      - CHAT_URL=",
-            f"      - CHAT_URL=http://{environment}-chat-api-legacy.{namespace}.svc.cluster.local\n"
+            f"      - CHAT_URL=http://foreign-chat-api.{namespace}.svc.cluster.local\n"
             "      - CHAT_URL=",
         )
     else:
@@ -297,37 +282,10 @@ def test_route_rejects_ambiguous_or_wrong_go_authority(
 
     # when / then
     with (
-        patch.object(checks, "run", return_value=legacy),
         patch.object(checks.Path, "read_text", return_value=changed),
         pytest.raises(checks.DeploymentError, match="route authority"),
     ):
-        checks.validate_legacy_and_route_authority(environment)
-
-
-def test_legacy_and_go_service_selectors_must_remain_separate() -> None:
-    # given
-    environment = "local-dev"
-    items = checks.documents(
-        checks.run(
-            [
-                os.environ.get("KUBECTL", "kubectl"),
-                "kustomize",
-                str(checks.ROOT / "k8s/overlays/local-dev/svc/chat/legacy"),
-            ]
-        )
-    )
-    deployment = checks.resource(items, "Deployment", "local-dev-chat-api-legacy")
-    service = checks.resource(items, "Service", "local-dev-chat-api-legacy")
-    deployment["spec"]["selector"]["matchLabels"]["app.kubernetes.io/name"] = "chat-api"
-    service["spec"]["selector"]["app.kubernetes.io/name"] = "chat-api"
-    changed = yaml.safe_dump_all(items)
-
-    # when / then
-    with (
-        patch.object(checks, "run", return_value=changed),
-        pytest.raises(checks.DeploymentError, match="selector separation"),
-    ):
-        checks.validate_legacy_and_route_authority(environment)
+        checks.validate_route_authority(environment)
 
 
 def test_local_image_requires_exact_source_identity() -> None:

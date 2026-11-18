@@ -15,23 +15,23 @@ import pytest
 @pytest.mark.parametrize(
     ("variable", "foreign_value", "message"),
     [
-        ("QUALIFICATION_CONTEXT", "qa-insurance-hub", "context differs"),
-        ("QUALIFICATION_KIND_CLUSTER", "foreign-cluster", "cluster differs"),
+        ("DEPLOYMENT_SMOKE_CONTEXT", "qa-insurance-hub", "context differs"),
+        ("DEPLOYMENT_SMOKE_KIND_CLUSTER", "foreign-cluster", "cluster differs"),
     ],
 )
-def test_qualification_target_rejects_foreign_coordinates_before_command(
+def test_deployment_smoke_target_rejects_foreign_coordinates_before_command(
     monkeypatch: pytest.MonkeyPatch, variable: str, foreign_value: str, message: str
 ) -> None:
     # given
-    monkeypatch.setenv("QUALIFICATION_CONTEXT", "kind-local-dev-insurance-hub")
-    monkeypatch.setenv("QUALIFICATION_KIND_CLUSTER", "local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOYMENT_SMOKE_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOYMENT_SMOKE_KIND_CLUSTER", "local-dev-insurance-hub")
     monkeypatch.setenv(variable, foreign_value)
     command = Mock()
     monkeypatch.setattr(disposable_deployment.checks, "run", command)
 
     # when / then
     with pytest.raises(disposable_deployment.DisposableError, match=message):
-        disposable_deployment.qualification_target()
+        disposable_deployment.deployment_smoke_target()
     command.assert_not_called()
 
 
@@ -216,7 +216,7 @@ def test_cli_preserves_interrupt_status(monkeypatch: pytest.MonkeyPatch) -> None
 def test_chat_disposable_deployment() -> None:
     # given
     assert os.environ.get("IMAGE_REF")
-    assert os.environ.get("QUALIFICATION_SOURCE_REVISION")
+    assert os.environ.get("DEPLOYMENT_SMOKE_SOURCE_REVISION")
 
     # when / then
     assert disposable_deployment.main() == 0

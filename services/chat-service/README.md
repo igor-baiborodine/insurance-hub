@@ -14,8 +14,8 @@
 # Chat service
 
 `chat-service` is the standalone Go implementation of the accepted Insurance Hub Chat WebSocket
-contract. The candidate is qualified privately before the environment-owned Vue/Nginx route is
-transferred directly from Java to Go, local-dev before QA.
+contract. It owns the Chat workload and serves the environment-owned Vue/Nginx route in local-dev
+and QA.
 
 ## Architecture and ownership
 
@@ -51,13 +51,13 @@ state. Readiness is withdrawn before new upgrades are rejected and tracked sessi
 1001 during bounded shutdown.
 
 The module depends on the published `libs/servicekit` version in `go.mod`. It has no Go workspace,
-filesystem replacement, template import, sibling-service private import, Java runtime dependency,
+filesystem replacement, template import, sibling-service private import, external runtime dependency,
 gRPC listener, protobuf surface, generated API contract, persistence or message broker.
 
 Source-copy provenance is recorded in [COPYING.md](COPYING.md).
 
-Operational procedures are owned by the [deployment, qualification and route-transfer runbook](deployment-runbook.md)
-and the [observability runbook](observability-runbook.md).
+Operational procedures are owned by the [deployment runbook](deployment-runbook.md) and the
+[observability runbook](observability-runbook.md).
 
 ## Runtime contract
 
@@ -148,16 +148,15 @@ runtime file writes.
 
 The generic service catalog and module-owned deployment guards render hardened, one-replica
 local-dev and QA workloads with distinct business and management Services. Neither Go workload has
-browser ingress; local-dev is default-denied, and QA adds only DNS and Alloy OTLP egress. Before
-release, the QA service aggregate keeps only `./chat/legacy`; the generic release adds `./chat`
-after publishing the image and canonical identity. Both Vue overlays select their environment's Go
+browser ingress; local-dev is default-denied, and QA adds only DNS and Alloy OTLP egress. The QA
+service aggregate contains `./chat` exactly once. Both Vue overlays select their environment's Go
 Chat Service. Local-dev remains directly managed; QA remains Flux-owned, so a reviewed source
 change does not mutate QA until its separately authorized merge and reconciliation window.
 
 The base Deployment owns `replicas: 1` and the `Recreate` strategy, so neither overlay can run two
 process-local room owners during replacement. `deploy-check` validates both renders, exact
-source-derived version mapping, legacy coexistence and unchanged Vue authority without contacting a
-cluster. `deploy-test-tooling` uses fake boundaries to exercise target selection, failure and
+source-derived version mapping, Go-only activation and unchanged Vue authority without contacting
+a cluster. `deploy-test-tooling` uses fake boundaries to exercise target selection, failure and
 bounded cleanup. `deploy-smoke` builds the exact candidate, loads it into the cataloged local Kind
 cluster, verifies health and negative HTTP route behavior in a uniquely owned namespace, and
 deletes that namespace within a fixed deadline. It does not touch the shared local-dev namespace.
@@ -195,8 +194,8 @@ commands mutate only the cataloged direct target and require explicit local-dev 
 `go-svc-image-load` changes the Kind node cache, `go-svc-deploy` server-side applies the rendered Go
 resources, and `go-svc-stop` scales only `local-dev-chat-api` to zero. Supply the same five
 environment values to every command. Rerun preflight after an uncertain failure; use status and
-verify to establish the postcondition before retrying. Stop never deletes the namespace, legacy
-Chat resources or repository manifests.
+verify to establish the postcondition before retrying. Stop never deletes the namespace or
+repository manifests.
 
 QA is Flux-owned. The generic release publishes the canonical image and activates `./chat`; do not
 use `go-svc-image-load`, `go-svc-deploy` or `go-svc-stop` for QA. After the release and with
@@ -206,5 +205,3 @@ post-release verification step.
 
 The local-dev route is applied only through the separately authorized web-vue direct owner. The QA
 route is published only through reviewed Git and Flux during its separately authorized window.
-Java retirement is a separate, one-time manual C04 operation and never removes legacy source or
-repository manifests.
