@@ -424,6 +424,57 @@ def test_cleanup_failure_is_attached_to_an_existing_failure() -> None:
     owned.close.assert_called_once_with()
 
 
+def test_nginx_cleanup_removes_owned_container_after_run_client_exits() -> None:
+    # given
+    owned = Mock()
+    owned.process.poll.return_value = 1
+    nginx = qualification.NginxProcess(
+        ("docker", "run"),
+        name="insurance-hub-chat-qualification-390",
+        docker="docker",
+        environment={"PATH": "/usr/bin"},
+    )
+    nginx.owned = owned
+
+    # when
+    with patch.object(qualification, "run") as run_command:
+        nginx.__exit__(None, None, None)
+
+    # then
+    run_command.assert_called_once_with(
+        ["docker", "rm", "--force", "insurance-hub-chat-qualification-390"],
+        cwd=qualification.ROOT,
+        env={"PATH": "/usr/bin"},
+        timeout_seconds=15,
+        activity="remove Chat qualification Nginx container",
+    )
+    owned.close.assert_called_once_with()
+
+
+def test_nginx_cleanup_accepts_exact_container_absence() -> None:
+    # given
+    owned = Mock()
+    name = "insurance-hub-chat-qualification-390"
+    nginx = qualification.NginxProcess(
+        ("docker", "run"),
+        name=name,
+        docker="docker",
+        environment={"PATH": "/usr/bin"},
+    )
+    nginx.owned = owned
+    absent = CommandError(
+        "controlled absence",
+        stderr=f"Error response from daemon: No such container: {name}\n",
+    )
+
+    # when
+    with patch.object(qualification, "run", side_effect=absent):
+        nginx.__exit__(None, None, None)
+
+    # then
+    owned.close.assert_called_once_with()
+
+
 def test_relay_cleanup_preserves_primary_failure() -> None:
     # given
     owned = Mock()

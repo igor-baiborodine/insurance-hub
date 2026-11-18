@@ -337,17 +337,20 @@ class NginxProcess:
         if self.owned is None:
             return
         cleanup_error: BaseException | None = None
-        if self.owned.process.poll() is None:
-            try:
-                run(
-                    [self.docker, "rm", "--force", self.name],
-                    cwd=ROOT,
-                    env=self.environment,
-                    timeout_seconds=15,
-                    activity="remove Chat qualification Nginx container",
-                )
-            except BaseException as error:
+        try:
+            run(
+                [self.docker, "rm", "--force", self.name],
+                cwd=ROOT,
+                env=self.environment,
+                timeout_seconds=15,
+                activity="remove Chat qualification Nginx container",
+            )
+        except CommandError as error:
+            expected_absence = f"Error response from daemon: No such container: {self.name}"
+            if error.stdout or error.stderr.strip() != expected_absence:
                 cleanup_error = error
+        except BaseException as error:
+            cleanup_error = error
         try:
             self.owned.close()
         except BaseException as error:
