@@ -114,6 +114,30 @@ def render(environment: str) -> str:
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
 
 
+def expected_ingress(environment: str) -> list[dict[str, Any]]:
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    return [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": namespace}
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "web-vue-legacy",
+                            "app.kubernetes.io/instance": ("insurance-hub-web-vue-legacy"),
+                            "app.kubernetes.io/component": "web",
+                            "environment": environment,
+                        }
+                    },
+                }
+            ],
+            "ports": [{"port": 8080, "protocol": "TCP"}],
+        }
+    ]
+
+
 def expected_egress(environment: str) -> list[dict[str, Any]]:
     if environment == "local-dev":
         return []
@@ -334,7 +358,7 @@ def validate_render(environment: str, text: str) -> list[dict[str, Any]]:
     require(
         policy_spec.get("podSelector", {}).get("matchLabels") == selector
         and policy_spec.get("policyTypes") == ["Ingress", "Egress"]
-        and policy_spec.get("ingress", []) == []
+        and policy_spec.get("ingress", []) == expected_ingress(environment)
         and policy_spec.get("egress", []) == expected_egress(environment),
         "NetworkPolicy differs",
     )

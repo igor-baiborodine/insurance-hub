@@ -56,7 +56,7 @@ def test_inspect_image_rejects_mismatched_oci_identity(monkeypatch: pytest.Monke
         disposable_deployment.inspect_image(image, "a" * 40)
 
 
-def test_prepared_resources_rewrite_only_owned_identity() -> None:
+def test_prepared_resources_rewrite_owned_identity_and_default_deny() -> None:
     # given
     source_revision = "a" * 40
     image = "insurance-hub-chat-api:1.0.0-local.aaaaaaaaaaaa"

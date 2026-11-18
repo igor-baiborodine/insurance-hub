@@ -121,6 +121,34 @@ def test_render_requires_the_application_exporter_timeout_default() -> None:
         checks.validate_render("local-dev", yaml.safe_dump_all(items))
 
 
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda policy: policy["spec"].pop("ingress"),
+        lambda policy: policy["spec"]["ingress"][0]["from"][0]["namespaceSelector"][
+            "matchLabels"
+        ].__setitem__("kubernetes.io/metadata.name", "foreign"),
+        lambda policy: policy["spec"]["ingress"][0]["from"][0]["podSelector"]["matchLabels"].pop(
+            "app.kubernetes.io/instance"
+        ),
+        lambda policy: policy["spec"]["ingress"][0]["ports"][0].__setitem__("port", 8081),
+    ],
+)
+def test_render_allows_only_web_vue_ingress(environment: str, mutation) -> None:
+    # given
+    items = checks.validate_render(environment, checks.render(environment))
+    policy = checks.resource(items, "NetworkPolicy", f"{environment}-chat-api")
+    weakened = deepcopy(items)
+    weakened_policy = checks.resource(weakened, "NetworkPolicy", f"{environment}-chat-api")
+    mutation(weakened_policy)
+
+    # when / then
+    assert policy["spec"]["ingress"] == checks.expected_ingress(environment)
+    with pytest.raises(checks.DeploymentError, match="NetworkPolicy"):
+        checks.validate_render(environment, yaml.safe_dump_all(weakened))
+
+
 def test_render_rejects_placeholder_and_mismatched_versions() -> None:
     # given
     rendered = checks.render("local-dev")
@@ -388,7 +416,6 @@ def test_live_state_accepts_kubernetes_api_defaults() -> None:
     for probe in ("startupProbe", "livenessProbe", "readinessProbe"):
         container[probe]["successThreshold"] = 1
     policy = actual[("networkpolicy", "local-dev-chat-api")]
-    policy["spec"].pop("ingress")
     policy["spec"].pop("egress")
     target = object.__new__(checks.Target)
     target.environment = "local-dev"
