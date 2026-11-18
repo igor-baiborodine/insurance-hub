@@ -1,6 +1,16 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
+- [Chat deployment and private qualification runbook](#chat-deployment-and-private-qualification-runbook)
+  - [Exact targets and ownership](#exact-targets-and-ownership)
+  - [Source and disposable qualification](#source-and-disposable-qualification)
+  - [Candidate identity gate](#candidate-identity-gate)
+  - [Deploy and observe local-dev](#deploy-and-observe-local-dev)
+  - [Observe QA](#observe-qa)
+  - [Run private real-client qualification through Nginx](#run-private-real-client-qualification-through-nginx)
+  - [Stop conditions, cleanup and recovery](#stop-conditions-cleanup-and-recovery)
+  - [Evidence checklist](#evidence-checklist)
+
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Chat deployment and private qualification runbook
