@@ -312,6 +312,68 @@ func TestCapture_RejectsInvalidInputsBeforeConnecting(t *testing.T) {
 	})
 }
 
+func TestVerifyLive_RejectsInvalidTimingBeforeConnecting(t *testing.T) {
+	t.Parallel()
+
+	err := verifyLive(options{
+		fixturePath:    checkedInFixture,
+		provenancePath: checkedInProvenance,
+		timeout:        0,
+		quietWindow:    defaultQuietWindow,
+	})
+	assertErrorContains(t, err, "timeout and quiet window must be positive")
+}
+
+func TestVerifyLiveWith_ComparesCapturedBehaviorToCheckedInFixture(t *testing.T) {
+	t.Parallel()
+
+	fixtureBytes, err := os.ReadFile(checkedInFixture)
+	if err != nil {
+		t.Fatalf("ReadFile(fixture) error = %v", err)
+	}
+	var expected fixture
+	if err := decodeJSON(fixtureBytes, &expected); err != nil {
+		t.Fatalf("decodeJSON(fixture) error = %v", err)
+	}
+	opts := options{
+		fixturePath:    checkedInFixture,
+		provenancePath: checkedInProvenance,
+		timeout:        defaultTimeout,
+		quietWindow:    defaultQuietWindow,
+	}
+
+	if err := verifyLiveWith(opts, func(options) (fixture, error) {
+		return expected, nil
+	}); err != nil {
+		t.Fatalf("verifyLiveWith(equal) error = %v", err)
+	}
+
+	drifted := expected
+	drifted.Oracle = "changed"
+	assertErrorContains(t, verifyLiveWith(opts, func(options) (fixture, error) {
+		return drifted, nil
+	}), "differs from the Java fixture")
+	assertErrorContains(t, verifyLiveWith(opts, func(options) (fixture, error) {
+		return fixture{}, errors.New("controlled capture failure")
+	}), "controlled capture failure")
+}
+
+func TestCompareFixture_RejectsLiveContractDrift(t *testing.T) {
+	t.Parallel()
+
+	expected := fixture{
+		SchemaVersion: fixtureSchemaVersion,
+		Oracle:        "legacy Java ChatWebSocket",
+	}
+	if err := compareFixture(expected, expected); err != nil {
+		t.Fatalf("compareFixture(equal) error = %v", err)
+	}
+
+	actual := expected
+	actual.Oracle = "changed"
+	assertErrorContains(t, compareFixture(actual, expected), "differs from the Java fixture")
+}
+
 func TestDialClient_ReportsHTTPFailure(t *testing.T) {
 	server := httptest.NewServer(
 		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

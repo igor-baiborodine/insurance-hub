@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -120,6 +121,8 @@ func main() {
 		err = capture(opts)
 	case "validate":
 		err = validateFiles(opts.fixturePath, opts.provenancePath)
+	case "verify-live":
+		err = verifyLive(opts)
 	default:
 		err = fmt.Errorf("unsupported mode %q", opts.mode)
 	}
@@ -137,7 +140,7 @@ func main() {
 
 func parseOptions() options {
 	var opts options
-	flag.StringVar(&opts.mode, "mode", "validate", "capture or validate")
+	flag.StringVar(&opts.mode, "mode", "validate", "capture, validate, or verify-live")
 	flag.StringVar(
 		&opts.endpoint,
 		"endpoint",
@@ -227,6 +230,40 @@ func capture(opts options) error {
 		return fmt.Errorf("write provenance: %w", err)
 	}
 	return validateFiles(opts.fixturePath, opts.provenancePath)
+}
+
+func verifyLive(opts options) error {
+	return verifyLiveWith(opts, captureFixture)
+}
+
+func verifyLiveWith(opts options, captureFn func(options) (fixture, error)) error {
+	if opts.timeout <= 0 || opts.quietWindow <= 0 {
+		return errors.New("timeout and quiet window must be positive")
+	}
+	if err := validateFiles(opts.fixturePath, opts.provenancePath); err != nil {
+		return err
+	}
+
+	expectedBytes, err := os.ReadFile(opts.fixturePath)
+	if err != nil {
+		return fmt.Errorf("read fixture: %w", err)
+	}
+	var expected fixture
+	if err := decodeJSON(expectedBytes, &expected); err != nil {
+		return fmt.Errorf("decode fixture: %w", err)
+	}
+	actual, err := captureFn(opts)
+	if err != nil {
+		return err
+	}
+	return compareFixture(actual, expected)
+}
+
+func compareFixture(actual fixture, expected fixture) error {
+	if reflect.DeepEqual(actual, expected) {
+		return nil
+	}
+	return errors.New("live recipient or payload behavior differs from the Java fixture")
 }
 
 func captureFixture(opts options) (fixture, error) {

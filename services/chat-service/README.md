@@ -56,6 +56,9 @@ gRPC listener, protobuf surface, generated API contract, persistence or message 
 
 Source-copy provenance is recorded in [COPYING.md](COPYING.md).
 
+Operational procedures are owned by the [deployment and private qualification runbook](deployment-runbook.md)
+and the [observability runbook](observability-runbook.md).
+
 ## Runtime contract
 
 The process owns exactly two HTTP listeners:
