@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import urllib.error
 from copy import deepcopy
 from pathlib import Path
@@ -44,6 +45,7 @@ def documents(target: qualification.Target) -> dict[tuple[str, str], dict[str, o
     vue_config = f"{target.environment}-web-vue-config-legacy-controlled"
     return {
         ("deployment", target.deployment): {
+            "metadata": {"uid": "deployment-uid"},
             "spec": {
                 "replicas": 1,
                 "strategy": {"type": "Recreate"},
@@ -59,12 +61,13 @@ def documents(target: qualification.Target) -> dict[tuple[str, str], dict[str, o
                         ]
                     },
                 },
-            }
+            },
         },
         ("configmap", chat_config): {"data": {"SERVICE_VERSION": target.version}},
         ("pods", ""): {
             "items": [
                 {
+                    "metadata": {"uid": "pod-uid"},
                     "status": {
                         "containerStatuses": [
                             {
@@ -75,7 +78,7 @@ def documents(target: qualification.Target) -> dict[tuple[str, str], dict[str, o
                                 ),
                             }
                         ]
-                    }
+                    },
                 }
             ]
         },
@@ -147,6 +150,10 @@ def test_live_identity_accepts_exact_candidate_and_public_java_route() -> None:
     assert evidence["source_revision"] == "a" * 40
     assert evidence["version"] == "git-aaaaaaaaaaaa"
     assert evidence["image_digest"] == f"sha256:{'b' * 64}"
+    assert evidence["deployment_uid"] == "deployment-uid"
+    assert evidence["pod_uid"] == "pod-uid"
+    assert evidence["runtime_service_version"] == "git-aaaaaaaaaaaa"
+    assert evidence["runtime_service_instance"] == "pod-uid"
     assert evidence["public_chat_url"].startswith("http://local-dev-chat-api-legacy.")
 
 
@@ -194,6 +201,34 @@ def test_nginx_command_binds_only_loopback_and_uses_unchanged_image() -> None:
     assert actual[2:4] == ("--pull", "never")
     assert actual[-1] == qualification.NGINX_IMAGE
     assert all("0.0.0.0" not in value for value in actual)
+
+
+def test_nginx_image_inspection_records_local_content_identity() -> None:
+    # given
+    environment = {"PATH": "/usr/bin"}
+    expected = f"sha256:{'c' * 64}"
+
+    # when
+    with patch.object(qualification, "run", return_value=f"{expected}\n") as run_command:
+        actual = qualification.inspect_nginx_image("docker", qualification.NGINX_IMAGE, environment)
+
+    # then
+    assert actual == expected
+    run_command.assert_called_once_with(
+        [
+            "docker",
+            "image",
+            "inspect",
+            qualification.NGINX_IMAGE,
+            "--format",
+            "{{.Id}}",
+        ],
+        cwd=qualification.ROOT,
+        env=environment,
+        timeout_seconds=15,
+        activity="inspect Chat qualification Nginx image",
+        capture=True,
+    )
 
 
 def test_relay_command_connects_unix_socket_only_to_loopback_forward() -> None:
@@ -270,6 +305,8 @@ def test_qualify_runs_real_clients_through_nginx_and_cleans_after_failure() -> N
             relay_waiter=lambda _path, _process: None,
             waiter=lambda _port, _process: None,
             verifier=fail_verification,
+            nginx_image_inspector=lambda _docker, _image, _environment: f"sha256:{'c' * 64}",
+            clock=lambda: "2026-11-18T00:00:00Z",
         )
     assert events == [
         "forward-start",
@@ -280,6 +317,68 @@ def test_qualify_runs_real_clients_through_nginx_and_cleans_after_failure() -> N
         "relay-stop",
         "forward-stop",
     ]
+
+
+def test_qualify_reports_identity_and_pass_only_after_cleanup(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    events: list[str] = []
+    process = SimpleNamespace(process=Mock())
+
+    class Resource:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def __enter__(self):
+            events.append(f"{self.name}-start")
+            return process
+
+        def __exit__(self, *_args: object) -> None:
+            events.append(f"{self.name}-stop")
+
+    def resource_type(name: str):
+        return lambda *_args, **_options: Resource(name)
+
+    times = iter(("2026-11-18T00:00:00Z", "2026-11-18T00:00:05Z"))
+
+    # when
+    with patch("builtins.print", side_effect=lambda value: events.append(f"report:{value}")):
+        qualification.qualify(
+            target,
+            arguments(),
+            get_json=getter_for(documents(target)),
+            forward_type=resource_type("forward"),
+            relay_type=resource_type("relay"),
+            nginx_type=resource_type("nginx"),
+            relay_waiter=lambda _path, _process: None,
+            waiter=lambda _port, _process: None,
+            verifier=lambda _port, _make, _environment: events.append("verify"),
+            nginx_image_inspector=lambda _docker, _image, _environment: f"sha256:{'c' * 64}",
+            clock=lambda: next(times),
+        )
+
+    # then
+    assert events[:-1] == [
+        "forward-start",
+        "relay-start",
+        "nginx-start",
+        "verify",
+        "nginx-stop",
+        "relay-stop",
+        "forward-stop",
+    ]
+    report = json.loads(events[-1].removeprefix("report:"))
+    assert report["deployment_uid"] == "deployment-uid"
+    assert report["pod_uid"] == "pod-uid"
+    assert report["runtime_service_instance"] == "pod-uid"
+    assert report["nginx_image_id"] == f"sha256:{'c' * 64}"
+    assert report["owner_started_at"] == "2026-11-18T00:00:00Z"
+    assert report["owner_ended_at"] == "2026-11-18T00:00:05Z"
+    assert report["cleanup"] == "passed"
+    assert report["real_client_parity"] == "passed"
+    assert capsys.readouterr().out == ""
 
 
 def test_nginx_cleanup_preserves_failure_and_closes_process() -> None:

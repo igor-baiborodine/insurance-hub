@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -160,8 +161,29 @@ def config_map_name(deployment: Mapping[str, Any]) -> str:
     return names[0]
 
 
+def utc_timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def inspect_nginx_image(docker: str, image: str, environment: Mapping[str, str]) -> str:
+    image_id = run(
+        [docker, "image", "inspect", image, "--format", "{{.Id}}"],
+        cwd=ROOT,
+        env=environment,
+        timeout_seconds=15,
+        activity="inspect Chat qualification Nginx image",
+        capture=True,
+    ).strip()
+    require(bool(IMAGE_DIGEST.fullmatch(image_id)), "qualification Nginx image ID is invalid")
+    return image_id
+
+
 def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) -> dict[str, str]:
     deployment = get_json(target, "deployment", target.deployment, "")
+    deployment_uid = nested(deployment, "metadata", "uid")
+    require(
+        isinstance(deployment_uid, str) and bool(deployment_uid), "Chat Deployment UID is missing"
+    )
     require(nested(deployment, "spec", "replicas") == 1, "Chat replica count differs")
     require(
         nested(deployment, "spec", "strategy", "type") == "Recreate",
@@ -184,6 +206,8 @@ def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) 
     pods = get_json(target, "pods", "", "app.kubernetes.io/name=chat-api")
     items = pods.get("items")
     require(isinstance(items, list) and len(items) == 1, "ready Chat Pod inventory differs")
+    pod_uid = nested(items[0], "metadata", "uid")
+    require(isinstance(pod_uid, str) and bool(pod_uid), "Chat Pod UID is missing")
     statuses = nested(items[0], "status", "containerStatuses")
     require(isinstance(statuses, list) and len(statuses) == 1, "Chat container status differs")
     status = statuses[0]
@@ -215,7 +239,11 @@ def validate_live_identity(target: Target, get_json: JsonGetter = kubectl_json) 
         "source_revision": target.source_revision,
         "version": target.version,
         "image_digest": target.image_digest,
+        "deployment_uid": deployment_uid,
+        "pod_uid": pod_uid,
         "pod_image_id": image_id,
+        "runtime_service_version": target.version,
+        "runtime_service_instance": pod_uid,
         "public_chat_url": expected_chat_url,
     }
 
@@ -423,7 +451,10 @@ def qualify(
     relay_waiter: Callable[[Path, OwnedProcess], None] = wait_for_relay,
     waiter: Callable[[int, OwnedProcess], None] = wait_for_nginx,
     verifier: Callable[[int, str, Mapping[str, str]], None] = verify_parity,
+    nginx_image_inspector: Callable[[str, str, Mapping[str, str]], str] = inspect_nginx_image,
+    clock: Callable[[], str] = utc_timestamp,
 ) -> None:
+    started_at = clock()
     evidence = validate_live_identity(target, get_json)
     require(
         arguments.confirm == f"run-{target.environment}-chat-private-qualification",
@@ -440,6 +471,11 @@ def qualify(
             arguments.make,
             arguments.socat,
         )
+    )
+    nginx_image_id = nginx_image_inspector(
+        arguments.docker,
+        arguments.nginx_image,
+        environment,
     )
     forward = forward_type(
         PortForwardSpec(
@@ -479,16 +515,20 @@ def qualify(
             relay_waiter(socket_path, relay_process)
             waiter(nginx_port, nginx_process)
             verifier(nginx_port, arguments.make, environment)
-            print(
-                json.dumps(
-                    {
-                        **evidence,
-                        "nginx_endpoint": f"ws://127.0.0.1:{nginx_port}",
-                        "real_client_parity": "passed",
-                    },
-                    sort_keys=True,
-                )
-            )
+    print(
+        json.dumps(
+            {
+                **evidence,
+                "nginx_image_id": nginx_image_id,
+                "nginx_endpoint": f"ws://127.0.0.1:{nginx_port}",
+                "owner_started_at": started_at,
+                "owner_ended_at": clock(),
+                "real_client_parity": "passed",
+                "cleanup": "passed",
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def parser() -> argparse.ArgumentParser:
