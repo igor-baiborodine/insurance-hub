@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import urllib.error
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -132,6 +133,35 @@ def local_documents(target: qualification.Target) -> dict[tuple[str, str], dict[
     return values
 
 
+def route_documents(
+    target: qualification.Target,
+    authority: str,
+) -> dict[tuple[str, str], dict[str, object]]:
+    values = local_documents(target)
+    vue_deployment = values[("deployment", target.vue_service)]
+    vue_deployment["metadata"] = {"uid": "vue-deployment-uid"}
+    vue_deployment["spec"]["replicas"] = 1
+    vue_deployment["status"] = {"readyReplicas": 1}
+    values[("deployment", target.java_service)] = {
+        "metadata": {"uid": "java-deployment-uid"},
+        "spec": {"replicas": 1},
+        "status": {"readyReplicas": 1},
+    }
+    values[("service", target.service)] = {
+        "spec": {"selector": {"app.kubernetes.io/name": "chat-api"}}
+    }
+    values[("service", target.java_service)] = {
+        "spec": {"selector": {"app.kubernetes.io/name": "chat-api-legacy"}}
+    }
+    values[("ingress", "")] = {"items": []}
+    values[("httproute.gateway.networking.k8s.io", "")] = {"items": []}
+    if authority == "go":
+        values[("configmap", "local-dev-web-vue-config-legacy-controlled")]["data"]["CHAT_URL"] = (
+            f"http://{target.service}.{target.namespace}.svc.cluster.local"
+        )
+    return values
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -227,6 +257,70 @@ def test_qa_live_identity_requires_the_registry_digest_without_local_docker() ->
     # then
     assert evidence["pod_image_id"].endswith(f"@{target.image_digest}")
     inspector.assert_not_called()
+
+
+@pytest.mark.parametrize("authority", ["java", "go"])
+def test_route_transfer_identity_accepts_only_the_requested_authority(authority: str) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+
+    # when
+    evidence = qualification.validate_route_transfer_identity(
+        target,
+        authority,
+        getter_for(route_documents(target, authority)),
+        candidate_image,
+    )
+
+    # then
+    assert evidence["route_authority"] == authority
+    assert evidence["java_deployment_uid"] == "java-deployment-uid"
+    assert evidence["vue_deployment_uid"] == "vue-deployment-uid"
+    assert evidence["secondary_go_route"] == "absent"
+    assert evidence["service_selector_separation"] == "passed"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("wrong-authority", "expected java service"),
+        ("java-not-ready", "Java Chat Deployment is not ready"),
+        ("selector-overlap", "selectors overlap"),
+        ("second-ingress", "second public Go Chat route"),
+        ("second-httproute", "second public Go Chat route"),
+    ],
+)
+def test_route_transfer_identity_rejects_unsafe_public_state(
+    mutation: str,
+    message: str,
+) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    values = route_documents(target, "java")
+    if mutation == "wrong-authority":
+        values[("configmap", "local-dev-web-vue-config-legacy-controlled")]["data"]["CHAT_URL"] = (
+            f"http://{target.service}.{target.namespace}.svc.cluster.local"
+        )
+    elif mutation == "java-not-ready":
+        values[("deployment", target.java_service)]["status"]["readyReplicas"] = 0
+    elif mutation == "selector-overlap":
+        values[("service", target.java_service)]["spec"]["selector"] = {
+            "app.kubernetes.io/name": "chat-api"
+        }
+    else:
+        kind = "ingress" if mutation == "second-ingress" else "httproute.gateway.networking.k8s.io"
+        values[(kind, "")]["items"] = [
+            {"spec": {"rules": [{"backendRefs": [{"name": target.service}]}]}}
+        ]
+
+    # when / then
+    with pytest.raises(qualification.QualificationError, match=message):
+        qualification.validate_route_transfer_identity(
+            target,
+            "java",
+            getter_for(values),
+            candidate_image,
+        )
 
 
 def test_local_candidate_inspection_links_registry_and_content_identities() -> None:
@@ -495,6 +589,112 @@ def test_qualify_reports_identity_and_pass_only_after_cleanup(
     assert report["cleanup"] == "passed"
     assert report["real_client_parity"] == "passed"
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("authority", "confirm"),
+    [
+        ("java", "preflight-local-dev-chat-route-transfer"),
+        ("go", "verify-local-dev-chat-route-transfer"),
+    ],
+)
+def test_public_route_owner_uses_deployed_vue_and_reports_after_cleanup(
+    authority: str,
+    confirm: str,
+) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    events: list[str] = []
+
+    class Forward:
+        def __init__(self, spec: PortForwardSpec, **_options: object) -> None:
+            assert spec == PortForwardSpec(
+                context="kind-local-dev-insurance-hub",
+                namespace="local-dev-all",
+                resource="service/local-dev-web-vue-legacy",
+                local_port=18081,
+                remote_port=80,
+            )
+
+        def __enter__(self) -> int:
+            events.append("forward-start")
+            return 18081
+
+        def __exit__(self, *_args: object) -> None:
+            events.append("forward-stop")
+
+    times = iter(("2026-11-18T00:00:00Z", "2026-11-18T00:00:05Z"))
+
+    # when
+    with patch("builtins.print", side_effect=lambda value: events.append(f"report:{value}")):
+        qualification.verify_public_route(
+            target,
+            arguments(confirm=confirm),
+            authority,
+            get_json=getter_for(route_documents(target, authority)),
+            forward_type=Forward,
+            verifier=lambda _port, _make, _environment: events.append("verify"),
+            candidate_image_inspector=candidate_image,
+            clock=lambda: next(times),
+        )
+
+    # then
+    assert events[:-1] == ["forward-start", "verify", "forward-stop"]
+    report = json.loads(events[-1].removeprefix("report:"))
+    assert report["route_authority"] == authority
+    assert report["real_client_parity"] == "passed"
+    assert report["cleanup"] == "passed"
+    assert report["owner_ended_at"] == "2026-11-18T00:00:05Z"
+
+
+def test_public_route_owner_cleans_forward_after_parity_failure() -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    events: list[str] = []
+
+    class Forward:
+        def __init__(self, *_args: object, **_options: object) -> None:
+            pass
+
+        def __enter__(self) -> int:
+            events.append("forward-start")
+            return 18081
+
+        def __exit__(self, *_args: object) -> None:
+            events.append("forward-stop")
+
+    def fail(_port: int, _make: str, _environment: Mapping[str, str]) -> None:
+        events.append("verify")
+        raise qualification.QualificationError("controlled public parity failure")
+
+    # when / then
+    with pytest.raises(qualification.QualificationError, match="public parity failure"):
+        qualification.verify_public_route(
+            target,
+            arguments(confirm="preflight-local-dev-chat-route-transfer"),
+            "java",
+            get_json=getter_for(route_documents(target, "java")),
+            forward_type=Forward,
+            verifier=fail,
+            candidate_image_inspector=candidate_image,
+        )
+    assert events == ["forward-start", "verify", "forward-stop"]
+
+
+def test_public_route_owner_rejects_confirmation_before_forward() -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+
+    # when / then
+    with pytest.raises(qualification.QualificationError, match="confirmation differs"):
+        qualification.verify_public_route(
+            target,
+            arguments(confirm="wrong"),
+            "java",
+            get_json=getter_for(route_documents(target, "java")),
+            forward_type=Mock(side_effect=AssertionError("must not start a forward")),
+            candidate_image_inspector=candidate_image,
+        )
 
 
 def test_nginx_cleanup_preserves_failure_and_closes_process() -> None:

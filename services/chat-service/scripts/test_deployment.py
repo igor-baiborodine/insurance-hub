@@ -212,8 +212,17 @@ def test_qa_aggregate_current_repository_state_is_valid() -> None:
     checks.validate_qa_aggregate(resources)
 
 
-@pytest.mark.parametrize("environment", ["local-dev", "qa"])
-def test_vue_route_authority_must_remain_legacy(environment: str) -> None:
+@pytest.mark.parametrize(
+    ("environment", "wrong_route"),
+    [
+        ("local-dev", "http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local"),
+        ("qa", "http://qa-chat-api.qa-svc.svc.cluster.local"),
+    ],
+)
+def test_vue_route_authority_matches_the_pr1_staged_state(
+    environment: str,
+    wrong_route: str,
+) -> None:
     # given
     legacy = checks.run(
         [
@@ -223,13 +232,71 @@ def test_vue_route_authority_must_remain_legacy(environment: str) -> None:
         ]
     )
     path = checks.ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml"
-    changed = path.read_text().replace(f"{environment}-chat-api-legacy", f"{environment}-chat-api")
+    expected = checks.EXPECTED_CHAT_ROUTES[environment]
+    changed = path.read_text().replace(expected, wrong_route)
 
     # when / then
     with (
         patch.object(checks, "run", return_value=legacy),
         patch.object(checks.Path, "read_text", return_value=changed),
         pytest.raises(checks.DeploymentError, match="route authority"),
+    ):
+        checks.validate_legacy_and_route_authority(environment)
+
+
+@pytest.mark.parametrize("mutation", ["multiple", "wrong-namespace"])
+def test_local_dev_route_rejects_ambiguous_or_wrong_go_authority(mutation: str) -> None:
+    # given
+    environment = "local-dev"
+    legacy = checks.run(
+        [
+            os.environ.get("KUBECTL", "kubectl"),
+            "kustomize",
+            str(checks.ROOT / "k8s/overlays/local-dev/svc/chat/legacy"),
+        ]
+    )
+    path = checks.ROOT / "k8s/overlays/local-dev/svc/web-vue/legacy/kustomization.yaml"
+    changed = path.read_text()
+    if mutation == "multiple":
+        changed = changed.replace(
+            "      - CHAT_URL=",
+            "      - CHAT_URL=http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local\n"
+            "      - CHAT_URL=",
+        )
+    else:
+        changed = changed.replace("local-dev-all.svc.cluster.local", "qa-svc.svc.cluster.local")
+
+    # when / then
+    with (
+        patch.object(checks, "run", return_value=legacy),
+        patch.object(checks.Path, "read_text", return_value=changed),
+        pytest.raises(checks.DeploymentError, match="route authority"),
+    ):
+        checks.validate_legacy_and_route_authority(environment)
+
+
+def test_legacy_and_go_service_selectors_must_remain_separate() -> None:
+    # given
+    environment = "local-dev"
+    items = checks.documents(
+        checks.run(
+            [
+                os.environ.get("KUBECTL", "kubectl"),
+                "kustomize",
+                str(checks.ROOT / "k8s/overlays/local-dev/svc/chat/legacy"),
+            ]
+        )
+    )
+    deployment = checks.resource(items, "Deployment", "local-dev-chat-api-legacy")
+    service = checks.resource(items, "Service", "local-dev-chat-api-legacy")
+    deployment["spec"]["selector"]["matchLabels"]["app.kubernetes.io/name"] = "chat-api"
+    service["spec"]["selector"]["app.kubernetes.io/name"] = "chat-api"
+    changed = yaml.safe_dump_all(items)
+
+    # when / then
+    with (
+        patch.object(checks, "run", return_value=changed),
+        pytest.raises(checks.DeploymentError, match="selector separation"),
     ):
         checks.validate_legacy_and_route_authority(environment)
 

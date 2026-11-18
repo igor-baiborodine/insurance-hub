@@ -35,6 +35,10 @@ from scripts.python.process_runner import CommandError, run_command  # noqa: E40
 SERVICE = "chat"
 EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
+EXPECTED_CHAT_ROUTES = {
+    "local-dev": "http://local-dev-chat-api.local-dev-all.svc.cluster.local",
+    "qa": "http://qa-chat-api-legacy.qa-svc.svc.cluster.local",
+}
 
 
 class DeploymentError(RuntimeError):
@@ -773,7 +777,6 @@ def validate_qa_aggregate(resources: Any) -> None:
 
 
 def validate_legacy_and_route_authority(environment: str) -> None:
-    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
     overlay = ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"
     items = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
     deployment = resource(items, "Deployment", f"{environment}-chat-api-legacy")
@@ -797,7 +800,7 @@ def validate_legacy_and_route_authority(environment: str) -> None:
         if literal.startswith("CHAT_URL=")
     ]
     require(
-        values == [f"CHAT_URL=http://{environment}-chat-api-legacy.{namespace}.svc.cluster.local"],
+        values == [f"CHAT_URL={EXPECTED_CHAT_ROUTES[environment]}"],
         "Vue Chat route authority differs",
     )
 

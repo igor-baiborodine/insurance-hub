@@ -62,6 +62,7 @@ QUALIFICATION_SERVICE ?=
 QUALIFICATION_IMAGE_DIGEST ?=
 QUALIFICATION_NGINX_IMAGE ?= insurance-hub-web-vue-legacy:latest
 CHAT_QUALIFICATION_CONFIRM ?=
+CHAT_ROUTE_TRANSFER_CONFIRM ?=
 QUALIFICATION_EFFECTIVE_IMAGE_REF := $(if $(strip $(QUALIFICATION_IMAGE_REF)),$(QUALIFICATION_IMAGE_REF),$(IMAGE_REF))
 QUALIFICATION_EFFECTIVE_SOURCE_REVISION := $(if $(strip $(QUALIFICATION_SOURCE_REVISION)),$(QUALIFICATION_SOURCE_REVISION),$(SOURCE_REVISION))
 QUALIFICATION_IMAGE_PREREQUISITE := $(if $(strip $(QUALIFICATION_IMAGE_REF)),,image-build)
@@ -82,7 +83,7 @@ export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_RE
 	check-servicekit check-candidate-servicekit run dockerfile-generate dockerfile-check \
 	image-build image-check _image-check-existing deploy-render deploy-check \
 	deploy-preflight deploy-status image-load deploy deploy-verify stop deploy-test-tooling deploy-smoke \
-	qualification-preflight qualification-run \
+	qualification-preflight qualification-run route-transfer-preflight route-transfer-verify \
 	python-tooling-format-check \
 	python-tooling-lint python-tooling-test-fast python-check shared-fast-build shared-fast-unit \
 	shared-candidate-format shared-candidate-lint shared-candidate-race \
@@ -271,6 +272,26 @@ qualification-run: python-runtime-check ## Run real clients through loopback Ngi
 		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
 		--nginx-image "$(QUALIFICATION_NGINX_IMAGE)" --confirm "$(CHAT_QUALIFICATION_CONFIRM)"
 
+route-transfer-preflight: python-runtime-check ## Guard Java public authority and verify parity through deployed Vue/Nginx
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" MAKE="$(MAKE)" \
+		"$(PYTHON)" scripts/qualification.py route-transfer-preflight \
+		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
+		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
+		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
+		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
+		--confirm "$(CHAT_ROUTE_TRANSFER_CONFIRM)"
+
+route-transfer-verify: python-runtime-check ## Guard Go public authority and verify parity through deployed Vue/Nginx
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 \
+		KUBECTL="$(KUBECTL)" DOCKER="$(DOCKER)" MAKE="$(MAKE)" \
+		"$(PYTHON)" scripts/qualification.py route-transfer-verify \
+		--environment "$(QUALIFICATION_ENV)" --context "$(QUALIFICATION_CONTEXT)" \
+		--namespace "$(QUALIFICATION_NAMESPACE)" --service "$(QUALIFICATION_SERVICE)" \
+		--source-revision "$(QUALIFICATION_SOURCE_REVISION)" \
+		--image-digest "$(QUALIFICATION_IMAGE_DIGEST)" \
+		--confirm "$(CHAT_ROUTE_TRANSFER_CONFIRM)"
+
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
 	@case " $${GOFLAGS:-} " in *-modfile*) echo 'check-servicekit: alternate module file rejected' >&2; exit 1;; esac
@@ -343,4 +364,6 @@ help:
 		'  make deploy-smoke     Smoke the exact image in an owned Kind namespace' \
 		'  make qualification-preflight  Read exact live Chat/public-route identity' \
 		'  make qualification-run  Verify live parity through authorized loopback Nginx' \
+		'  make route-transfer-preflight  Guard Java authority and deployed-path parity' \
+		'  make route-transfer-verify  Guard Go authority and deployed-path parity' \
 		'  make run              Start the two-listener service'

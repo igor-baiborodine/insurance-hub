@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard and run loopback-only Chat real-client qualification through Nginx."""
+"""Guard and run private or deployed-path Chat real-client qualification."""
 
 from __future__ import annotations
 
@@ -76,6 +76,10 @@ class Target:
     @property
     def java_service(self) -> str:
         return f"{self.environment}-chat-api-legacy"
+
+    @property
+    def vue_service(self) -> str:
+        return f"{self.environment}-web-vue-legacy"
 
     @classmethod
     def validated(cls, arguments: argparse.Namespace) -> Target:
@@ -227,7 +231,9 @@ def validate_live_identity(
     target: Target,
     get_json: JsonGetter = kubectl_json,
     candidate_image_inspector: CandidateImageInspector | None = None,
+    route_authority: str = "java",
 ) -> dict[str, str]:
+    require(route_authority in {"java", "go"}, "Chat route authority is invalid")
     deployment = get_json(target, "deployment", target.deployment, "")
     deployment_uid = nested(deployment, "metadata", "uid")
     require(
@@ -284,10 +290,11 @@ def validate_live_identity(
         config_map_name(vue_deployment),
         "",
     )
-    expected_chat_url = f"http://{target.java_service}.{target.namespace}.svc.cluster.local"
+    route_service = target.java_service if route_authority == "java" else target.service
+    expected_chat_url = f"http://{route_service}.{target.namespace}.svc.cluster.local"
     require(
         nested(vue_configuration, "data").get("CHAT_URL") == expected_chat_url,
-        "deployed Vue Chat route is not the Java service",
+        f"deployed Vue Chat route is not the expected {route_authority} service",
     )
     return {
         "environment": target.environment,
@@ -304,6 +311,78 @@ def validate_live_identity(
         "runtime_service_version": target.version,
         "runtime_service_instance": pod_uid,
         "public_chat_url": expected_chat_url,
+    }
+
+
+def validate_ready_deployment(deployment: Mapping[str, Any], owner: str) -> str:
+    uid = nested(deployment, "metadata", "uid")
+    replicas = nested(deployment, "spec", "replicas")
+    ready = nested(deployment, "status", "readyReplicas")
+    require(isinstance(uid, str) and bool(uid), f"{owner} Deployment UID is missing")
+    require(isinstance(replicas, int) and replicas > 0, f"{owner} replicas are invalid")
+    require(ready == replicas, f"{owner} Deployment is not ready")
+    return uid
+
+
+def service_selector(service: Mapping[str, Any], owner: str) -> Mapping[str, Any]:
+    selector = nested(service, "spec", "selector")
+    require(isinstance(selector, Mapping) and bool(selector), f"{owner} selector is missing")
+    return selector
+
+
+def contains_reference(value: Any, expected: str) -> bool:
+    if isinstance(value, Mapping):
+        return any(contains_reference(item, expected) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_reference(item, expected) for item in value)
+    return value == expected
+
+
+def validate_route_transfer_identity(
+    target: Target,
+    route_authority: str,
+    get_json: JsonGetter = kubectl_json,
+    candidate_image_inspector: CandidateImageInspector | None = None,
+) -> dict[str, str]:
+    evidence = validate_live_identity(
+        target,
+        get_json,
+        candidate_image_inspector,
+        route_authority,
+    )
+    java_deployment = get_json(target, "deployment", target.java_service, "")
+    vue_deployment = get_json(target, "deployment", target.vue_service, "")
+    go_service = get_json(target, "service", target.service, "")
+    java_service = get_json(target, "service", target.java_service, "")
+    java_selector = service_selector(java_service, "Java Chat Service")
+    go_selector = service_selector(go_service, "Go Chat Service")
+    require(java_selector != go_selector, "Java and Go Chat Service selectors overlap")
+    require(
+        java_selector.get("app.kubernetes.io/name") == "chat-api-legacy",
+        "Java Chat Service selector differs",
+    )
+    require(
+        go_selector.get("app.kubernetes.io/name") == "chat-api",
+        "Go Chat Service selector differs",
+    )
+    ingress_items = get_json(target, "ingress", "", "").get("items")
+    route_items = get_json(target, "httproute.gateway.networking.k8s.io", "", "").get("items")
+    require(isinstance(ingress_items, list), "Ingress inventory is invalid")
+    require(isinstance(route_items, list), "HTTPRoute inventory is invalid")
+    require(
+        not any(
+            isinstance(item, Mapping) and contains_reference(item.get("spec"), target.service)
+            for item in [*ingress_items, *route_items]
+        ),
+        "a second public Go Chat route exists",
+    )
+    return {
+        **evidence,
+        "route_authority": route_authority,
+        "java_deployment_uid": validate_ready_deployment(java_deployment, "Java Chat"),
+        "vue_deployment_uid": validate_ready_deployment(vue_deployment, "Vue"),
+        "secondary_go_route": "absent",
+        "service_selector_separation": "passed",
     }
 
 
@@ -597,9 +676,71 @@ def qualify(
     )
 
 
+def verify_public_route(
+    target: Target,
+    arguments: argparse.Namespace,
+    route_authority: str,
+    *,
+    get_json: JsonGetter = kubectl_json,
+    forward_type: type[OwnedPortForward] = OwnedPortForward,
+    verifier: Callable[[int, str, Mapping[str, str]], None] = verify_parity,
+    candidate_image_inspector: CandidateImageInspector | None = None,
+    clock: Callable[[], str] = utc_timestamp,
+) -> None:
+    started_at = clock()
+    inspector = candidate_image_inspector or (
+        lambda selected: inspect_candidate_image(selected, arguments.docker)
+    )
+    evidence = validate_route_transfer_identity(
+        target,
+        route_authority,
+        get_json,
+        inspector,
+    )
+    action = "preflight" if route_authority == "java" else "verify"
+    require(
+        arguments.confirm == f"{action}-{target.environment}-chat-route-transfer",
+        "route-transfer confirmation differs",
+    )
+    nginx_port = arguments.nginx_port or loopback_port()
+    environment = child_environment(preferred_executables=(arguments.kubectl, arguments.make))
+    forward = forward_type(
+        PortForwardSpec(
+            context=target.context,
+            namespace=target.namespace,
+            resource=f"service/{target.vue_service}",
+            local_port=nginx_port,
+            remote_port=80,
+        ),
+        cwd=ROOT,
+        env=environment,
+        startup_seconds=30,
+        teardown_seconds=10,
+        kubectl=arguments.kubectl,
+    )
+    with forward:
+        verifier(nginx_port, arguments.make, environment)
+    print(
+        json.dumps(
+            {
+                **evidence,
+                "nginx_endpoint": f"ws://127.0.0.1:{nginx_port}",
+                "owner_started_at": started_at,
+                "owner_ended_at": clock(),
+                "real_client_parity": "passed",
+                "cleanup": "passed",
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("action", choices=("preflight", "run"))
+    result.add_argument(
+        "action",
+        choices=("preflight", "run", "route-transfer-preflight", "route-transfer-verify"),
+    )
     result.add_argument("--environment", required=True)
     result.add_argument("--context", required=True)
     result.add_argument("--namespace", required=True)
@@ -632,8 +773,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
-        else:
+        elif arguments.action == "run":
             qualify(target, arguments)
+        else:
+            route_authority = "java" if arguments.action.endswith("preflight") else "go"
+            verify_public_route(target, arguments, route_authority)
     except (
         AdministrationError,
         CommandError,

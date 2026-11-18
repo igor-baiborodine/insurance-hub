@@ -14,8 +14,8 @@
 # Chat service
 
 `chat-service` is the standalone Go implementation of the accepted Insurance Hub Chat WebSocket
-contract. It exposes the private candidate route while Java remains the only deployed browser Chat
-upstream until the later route-transfer milestone.
+contract. The candidate is qualified privately before the environment-owned Vue/Nginx route is
+transferred directly from Java to Go, local-dev before QA.
 
 ## Architecture and ownership
 
@@ -56,7 +56,7 @@ gRPC listener, protobuf surface, generated API contract, persistence or message 
 
 Source-copy provenance is recorded in [COPYING.md](COPYING.md).
 
-Operational procedures are owned by the [deployment and private qualification runbook](deployment-runbook.md)
+Operational procedures are owned by the [deployment, qualification and route-transfer runbook](deployment-runbook.md)
 and the [observability runbook](observability-runbook.md).
 
 ## Runtime contract
@@ -150,8 +150,10 @@ The generic service catalog and module-owned deployment guards render hardened, 
 local-dev and QA workloads with distinct business and management Services. Neither Go workload has
 browser ingress; local-dev is default-denied, and QA adds only DNS and Alloy OTLP egress. Before
 release, the QA service aggregate keeps only `./chat/legacy`; the generic release adds `./chat`
-after publishing the image and canonical identity. Both Vue environments retain the legacy Chat URL
-as their only route authority.
+after publishing the image and canonical identity. PR1 of issue 391 selects the Go Chat Service in
+the local-dev Vue overlay while QA deliberately retains its Java Chat URL. This source change does
+not mutate the directly managed local-dev cluster; the separate authorized web-vue apply and live
+acceptance remain required before any QA route change.
 
 The base Deployment owns `replicas: 1` and the `Recreate` strategy, so neither overlay can run two
 process-local room owners during replacement. `deploy-check` validates both renders, exact
@@ -203,6 +205,7 @@ separate read authority, use the exact QA coordinates above with `go-svc-deploy-
 `go-svc-deploy-verify`. Registry digest, Flux revision and runtime identity evidence belong to the
 post-release verification step.
 
-Until route transfer in C03, the Go service must not be made a browser/Nginx Chat upstream. Java
-retirement is a separate, one-time manual C04 operation and never removes legacy source or
+The local-dev route is applied only through the separately authorized web-vue direct owner. QA
+remains Java-owned in PR1 and changes only in the later reviewed PR2 after local-dev acceptance.
+Java retirement is a separate, one-time manual C04 operation and never removes legacy source or
 repository manifests.
