@@ -1,6 +1,15 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
+- [Chat observability runbook](#chat-observability-runbook)
+  - [Signal and privacy boundary](#signal-and-privacy-boundary)
+  - [Source and disposable validation](#source-and-disposable-validation)
+  - [QA preflight and provisioning](#qa-preflight-and-provisioning)
+  - [Live verification](#live-verification)
+  - [Investigation workflow](#investigation-workflow)
+  - [Recovery and cleanup](#recovery-and-cleanup)
+  - [Evidence checklist](#evidence-checklist)
+
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Chat observability runbook
@@ -77,8 +86,9 @@ Keep render, apply/read-back and live signal evidence distinct.
 Use a bounded UTC range, normally 15 minutes. Start with availability and the active connection
 series, then handshakes, broadcast failures, slow-peer closes, shutdown failures and shared exporter
 health. Use only fixed attributes such as handshake outcome, broadcast event/outcome and close
-reason. Correlate a safe lifecycle log to a short handshake span with structured `trace_id`; never
-search by username, topic or message bytes.
+reason. Correlate only the `chat WebSocket handshake completed` log record to its short handshake
+span with structured `trace_id` and `span_id`. Other lifecycle records intentionally omit those
+fields when no active span exists. Never search by username, topic or message bytes.
 
 Representative queries include:
 
