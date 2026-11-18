@@ -796,8 +796,11 @@ def validate_qa_aggregate(resources: Any) -> None:
         isinstance(resources, list) and all(isinstance(item, str) for item in resources),
         "QA service aggregate resources are invalid",
     )
-    require(resources.count("./chat") <= 1, "Go Chat activation must occur at most once")
-    require(resources.count("./chat/legacy") == 1, "legacy Chat must remain active exactly once")
+    require(resources.count("./chat") == 1, "Go Chat must remain active exactly once")
+    require(
+        [item for item in resources if item.startswith("./chat/")] == [],
+        "only the Go Chat aggregate may remain active",
+    )
 
 
 def validate_legacy_and_route_authority(environment: str) -> None:
@@ -847,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_qa_aggregate(aggregate.get("resources"))
         for environment in ("local-dev", "qa"):
             validate_legacy_and_route_authority(environment)
-        print("chat-deployment-check: local-dev/QA renders and coexistence passed")
+        print("chat-deployment-check: local-dev/QA renders and Go activation passed")
     return 0
 
 

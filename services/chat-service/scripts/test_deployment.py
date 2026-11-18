@@ -203,24 +203,17 @@ def test_qa_render_accepts_canonical_future_release_tag() -> None:
         checks.validate_render("qa", invalid_release)
 
 
-@pytest.mark.parametrize(
-    "resources",
-    [
-        ["./chat/legacy", "./product"],
-        ["./chat", "./chat/legacy", "./product"],
-    ],
-)
-def test_qa_aggregate_accepts_pre_release_and_released_states(resources: list[str]) -> None:
+def test_qa_aggregate_accepts_only_the_final_go_state() -> None:
     # when / then
-    checks.validate_qa_aggregate(resources)
+    checks.validate_qa_aggregate(["./chat", "./product"])
 
 
 @pytest.mark.parametrize(
     ("resources", "message"),
     [
-        (["./chat", "./chat", "./chat/legacy"], "at most once"),
-        (["./chat"], "legacy Chat"),
-        (["./chat/legacy", "./chat/legacy"], "legacy Chat"),
+        (["./chat", "./chat", "./product"], "exactly once"),
+        (["./product"], "exactly once"),
+        (["./chat", "./chat/legacy", "./product"], "only the Go Chat"),
         (["./chat/legacy", {"path": "./chat"}], "resources are invalid"),
     ],
 )
