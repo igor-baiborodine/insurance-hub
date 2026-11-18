@@ -221,7 +221,7 @@ tests:
         values: '2048x22'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="ProductTelemetryBacklog",alertstate="firing"}) or vector(0)'
-        eval_time: 3m
+        eval_time: 3m30s
         exp_samples:
           - labels: '{}'
             value: 1

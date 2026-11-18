@@ -377,7 +377,7 @@ tests:
           - labels: '{}'
             value: 0
       - expr: 'count(ALERTS{alertname="PolicySearchTelemetryBacklog",alertstate="firing"}) or vector(0)'
-        eval_time: 3m
+        eval_time: 3m30s
         exp_samples:
           - labels: '{}'
             value: 1

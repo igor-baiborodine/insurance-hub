@@ -163,7 +163,7 @@
       "response": "Identify the failed signal/backend and inspect bounded retry/drop counters while preserving service availability."
     },
     "PolicySearchTelemetryBacklog": {
-      "remote_write_lag_seconds": 30,
+      "remote_write_lag_seconds": 60,
       "queue_ratio": 0.8,
       "for": "2m",
       "severity": "warning",

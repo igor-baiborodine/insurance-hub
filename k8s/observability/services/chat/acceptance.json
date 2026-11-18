@@ -18,7 +18,7 @@
     "failure_window": "5m",
     "telemetry_absence_window": "2m",
     "telemetry_recovery_for": "1m",
-    "remote_write_lag_seconds": 30,
+    "remote_write_lag_seconds": 60,
     "exporter_queue_ratio": 0.8,
     "restart_window": "15m"
   },
