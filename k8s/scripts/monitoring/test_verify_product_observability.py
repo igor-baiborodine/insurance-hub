@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import urllib.parse
 from argparse import Namespace
 from contextlib import nullcontext
 from pathlib import Path
@@ -617,10 +618,15 @@ class TestProductObservabilityVerification:
             if description == "Chat active-connection metric":
                 return [{"value": [0, "0"]}]
             if description == "correlated Chat handshake logs":
-                return log_results
+                return _probe()
             if description == "correlated Chat handshake trace":
                 return [{"trace": "observed"}]
             raise AssertionError(description)
+
+        def backend_response(url: str) -> dict[str, object]:
+            if "/loki/api/v1/query_range" in url:
+                return {"data": {"result": log_results}}
+            return {"data": {"result": [{"value": [0, "0"]}]}}
 
         # when
         with (
@@ -628,8 +634,8 @@ class TestProductObservabilityVerification:
             mock.patch.object(
                 verifier,
                 "request_json",
-                return_value={"data": {"result": [{"value": [0, "0"]}]}},
-            ),
+                side_effect=backend_response,
+            ) as request,
         ):
             result = verifier.verify_chat_enabled_signals(
                 assets,
@@ -647,6 +653,14 @@ class TestProductObservabilityVerification:
             "trace_batches": 1,
             "firing_alerts": 0,
         }
+        log_url = next(
+            call.args[0]
+            for call in request.call_args_list
+            if "/loki/api/v1/query_range" in call.args[0]
+        )
+        log_query = urllib.parse.parse_qs(urllib.parse.urlparse(log_url).query)["query"][0]
+        assert 'service_implementation="go"} | json' in log_query
+        assert 'service_implementation="go"}}' not in log_query
 
     @pytest.mark.parametrize("active", ([], [{"value": [0, "1"]}]))
     def test_chat_enabled_signals_reject_missing_or_non_idle_metric(

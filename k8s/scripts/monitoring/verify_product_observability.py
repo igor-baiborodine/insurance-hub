@@ -1059,7 +1059,7 @@ def verify_chat_enabled_signals(
     now = time.time_ns()
     log_query = (
         f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
-        'service_implementation="go"}} | json '
+        'service_implementation="go"} | json '
         f'| service_instance_id="{pod_uid}" '
         '| msg="chat WebSocket handshake completed" | outcome="upgrade_failed"'
     )
