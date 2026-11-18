@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -90,6 +91,19 @@ def request_text(
             return response.read().decode("utf-8")
     except VerificationError:
         raise
+    except OSError as error:
+        raise VerificationError("service endpoint was unavailable") from error
+
+
+def request_status(url: str, headers: Mapping[str, str] | None = None) -> int:
+    request = urllib.request.Request(url, headers=dict(headers or {}))
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        status = error.code
+        error.close()
+        return status
     except OSError as error:
         raise VerificationError("service endpoint was unavailable") from error
 
@@ -520,6 +534,33 @@ def dashboard_services(target: KubernetesTarget) -> list[tuple[str, str, str, in
     )
     return [
         ("dashboard", target.service_namespace, target.config.business_service, 80),
+        ("health", target.service_namespace, target.config.management_service, 8081),
+    ]
+
+
+def chat_reads(
+    ports: Mapping[str, int], trace_id: str, _deployment_settings: Mapping[str, str]
+) -> int:
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
+        "Chat liveness failed",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
+        "Chat readiness failed",
+    )
+    status = request_status(
+        f"http://127.0.0.1:{ports['chat']}/ws/chat/main/observability",
+        {"traceparent": f"00-{trace_id}-0123456789abcdef-01"},
+    )
+    require(status == 400, "Chat non-upgrade handshake contract differs")
+    return 1
+
+
+def chat_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    require(target.config.management_service is not None, "Chat management service is required")
+    return [
+        ("chat", target.service_namespace, target.config.business_service, 80),
         ("health", target.service_namespace, target.config.management_service, 8081),
     ]
 
@@ -963,6 +1004,105 @@ def verify_dashboard_enabled_signals(
     }
 
 
+def chat_log_trace_id(results: Sequence[Mapping[str, Any]], field: str) -> str:
+    candidates: list[tuple[int, str]] = []
+    for result in results:
+        for value in result.get("values", []):
+            if not isinstance(value, list) or len(value) != 2:
+                continue
+            try:
+                timestamp = int(value[0])
+                document = json.loads(value[1])
+            except TypeError, ValueError, json.JSONDecodeError:
+                continue
+            trace_id = document.get(field) if isinstance(document, dict) else None
+            if isinstance(trace_id, str) and re.fullmatch(r"[0-9a-f]{32}", trace_id):
+                candidates.append((timestamp, trace_id))
+    require(bool(candidates), "correlated Chat handshake log has no safe trace ID")
+    return max(candidates)[1]
+
+
+def verify_chat_enabled_signals(
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    _trace_id: str,
+    pod_uid: str,
+    _deployment_settings: Mapping[str, str],
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        expected.metrics == ("insurance_hub_chat_connections_active",)
+        and expected.logs == ("trace_id",)
+        and expected.traces == (assets.contract.service_name,),
+        "Chat expected signal inventory differs from its registered probe",
+    )
+    common = (
+        f'service_name="{assets.contract.service_name}",'
+        'deployment_environment_name="qa",service_implementation="go",'
+        f'service_instance_id="{pod_uid}"'
+    )
+    active_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": f"{expected.metrics[0]}{{{common}}}"}
+    )
+    active = wait_for(
+        "Chat active-connection metric",
+        lambda: query_results(request_json(active_url)),
+    )
+    require(len(active) == 1, "Chat active-connection metric is missing or ambiguous")
+    sample = active[0].get("value", [])
+    try:
+        active_connections = float(sample[1])
+    except (IndexError, TypeError, ValueError) as error:
+        raise VerificationError("Chat active-connection metric is malformed") from error
+    require(active_connections == 0, "Chat is not in healthy idle state")
+
+    now = time.time_ns()
+    log_query = (
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        'service_implementation="go"}} | json '
+        f'| service_instance_id="{pod_uid}" '
+        '| msg="chat WebSocket handshake completed" | outcome="upgrade_failed"'
+    )
+    log_url = f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?" + urllib.parse.urlencode(
+        {
+            "query": log_query,
+            "start": now - 90_000_000_000,
+            "end": now + 30_000_000_000,
+            "limit": 20,
+        }
+    )
+    logs = wait_for(
+        "correlated Chat handshake logs",
+        lambda: query_results(request_json(log_url)),
+    )
+    handshake_trace_id = chat_log_trace_id(logs, expected.logs[0])
+    trace = wait_for(
+        "correlated Chat handshake trace",
+        lambda: request_json(
+            f"http://127.0.0.1:{ports['tempo']}/api/traces/{handshake_trace_id}"
+        ).get("batches"),
+    )
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
+    alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": alert_query}
+    )
+    alerts = query_results(request_json(alert_url))
+    require(
+        len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
+        "a selected-service Chat alert is firing",
+    )
+    return {
+        "active_connections": 0,
+        "handshake_log_streams": len(logs),
+        "handshake_trace_id": handshake_trace_id,
+        "trace_batches": len(trace),
+        "firing_alerts": 0,
+    }
+
+
 @dataclass(frozen=True)
 class ServiceProbe:
     """Service-owned workload and signal checks behind generic target selection."""
@@ -977,6 +1117,13 @@ class ServiceProbe:
 
 
 SERVICE_PROBES = {
+    "chat": ServiceProbe(
+        service="chat",
+        services=chat_services,
+        workload=chat_reads,
+        enabled_signals=verify_chat_enabled_signals,
+        result_key="chat_handshakes",
+    ),
     "dashboard": ServiceProbe(
         service="dashboard",
         services=dashboard_services,
