@@ -29,6 +29,9 @@ flag_management:
     - name: document-service
       paths:
         - services/document-service/
+    - name: chat-service
+      paths:
+        - services/chat-service/
 
 ignore:
   - "services/product-service/gen/**"

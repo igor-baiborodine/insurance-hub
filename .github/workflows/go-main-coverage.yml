@@ -53,6 +53,10 @@ jobs:
             role: business-service
             coverage_files: services/document-service/coverage.txt,services/document-service/integration-coverage.txt
             flag: document-service
+          - module: services/chat-service
+            role: business-service
+            coverage_files: services/chat-service/coverage.txt,services/chat-service/integration-coverage.txt
+            flag: chat-service
     steps:
       - name: Checkout exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -18,6 +18,9 @@ on:
       - '**/*-service/gen/openapiv2/**/*.json'
       - '**/*-service/internal/postgres/sql/*.sql'
       - '**/*-service/**/testdata/**'
+      - 'go-module-topology.json'
+      - 'scripts/go/report_card.py'
+      - '.github/workflows/go-report-card.yml'
       - '!legacy/**'
       - '!services/*/*-service/**'
       - '!templates/*/*-service/**'
@@ -38,6 +41,9 @@ on:
       - '**/*-service/gen/openapiv2/**/*.json'
       - '**/*-service/internal/postgres/sql/*.sql'
       - '**/*-service/**/testdata/**'
+      - 'go-module-topology.json'
+      - 'scripts/go/report_card.py'
+      - '.github/workflows/go-report-card.yml'
       - '!legacy/**'
       - '!services/*/*-service/**'
       - '!templates/*/*-service/**'
@@ -83,7 +89,7 @@ jobs:
       - name: Install archived report checks
         run: make -C .tools/goreportcard install
 
-      - name: Check registered services, shared libraries, and scaffold
+      - name: Check topology-registered services, shared libraries, and scaffold
         run: |
           report_card_bin="$(dirname "$(command -v go)")"
           ./.venv/bin/python scripts/go/report_card.py \
