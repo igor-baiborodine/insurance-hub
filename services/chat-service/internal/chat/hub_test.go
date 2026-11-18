@@ -1,78 +1,47 @@
 package chat_test
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"os"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/chat"
 )
 
-type parityFixture struct {
-	SetupSilenceVerified []string         `json:"setupSilenceVerified"`
-	Sessions             []fixtureSession `json:"sessions"`
-	Cases                []fixtureCase    `json:"cases"`
-}
-
-type fixtureSession struct {
-	ID       string `json:"id"`
-	Topic    string `json:"topic"`
-	Username string `json:"username"`
-}
-
-type fixtureCase struct {
-	ID               string            `json:"id"`
-	Action           fixtureAction     `json:"action"`
-	Deliveries       []fixtureDelivery `json:"deliveries"`
-	SilentSessionIDs []string          `json:"silentSessionIds"`
-}
-
-type fixtureAction struct {
-	Kind          string  `json:"kind"`
-	SessionID     string  `json:"sessionId"`
-	PayloadBase64 *string `json:"payloadBase64,omitempty"`
-}
-
-type fixtureDelivery struct {
-	RecipientSessionID string `json:"recipientSessionId"`
-	MessageType        string `json:"messageType"`
-	PayloadBase64      string `json:"payloadBase64"`
-}
-
-func TestHub_JavaParityFixture(t *testing.T) {
+func TestHub_PreservesRoomContract(t *testing.T) {
 	// given
-	fixture := loadParityFixture(t)
 	hub := newHub(t, 8)
-	sessionSpecs := make(map[string]fixtureSession, len(fixture.Sessions))
-	for _, session := range fixture.Sessions {
-		sessionSpecs[session.ID] = session
-	}
-	sessions := make(map[string]*chat.Session, len(fixture.Sessions))
-	for _, setupID := range fixture.SetupSilenceVerified {
-		fixtureID := strings.TrimSuffix(setupID, "-open")
-		if fixtureID == setupID {
-			t.Fatalf("setup ID %q is missing -open suffix", setupID)
-		}
-		sessions[fixtureID] = joinFixtureSession(t, hub, sessionSpecs[fixtureID])
-		assertSilent(t, sessions)
-	}
+	alice := join(t, hub, "main", "alice")
+	carol := join(t, hub, "other", "carol")
+	assertNoMessage(t, alice)
+	assertNoMessage(t, carol)
+	bob := join(t, hub, "Main", "bob")
+	assertMessage(t, alice, []byte("<p>[bob] Joined!</p>"))
+	assertNoMessage(t, bob)
+	assertNoMessage(t, carol)
 
-	for _, parityCase := range fixture.Cases {
-		t.Run(parityCase.ID, func(t *testing.T) {
-			// when
-			applyFixtureAction(t, hub, sessions, sessionSpecs, parityCase.Action)
-
-			// then
-			assertFixtureDeliveries(t, sessions, parityCase.Deliveries)
-			assertSilentIDs(t, sessions, parityCase.SilentSessionIDs)
-			assertNoDuplicateDeliveries(t, sessions, parityCase.Deliveries)
-		})
+	// when / then
+	payload := []byte(`<span data-chat-contract="true">hello</span>`)
+	if err := hub.Broadcast(bob, payload); err != nil {
+		t.Fatal(err)
 	}
+	assertMessage(t, alice, payload)
+	assertNoMessage(t, bob)
+	assertNoMessage(t, carol)
+
+	if err := hub.Broadcast(bob, nil); err != nil {
+		t.Fatal(err)
+	}
+	assertMessage(t, alice, nil)
+	assertNoMessage(t, bob)
+	assertNoMessage(t, carol)
+
+	if !hub.Leave(bob) {
+		t.Fatal("active session was not removed")
+	}
+	assertMessage(t, alice, []byte("<p>[bob] Disconnected!</p>"))
+	assertNoMessage(t, carol)
 }
 
 func TestHub_BroadcastFreezesPayload(t *testing.T) {
@@ -269,98 +238,6 @@ func TestNewHub_RejectsNonPositiveQueueSize(t *testing.T) {
 			t.Fatalf("NewHub(%d) succeeded", size)
 		}
 	}
-}
-
-func loadParityFixture(t *testing.T) parityFixture {
-	t.Helper()
-	contents, err := os.ReadFile("testdata/java-parity.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture parityFixture
-	if err := json.Unmarshal(contents, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	return fixture
-}
-
-func applyFixtureAction(
-	t *testing.T,
-	hub *chat.Hub,
-	sessions map[string]*chat.Session,
-	specs map[string]fixtureSession,
-	action fixtureAction,
-) {
-	t.Helper()
-	switch action.Kind {
-	case "open":
-		sessions[action.SessionID] = joinFixtureSession(t, hub, specs[action.SessionID])
-	case "text-message":
-		payload, err := base64.StdEncoding.DecodeString(*action.PayloadBase64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := hub.Broadcast(sessions[action.SessionID], payload); err != nil {
-			t.Fatal(err)
-		}
-	case "normal-close":
-		if !hub.Leave(sessions[action.SessionID]) {
-			t.Fatal("fixture session was not active")
-		}
-	default:
-		t.Fatalf("unsupported fixture action %q", action.Kind)
-	}
-}
-
-func assertFixtureDeliveries(
-	t *testing.T,
-	sessions map[string]*chat.Session,
-	deliveries []fixtureDelivery,
-) {
-	t.Helper()
-	for _, delivery := range deliveries {
-		if delivery.MessageType != "text" {
-			t.Fatalf("fixture message type = %q, want text", delivery.MessageType)
-		}
-		payload, err := base64.StdEncoding.DecodeString(delivery.PayloadBase64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertMessage(t, sessions[delivery.RecipientSessionID], payload)
-	}
-}
-
-func assertNoDuplicateDeliveries(
-	t *testing.T,
-	sessions map[string]*chat.Session,
-	deliveries []fixtureDelivery,
-) {
-	t.Helper()
-	for _, delivery := range deliveries {
-		assertNoMessage(t, sessions[delivery.RecipientSessionID])
-	}
-}
-
-func assertSilentIDs(t *testing.T, sessions map[string]*chat.Session, ids []string) {
-	t.Helper()
-	for _, id := range ids {
-		assertNoMessage(t, sessions[id])
-	}
-}
-
-func assertSilent(t *testing.T, sessions map[string]*chat.Session) {
-	t.Helper()
-	ids := make([]string, 0, len(sessions))
-	for id := range sessions {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	assertSilentIDs(t, sessions, ids)
-}
-
-func joinFixtureSession(t *testing.T, hub *chat.Hub, spec fixtureSession) *chat.Session {
-	t.Helper()
-	return join(t, hub, spec.Topic, spec.Username)
 }
 
 func join(t *testing.T, hub *chat.Hub, topic, username string) *chat.Session {

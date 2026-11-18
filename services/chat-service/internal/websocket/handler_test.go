@@ -110,7 +110,7 @@ func TestHandler_RealClientsPreserveChatContract(t *testing.T) {
 	join := readText(t, alice)
 	if err := bob.WriteMessage(
 		gorilla.TextMessage,
-		[]byte(`<span data-chat-parity="true">hello</span>`),
+		[]byte(`<span data-chat-contract="true">hello</span>`),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestHandler_RealClientsPreserveChatContract(t *testing.T) {
 	if join != "<p>[bob] Joined!</p>" {
 		t.Fatalf("join = %q", join)
 	}
-	if message != `<span data-chat-parity="true">hello</span>` {
+	if message != `<span data-chat-contract="true">hello</span>` {
 		t.Fatalf("message = %q", message)
 	}
 	if empty != "" {

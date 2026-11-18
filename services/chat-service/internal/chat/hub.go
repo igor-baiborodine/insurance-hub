@@ -100,7 +100,7 @@ func NewHub(outboundQueueSize int, observer Observer) (*Hub, error) {
 	return &Hub{outboundQueueSize: outboundQueueSize, observer: observer}, nil
 }
 
-// Join adds a session and broadcasts the accepted Java-compatible join message to its peers.
+// Join adds a session and broadcasts the accepted join message to its peers.
 func (hub *Hub) Join(topic, username string) (*Session, error) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()

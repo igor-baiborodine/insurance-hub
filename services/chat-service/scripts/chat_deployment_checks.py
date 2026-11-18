@@ -803,19 +803,7 @@ def validate_qa_aggregate(resources: Any) -> None:
     )
 
 
-def validate_legacy_and_route_authority(environment: str) -> None:
-    overlay = ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"
-    items = documents(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
-    deployment = resource(items, "Deployment", f"{environment}-chat-api-legacy")
-    service = resource(items, "Service", f"{environment}-chat-api-legacy")
-    selector = deployment.get("spec", {}).get("selector", {}).get("matchLabels")
-    require(
-        len(items) == 2
-        and selector == service.get("spec", {}).get("selector")
-        and selector.get("app.kubernetes.io/name") == "chat-api-legacy"
-        and selector.get("app.kubernetes.io/name") != "chat-api",
-        "legacy Chat identity or selector separation differs",
-    )
+def validate_route_authority(environment: str) -> None:
     vue = yaml.safe_load(
         (ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml").read_text()
     )
@@ -849,7 +837,7 @@ def main(argv: list[str] | None = None) -> int:
         aggregate = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
         validate_qa_aggregate(aggregate.get("resources"))
         for environment in ("local-dev", "qa"):
-            validate_legacy_and_route_authority(environment)
+            validate_route_authority(environment)
         print("chat-deployment-check: local-dev/QA renders and Go activation passed")
     return 0
 

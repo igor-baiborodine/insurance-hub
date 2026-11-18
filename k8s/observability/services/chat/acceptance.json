@@ -4,7 +4,7 @@
   "status": "specified",
   "evidence": {
     "basis": "Issue 390 bounded Chat transport and deployment contracts",
-    "limitation": "These warning thresholds support source and disposable validation. They are not production SLOs, load capacity evidence or shared-environment qualification."
+    "limitation": "These warning thresholds support source and disposable validation. They are not production SLOs, load capacity evidence or shared-environment acceptance."
   },
   "resource_budget": {
     "cpu_limit_cores": 0.2,

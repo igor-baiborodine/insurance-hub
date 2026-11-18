@@ -32,20 +32,20 @@ def require(condition: object, message: str) -> None:
         raise DisposableError(message)
 
 
-def qualification_target() -> tuple[str, str]:
+def deployment_smoke_target() -> tuple[str, str]:
     record = service_record(ROOT, "chat")
     target = target_record(ROOT, record, "local-dev")
-    require(target["mode"] == "direct", "qualification target must use direct ownership")
+    require(target["mode"] == "direct", "deployment smoke target must use direct ownership")
     context = target["context"]
     cluster = target.get("kindCluster")
-    require(isinstance(cluster, str) and bool(cluster), "qualification Kind cluster is missing")
+    require(isinstance(cluster, str) and bool(cluster), "deployment smoke Kind cluster is missing")
     require(
-        os.environ.get("QUALIFICATION_CONTEXT", context) == context,
-        "qualification context differs from the catalog",
+        os.environ.get("DEPLOYMENT_SMOKE_CONTEXT", context) == context,
+        "deployment smoke context differs from the catalog",
     )
     require(
-        os.environ.get("QUALIFICATION_KIND_CLUSTER", cluster) == cluster,
-        "qualification Kind cluster differs from the catalog",
+        os.environ.get("DEPLOYMENT_SMOKE_KIND_CLUSTER", cluster) == cluster,
+        "deployment smoke Kind cluster differs from the catalog",
     )
     return context, cluster
 
@@ -283,8 +283,8 @@ def execute(
 
 def main() -> int:
     image = os.environ.get("IMAGE_REF", "")
-    source_revision = os.environ.get("QUALIFICATION_SOURCE_REVISION", "")
-    context, cluster = qualification_target()
+    source_revision = os.environ.get("DEPLOYMENT_SMOKE_SOURCE_REVISION", "")
+    context, cluster = deployment_smoke_target()
     image_identity = inspect_image(image, source_revision)
     namespace = "chat-smoke-" + secrets.token_hex(4)
     items = prepared_resources(checks.render("local-dev"), namespace, image, source_revision)

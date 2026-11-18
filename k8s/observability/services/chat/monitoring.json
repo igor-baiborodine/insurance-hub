@@ -110,8 +110,7 @@
       "trace_id",
       "Healthy idle",
       "missing telemetry",
-      "container_cpu_usage_seconds_total{namespace=\\\"qa-svc\\\",pod=~\\\"qa-chat-api-.*\\\",pod!~\\\"qa-chat-api-legacy-.*\\\"",
-      "pod!~\\\"qa-chat-api-legacy-.*\\\""
+      "container_cpu_usage_seconds_total{namespace=\\\"qa-svc\\\",pod=~\\\"qa-chat-api-.*\\\",container=\\\"chat-api\\\"}"
     ],
     "outcomes": {
       "common": {
