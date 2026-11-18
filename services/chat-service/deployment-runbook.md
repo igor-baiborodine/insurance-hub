@@ -223,12 +223,11 @@ does not transfer the public route or authorize Java retirement.
 
 ## Verify the deployed public route
 
-PR1 source selects
-`http://local-dev-chat-api.local-dev-all.svc.cluster.local` only in the local-dev Vue overlay. QA
-source remains on `http://qa-chat-api-legacy.qa-svc.svc.cluster.local`. Merging PR1 changes desired
-source only: local-dev is directly managed and still requires a separately authorized
-`make -C k8s svc-deploy SVC_NAME=web-vue` operation. Do not publish a QA route change until that
-local-dev operation is accepted.
+Final source selects each environment's Go Chat Service in its Vue overlay. Local-dev is directly
+managed and changes only through a separately authorized
+`make -C k8s svc-deploy SVC_NAME=web-vue` operation. QA is Flux-owned: reviewing or validating the
+source is inert, while merging it to `main` can publish the route and belongs only to the separately
+authorized QA window.
 
 The route-transfer owner is read-only: it never applies a manifest, reconciles Flux, changes a
 workload or restores Java. It reads the exact Go candidate and deployment-derived Vue ConfigMap,

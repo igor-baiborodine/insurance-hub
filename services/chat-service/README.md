@@ -150,10 +150,9 @@ The generic service catalog and module-owned deployment guards render hardened, 
 local-dev and QA workloads with distinct business and management Services. Neither Go workload has
 browser ingress; local-dev is default-denied, and QA adds only DNS and Alloy OTLP egress. Before
 release, the QA service aggregate keeps only `./chat/legacy`; the generic release adds `./chat`
-after publishing the image and canonical identity. PR1 of issue 391 selects the Go Chat Service in
-the local-dev Vue overlay while QA deliberately retains its Java Chat URL. This source change does
-not mutate the directly managed local-dev cluster; the separate authorized web-vue apply and live
-acceptance remain required before any QA route change.
+after publishing the image and canonical identity. Both Vue overlays select their environment's Go
+Chat Service. Local-dev remains directly managed; QA remains Flux-owned, so a reviewed source
+change does not mutate QA until its separately authorized merge and reconciliation window.
 
 The base Deployment owns `replicas: 1` and the `Recreate` strategy, so neither overlay can run two
 process-local room owners during replacement. `deploy-check` validates both renders, exact
@@ -205,7 +204,7 @@ separate read authority, use the exact QA coordinates above with `go-svc-deploy-
 `go-svc-deploy-verify`. Registry digest, Flux revision and runtime identity evidence belong to the
 post-release verification step.
 
-The local-dev route is applied only through the separately authorized web-vue direct owner. QA
-remains Java-owned in PR1 and changes only in the later reviewed PR2 after local-dev acceptance.
+The local-dev route is applied only through the separately authorized web-vue direct owner. The QA
+route is published only through reviewed Git and Flux during its separately authorized window.
 Java retirement is a separate, one-time manual C04 operation and never removes legacy source or
 repository manifests.

@@ -37,7 +37,7 @@ EXPECTED_KINDS = {"ConfigMap", "Deployment", "Service", "NetworkPolicy"}
 ROLLOUT_TIMEOUT_SECONDS = {"local-dev": 180, "qa": 600}
 EXPECTED_CHAT_ROUTES = {
     "local-dev": "http://local-dev-chat-api.local-dev-all.svc.cluster.local",
-    "qa": "http://qa-chat-api-legacy.qa-svc.svc.cluster.local",
+    "qa": "http://qa-chat-api.qa-svc.svc.cluster.local",
 }
 
 
