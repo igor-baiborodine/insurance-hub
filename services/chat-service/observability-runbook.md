@@ -15,8 +15,8 @@
 # Chat observability runbook
 
 This runbook owns Chat monitoring source validation, guarded QA provisioning, safe investigation,
-recovery and evidence. Use the [deployment runbook](deployment-runbook.md) for candidate identity,
-workload operations and private real-client qualification through unchanged Nginx.
+recovery and evidence. Use the [deployment runbook](deployment-runbook.md) for candidate identity
+and workload operations.
 
 ## Signal and privacy boundary
 
@@ -50,8 +50,8 @@ QA monitoring coordinates are `qa-insurance-hub`, namespace `qa-monitoring`, Pro
 
 Before any apply, record the full monitoring source revision, render both objects, preserve their
 SHA-256 values and read the existing object UIDs when present. Stop for a wrong context/namespace,
-foreign UID, selector that can include `qa-chat-api-legacy-*`, missing source identity or unexpected
-existing ownership.
+foreign UID, selector that does not identify Go Chat, missing source identity or unexpected existing
+ownership.
 
 With separate QA monitoring mutation authority, apply only through the existing owners:
 
@@ -130,9 +130,10 @@ Never stop shared Alloy, Prometheus, Loki or Tempo to manufacture evidence.
 ## Recovery and cleanup
 
 For an application identity, readiness or network mismatch, stop and follow the deployment
-runbook. Do not lower thresholds or relabel Java signals as Go. Restore prior monitoring only after
-verifying the captured object UIDs still match; use the guarded apply owners with reviewed prior
-source, then read back and reverify. Do not delete shared backends or another service's assets.
+runbook. Do not lower thresholds or relabel unrelated signals as Go Chat. Restore prior monitoring
+only after verifying the captured object UIDs still match; use the guarded apply owners with
+reviewed prior source, then read back and reverify. Do not delete shared backends or another
+service's assets.
 
 Stop foreground Grafana or verifier processes normally and require their owned port-forwards to be
 absent. Preserve the first failure and any cleanup failure separately.

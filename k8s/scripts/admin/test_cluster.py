@@ -410,8 +410,10 @@ def test_service_aggregate_validates_then_runs_the_complete_deployment(monkeypat
     # then
     assert kube.verified
     assert calls.count("secret") == 2
-    assert len(make_calls) == 15
-    assert all(target == "svc-load-delete-deploy" for target, _ in make_calls[-11:])
+    assert len(make_calls) == 14
+    service_calls = make_calls[-10:]
+    assert all(target == "svc-load-delete-deploy" for target, _ in service_calls)
+    assert all(variables["SVC_NAME"] != "chat" for _, variables in service_calls)
 
 
 def test_infra_aggregate_preserves_postgres_and_minio_phase_order(monkeypatch):
