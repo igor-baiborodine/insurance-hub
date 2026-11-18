@@ -189,7 +189,9 @@ def test_nginx_command_binds_only_loopback_and_uses_unchanged_image() -> None:
     assert "127.0.0.1:18081:80" in actual
     assert "CHAT_URL=http://unix:/run/chat-upstream/chat.sock:" in actual
     assert "/tmp/insurance-hub-chat-qualification-test:/run/chat-upstream:ro" in actual
+    assert f"{qualification.NGINX_TEMPLATE}:/etc/nginx/conf.d/default.tmpl:ro" in actual
     assert "kube-dns.kube-system.svc.cluster.local:127.0.0.1" in actual
+    assert actual[2:4] == ("--pull", "never")
     assert actual[-1] == qualification.NGINX_IMAGE
     assert all("0.0.0.0" not in value for value in actual)
 

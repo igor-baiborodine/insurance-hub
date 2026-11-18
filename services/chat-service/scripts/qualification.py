@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 NGINX_IMAGE = "insurance-hub-web-vue-legacy:latest"
+NGINX_TEMPLATE = ROOT / "legacy/web-vue/nginx-app.conf"
 
 TARGETS = {
     "local-dev": {
@@ -230,9 +231,12 @@ def nginx_arguments(
     require(nginx_image == NGINX_IMAGE, "qualification Nginx image differs")
     require(1 <= nginx_port <= 65535, "loopback port is invalid")
     require(relay_directory.is_absolute(), "qualification relay directory is invalid")
+    require(NGINX_TEMPLATE.is_file(), "qualification Nginx template is unavailable")
     return (
         docker,
         "run",
+        "--pull",
+        "never",
         "--rm",
         "--name",
         container_name,
@@ -242,6 +246,8 @@ def nginx_arguments(
         f"127.0.0.1:{nginx_port}:80",
         "--volume",
         f"{relay_directory}:/run/chat-upstream:ro",
+        "--volume",
+        f"{NGINX_TEMPLATE}:/etc/nginx/conf.d/default.tmpl:ro",
         "--env",
         "GATEWAY_URL=http://127.0.0.1:1",
         "--env",
