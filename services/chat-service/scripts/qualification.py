@@ -131,14 +131,26 @@ def kubectl_json(target: Target, kind: str, name: str, selector: str = "") -> di
     if selector:
         arguments.extend(("--selector", selector))
     arguments.extend(("--output", "json"))
-    output = run(
-        arguments,
-        cwd=ROOT,
-        env=child_environment(preferred_executables=(arguments[0],)),
-        timeout_seconds=30,
-        activity=f"inspect Chat qualification {kind}",
-        capture=True,
-    )
+    try:
+        output = run(
+            arguments,
+            cwd=ROOT,
+            env=child_environment(preferred_executables=(arguments[0],)),
+            timeout_seconds=30,
+            activity=f"inspect Chat qualification {kind}",
+            capture=True,
+        )
+    except CommandError as error:
+        expected_absence = 'error: the server doesn\'t have a resource type "httproute"'
+        if (
+            kind == "httproute.gateway.networking.k8s.io"
+            and not name
+            and not selector
+            and not error.stdout
+            and error.stderr.strip() == expected_absence
+        ):
+            return {"items": []}
+        raise
     try:
         value = json.loads(output)
     except json.JSONDecodeError as error:
