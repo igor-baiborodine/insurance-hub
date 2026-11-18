@@ -441,7 +441,7 @@ def qualify(
             namespace=target.namespace,
             resource=f"service/{target.service}",
             local_port=chat_port,
-            remote_port=8080,
+            remote_port=80,
         ),
         cwd=ROOT,
         env=environment,

@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import pytest
 import qualification
 
+from scripts.go.service.tooling_contracts import PortForwardSpec
 from scripts.go.service.tooling_process import CommandError
 from scripts.go.service.tooling_resources import ResourceError
 
@@ -213,8 +214,14 @@ def test_qualify_runs_real_clients_through_nginx_and_cleans_after_failure() -> N
     process = SimpleNamespace(process=Mock())
 
     class Forward:
-        def __init__(self, *_args: object, **_options: object) -> None:
-            pass
+        def __init__(self, spec: PortForwardSpec, **_options: object) -> None:
+            assert spec == PortForwardSpec(
+                context="kind-local-dev-insurance-hub",
+                namespace="local-dev-all",
+                resource="service/local-dev-chat-api",
+                local_port=18080,
+                remote_port=80,
+            )
 
         def __enter__(self) -> int:
             events.append("forward-start")
