@@ -56,7 +56,19 @@ cluster. It does not mutate `local-dev-all` or QA and does not prove either shar
 Record the accepted full source revision, `git-<first-12>` version, mutable image reference,
 digest-qualified reference and `sha256:` registry digest. Reject zero, placeholder, development,
 tag-only or mismatched values. The generic release must show the same full revision and version in
-OCI labels before either environment is qualified.
+OCI labels before either environment is qualified. For local-dev, pull the digest-qualified image,
+add the source-derived local tag required by the direct owner and retain the registry RepoDigest:
+
+```sh
+docker pull "$QUALIFICATION_IMAGE_REF"
+docker tag "$QUALIFICATION_IMAGE_REF" \
+  "insurance-hub-chat-api:1.0.0-local.${QUALIFICATION_SOURCE_REVISION%????????????????????????????}"
+```
+
+The local qualification preflight requires the local tag's OCI revision/version and RepoDigest to
+identify the accepted candidate, then requires the Kind Pod image ID to equal that local content
+ID. QA instead requires the Pod image ID to expose the accepted registry digest directly. Never
+substitute the local content ID for the registry manifest digest; retain both.
 
 Bind one environment exactly. For local-dev:
 
