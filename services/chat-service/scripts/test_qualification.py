@@ -186,6 +186,46 @@ def test_target_rejects_wrong_coordinates_before_target_access(
         qualification.Target.validated(selected)
 
 
+def test_kubectl_json_accepts_exact_absent_optional_httproute_api() -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    absent = CommandError(
+        "controlled absence",
+        stderr='error: the server doesn\'t have a resource type "httproute"\n',
+    )
+
+    # when
+    with patch.object(qualification, "run", side_effect=absent):
+        actual = qualification.kubectl_json(
+            target,
+            "httproute.gateway.networking.k8s.io",
+            "",
+        )
+
+    # then
+    assert actual == {"items": []}
+
+
+@pytest.mark.parametrize(
+    ("kind", "stderr"),
+    [
+        ("ingress", 'error: the server doesn\'t have a resource type "httproute"\n'),
+        ("httproute.gateway.networking.k8s.io", "Error from server (Forbidden): controlled\n"),
+    ],
+)
+def test_kubectl_json_rejects_other_inventory_failures(kind: str, stderr: str) -> None:
+    # given
+    target = qualification.Target.validated(arguments())
+    failure = CommandError("controlled failure", stderr=stderr)
+
+    # when / then
+    with (
+        patch.object(qualification, "run", side_effect=failure),
+        pytest.raises(CommandError, match="controlled failure"),
+    ):
+        qualification.kubectl_json(target, kind, "")
+
+
 def test_live_identity_accepts_exact_candidate_and_public_java_route() -> None:
     # given
     target = qualification.Target.validated(arguments())

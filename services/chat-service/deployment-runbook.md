@@ -236,6 +236,9 @@ requires ready Java and Vue Deployments, distinct Java/Go Service selectors and 
 or HTTPRoute that references the Go Chat Service. It then owns one loopback port-forward to the
 deployed `web-vue-legacy` Service and bounds `verify-live-java-parity` to 60 seconds.
 
+The owner treats kubectl's exact “no `httproute` resource type” result as an empty optional
+HTTPRoute inventory. Every other inventory failure still fails closed.
+
 Before the authorized route change, require Java public authority and baseline parity:
 
 ```sh
