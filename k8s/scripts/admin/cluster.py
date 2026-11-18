@@ -1072,7 +1072,6 @@ def deploy_aggregate(kube: Kubernetes, kind: str, values: Mapping[str, str] | No
         "pricing",
         "document",
         "payment",
-        "chat",
     )
     for service in services:
         _make(kube.commands, "svc-load-delete-deploy", variables={"SVC_NAME": service})
