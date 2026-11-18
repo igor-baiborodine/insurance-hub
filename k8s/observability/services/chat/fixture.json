@@ -1,0 +1,289 @@
+{
+  "common_labels": {
+    "deployment_environment_name": "qa",
+    "service_implementation": "go",
+    "service_instance_id": "fixture-pod",
+    "service_name": "chat-service",
+    "service_version": "fixture"
+  },
+  "dashboard_variables": {
+    "environment": "qa",
+    "implementation": "go"
+  },
+  "schema_version": 1,
+  "series": [
+    {
+      "labels": {},
+      "name": "insurance_hub_chat_connections_active",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "accepted"
+      },
+      "name": "insurance_hub_chat_handshakes_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "capacity_rejected"
+      },
+      "name": "insurance_hub_chat_handshakes_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "upgrade_failed"
+      },
+      "name": "insurance_hub_chat_handshakes_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "accepted",
+        "le": "0.01"
+      },
+      "name": "insurance_hub_chat_handshake_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 8
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "accepted",
+        "le": "0.05"
+      },
+      "name": "insurance_hub_chat_handshake_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_handshake_outcome": "accepted",
+        "le": "+Inf"
+      },
+      "name": "insurance_hub_chat_handshake_duration_seconds_bucket",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 10
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_broadcast_event": "message",
+        "insurance_hub_chat_broadcast_outcome": "delivered"
+      },
+      "name": "insurance_hub_chat_broadcast_deliveries_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 5
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_broadcast_event": "message",
+        "insurance_hub_chat_broadcast_outcome": "queue_full"
+      },
+      "name": "insurance_hub_chat_broadcast_deliveries_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_connection_close_reason": "normal"
+      },
+      "name": "insurance_hub_chat_connection_closes_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "insurance_hub_chat_connection_close_reason": "slow_peer"
+      },
+      "name": "insurance_hub_chat_connection_closes_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {},
+      "name": "insurance_hub_chat_shutdown_failures_total",
+      "use_common_labels": true,
+      "value": 0
+    },
+    {
+      "labels": {},
+      "name": "go_goroutine_count",
+      "use_common_labels": true,
+      "value": 12
+    },
+    {
+      "labels": {
+        "go_memory_type": "heap"
+      },
+      "name": "go_memory_used_bytes",
+      "use_common_labels": true,
+      "value": 33554432
+    },
+    {
+      "labels": {},
+      "name": "go_memory_gc_cycles_total",
+      "use_common_labels": true,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 1
+      }
+    },
+    {
+      "labels": {
+        "container": "chat-api",
+        "namespace": "qa-svc",
+        "pod": "qa-chat-api-fixture"
+      },
+      "name": "container_cpu_usage_seconds_total",
+      "use_common_labels": false,
+      "value": {
+        "initial": 0,
+        "kind": "linear",
+        "step": 0.02
+      }
+    },
+    {
+      "labels": {
+        "container": "chat-api",
+        "namespace": "qa-svc",
+        "pod": "qa-chat-api-fixture"
+      },
+      "name": "container_memory_working_set_bytes",
+      "use_common_labels": false,
+      "value": 50331648
+    },
+    {
+      "labels": {
+        "deployment": "qa-chat-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_spec_replicas",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "deployment": "qa-chat-api",
+        "namespace": "qa-svc"
+      },
+      "name": "kube_deployment_status_replicas_available",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "condition": "true",
+        "namespace": "qa-svc",
+        "pod": "qa-chat-api-fixture"
+      },
+      "name": "kube_pod_status_ready",
+      "use_common_labels": false,
+      "value": 1
+    },
+    {
+      "labels": {
+        "container": "chat-api",
+        "namespace": "qa-svc",
+        "pod": "qa-chat-api-fixture"
+      },
+      "name": "kube_pod_container_status_restarts_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "loki_write_dropped_entries_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_failed_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_dropped_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_samples_pending",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "prometheus_remote_storage_queue_highest_sent_timestamp_seconds",
+      "use_common_labels": false,
+      "value": {
+        "kind": "unix_time"
+      }
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_send_failed_spans_total",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_size",
+      "use_common_labels": false,
+      "value": 0
+    },
+    {
+      "labels": {
+        "job": "qa-alloy"
+      },
+      "name": "otelcol_exporter_queue_capacity",
+      "use_common_labels": false,
+      "value": 2048
+    }
+  ]
+}

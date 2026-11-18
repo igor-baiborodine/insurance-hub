@@ -71,6 +71,12 @@ func TestConnectionRegistry_Drain_ClosesJoinsAndRejectsRegistration(t *testing.T
 	if !errors.Is(registrationErr, errConnectionDrainStarted) {
 		t.Fatalf("register during drain = %v", registrationErr)
 	}
+	registry.mutex.Lock()
+	remaining := len(registry.connections)
+	registry.mutex.Unlock()
+	if remaining != 0 {
+		t.Fatalf("registered connections after drain = %d", remaining)
+	}
 }
 
 func TestConnectionRegistry_Drain_BoundsBlockedJoinAndPreservesErrors(t *testing.T) {

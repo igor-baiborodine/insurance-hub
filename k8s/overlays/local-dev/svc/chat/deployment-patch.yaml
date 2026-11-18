@@ -3,9 +3,6 @@ kind: Deployment
 metadata:
   name: chat-api
 spec:
-  strategy:
-    type: Recreate
-    rollingUpdate: null
   template:
     spec:
       containers:

@@ -1,0 +1,360 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Pilot operations for the Go Chat service. Thresholds are acceptance settings, not production SLOs.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum(insurance_hub_chat_connections_active{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "current",
+          "refId": "A"
+        },
+        {
+          "expr": "max_over_time(insurance_hub_chat_connections_active{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])",
+          "legendFormat": "recent maximum",
+          "refId": "B"
+        }
+      ],
+      "title": "Active sessions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by (insurance_hub_chat_handshake_outcome) (rate(insurance_hub_chat_handshakes_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "{{insurance_hub_chat_handshake_outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(insurance_hub_chat_handshakes_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_chat_handshake_outcome=~\"capacity_rejected|upgrade_failed\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_chat_handshakes_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
+          "legendFormat": "failure ratio",
+          "refId": "B"
+        }
+      ],
+      "title": "Handshake outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(insurance_hub_chat_handshake_duration_seconds_bucket{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(insurance_hub_chat_handshake_duration_seconds_bucket{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "title": "Handshake latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (insurance_hub_chat_broadcast_event, insurance_hub_chat_broadcast_outcome) (rate(insurance_hub_chat_broadcast_deliveries_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "{{insurance_hub_chat_broadcast_event}} {{insurance_hub_chat_broadcast_outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(insurance_hub_chat_broadcast_deliveries_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_chat_broadcast_outcome=\"queue_full\"}[$__rate_interval]))",
+          "legendFormat": "queue full",
+          "refId": "B"
+        }
+      ],
+      "title": "Broadcast delivery outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(increase(insurance_hub_chat_connection_closes_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_chat_connection_close_reason=\"slow_peer\"}[$__rate_interval]))",
+          "legendFormat": "slow peer",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (insurance_hub_chat_connection_close_reason) (rate(insurance_hub_chat_connection_closes_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "{{insurance_hub_chat_connection_close_reason}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Slow-peer closes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(increase(insurance_hub_chat_shutdown_failures_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "recent failures",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(insurance_hub_chat_shutdown_failures_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "failure rate",
+          "refId": "B"
+        }
+      ],
+      "title": "Shutdown failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(go_goroutine_count{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "goroutines",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(go_memory_used_bytes{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"})",
+          "legendFormat": "runtime memory bytes",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(go_memory_gc_cycles_total{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))",
+          "legendFormat": "GC cycles",
+          "refId": "C"
+        }
+      ],
+      "title": "Go runtime",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"}[$__rate_interval]))",
+          "legendFormat": "CPU cores",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(container_memory_working_set_bytes{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"})",
+          "legendFormat": "working set bytes",
+          "refId": "B"
+        }
+      ],
+      "title": "Pod CPU and memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum(kube_deployment_spec_replicas{namespace=\"qa-svc\",deployment=\"qa-chat-api\"})",
+          "legendFormat": "desired",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(kube_deployment_status_replicas_available{namespace=\"qa-svc\",deployment=\"qa-chat-api\"})",
+          "legendFormat": "available",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(kube_pod_status_ready{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",condition=\"true\"})",
+          "legendFormat": "ready",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"qa-svc\",pod=~\"qa-chat-api-.*\",pod!~\"qa-chat-api-legacy-.*\",container=\"chat-api\"}[$__rate_interval]))",
+          "legendFormat": "restarts",
+          "refId": "D"
+        }
+      ],
+      "title": "Readiness and restarts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum(increase(loki_write_dropped_entries_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "Loki dropped entries",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(prometheus_remote_storage_samples_failed_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "remote-write failures",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(prometheus_remote_storage_samples_dropped_total{job=~\".*alloy.*\"}[$__rate_interval]))",
+          "legendFormat": "remote-write dropped",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(prometheus_remote_storage_samples_pending{job=~\".*alloy.*\"})",
+          "legendFormat": "remote-write pending",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(otelcol_exporter_queue_size{job=~\".*alloy.*\"}) / clamp_min(sum(otelcol_exporter_queue_capacity{job=~\".*alloy.*\"}), 1)",
+          "legendFormat": "OTLP queue ratio",
+          "refId": "E"
+        },
+        {
+          "expr": "time() - max(timestamp(insurance_hub_chat_connections_active{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}))",
+          "legendFormat": "Chat idle-safe metric age seconds",
+          "refId": "F"
+        }
+      ],
+      "title": "Telemetry delivery health",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "{service_name=\"chat-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"} | json | level=~\"WARN|ERROR\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Chat failure logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "id": 12,
+      "targets": [
+        {
+          "query": "{ resource.service.name = \"chat-service\" && resource.deployment.environment.name =~ \"$environment\" && resource.insurance_hub.service.implementation =~ \"$implementation\" }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Chat traces",
+      "type": "traces"
+    },
+    {
+      "id": 13,
+      "options": {
+        "content": "Use `trace_id` from a Chat handshake log to open the matching Tempo trace. Healthy idle means the active-session series is present with value zero; an available deployment without that series is missing telemetry. Keep selectors on `qa-chat-api` and exclude legacy Pods.",
+        "mode": "markdown"
+      },
+      "title": "Investigation workflow",
+      "type": "text"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": [
+    "insurance-hub",
+    "chat",
+    "pilot"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(insurance_hub_chat_connections_active{service_name=\"chat-service\"}, deployment_environment_name)",
+        "includeAll": true,
+        "label": "Environment",
+        "name": "environment",
+        "query": {
+          "query": "label_values(insurance_hub_chat_connections_active{service_name=\"chat-service\"}, deployment_environment_name)",
+          "refId": "PrometheusVariableQueryEditor-Environment"
+        },
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(insurance_hub_chat_connections_active{service_name=\"chat-service\"}, service_implementation)",
+        "includeAll": true,
+        "label": "Implementation",
+        "name": "implementation",
+        "query": {
+          "query": "label_values(insurance_hub_chat_connections_active{service_name=\"chat-service\"}, service_implementation)",
+          "refId": "PrometheusVariableQueryEditor-Implementation"
+        },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Insurance Hub / Chat service",
+  "uid": "insurance-hub-chat-service",
+  "version": 1
+}

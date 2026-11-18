@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
+import probe_chat
 import probe_dashboard
 import probe_document
 import probe_product
@@ -326,6 +327,64 @@ def test_document_probe_timeout_reclaims_owned_process(tmp_path: Path) -> None:
         pytest.raises(probe_document.ProbeError, match="timed out"),
     ):
         probe_document.execute_in_root(args, tmp_path)
+    assert terminate.call_count == 2
+    assert not ownership.exists()
+
+
+def test_chat_probe_uses_fixed_identity_and_keeps_sentinel_out_of_identity() -> None:
+    # given
+    args = type(
+        "Args",
+        (),
+        {
+            "version": "git-390000000000",
+            "instance_id": "chat-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+
+    # when
+    with mock.patch.dict(os.environ, {"SERVICE_NAME": probe_chat.SENSITIVE_SENTINEL}):
+        values = probe_chat.environment(args)
+
+    # then
+    assert values["SERVICE_NAME"] == "chat-service"
+    assert values["SERVICE_VERSION"] == "git-390000000000"
+    assert values["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://127.0.0.1:4317"
+    assert probe_chat.SENSITIVE_SENTINEL not in {
+        values["SERVICE_NAME"],
+        values["SERVICE_VERSION"],
+        values["SERVICE_INSTANCE_ID"],
+    }
+
+
+def test_chat_probe_timeout_reclaims_owned_process(tmp_path: Path) -> None:
+    # given
+    ownership = tmp_path / "owned"
+    args = type(
+        "Args",
+        (),
+        {
+            "service_root": tmp_path,
+            "log_file": tmp_path / "service.log",
+            "ownership_file": ownership,
+            "trace_id": "a" * 32,
+            "version": "git-390000000000",
+            "instance_id": "chat-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+    process = mock.Mock(pid=4390)
+    process.wait.side_effect = subprocess.TimeoutExpired("probe", 60)
+
+    # when / then
+    with (
+        mock.patch.object(probe_chat, "run"),
+        mock.patch.object(probe_chat.subprocess, "Popen", return_value=process),
+        mock.patch.object(probe_chat.alloy_runtime, "terminate_process_group") as terminate,
+        pytest.raises(probe_chat.ProbeError, match="timed out"),
+    ):
+        probe_chat.execute_in_root(args, tmp_path)
     assert terminate.call_count == 2
     assert not ownership.exists()
 

@@ -1,0 +1,181 @@
+{
+  "alerts": {
+    "expression_markers": {
+      "ChatBroadcastDeliveryFailure": [
+        "insurance_hub_chat_broadcast_outcome=\"queue_full\"",
+        "[5m]"
+      ],
+      "ChatHandshakeFailureRate": [
+        "capacity_rejected|upgrade_failed",
+        "> 0.1",
+        ">= 20"
+      ],
+      "ChatResourcePressure": [
+        "> 107374182.4",
+        "> 0.16"
+      ],
+      "ChatShutdownFailure": [
+        "insurance_hub_chat_shutdown_failures_total",
+        "[5m]"
+      ],
+      "ChatSlowPeerCloses": [
+        "insurance_hub_chat_connection_close_reason=\"slow_peer\"",
+        "[5m]"
+      ],
+      "ChatTelemetryBacklog": [
+        "prometheus_remote_storage_samples_pending",
+        "highest_sent_timestamp_seconds",
+        "otelcol_exporter_queue_size",
+        "> 0.8"
+      ],
+      "ChatTelemetryDeliveryFailure": [
+        "loki_write_dropped_entries_total",
+        "prometheus_remote_storage_samples_failed_total",
+        "prometheus_remote_storage_samples_dropped_total",
+        "otelcol_exporter_send_failed_spans_total"
+      ],
+      "ChatTelemetryMissing": [
+        "absent_over_time",
+        "insurance_hub_chat_connections_active",
+        "[2m]"
+      ],
+      "ChatUnavailable": [
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available"
+      ],
+      "ChatUnexpectedRestart": [
+        "kube_pod_container_status_restarts_total",
+        "[15m]"
+      ]
+    },
+    "for": {
+      "ChatBroadcastDeliveryFailure": null,
+      "ChatHandshakeFailureRate": "2m",
+      "ChatResourcePressure": "5m",
+      "ChatShutdownFailure": null,
+      "ChatSlowPeerCloses": null,
+      "ChatTelemetryBacklog": "2m",
+      "ChatTelemetryDeliveryFailure": null,
+      "ChatTelemetryMissing": "1m",
+      "ChatUnavailable": "2m",
+      "ChatUnexpectedRestart": null
+    },
+    "group_name": "insurance-hub-chat-service",
+    "interval": "30s",
+    "common_labels": {
+      "service": "chat-service",
+      "severity": "warning"
+    },
+    "inventory": {
+      "common": [
+        "ChatHandshakeFailureRate",
+        "ChatBroadcastDeliveryFailure",
+        "ChatSlowPeerCloses",
+        "ChatShutdownFailure",
+        "ChatResourcePressure",
+        "ChatUnavailable",
+        "ChatTelemetryMissing",
+        "ChatTelemetryDeliveryFailure",
+        "ChatTelemetryBacklog",
+        "ChatUnexpectedRestart"
+      ],
+      "dependencies": {},
+      "workers": {}
+    },
+    "path": "alerts.yaml",
+    "prometheus_rule_name": "chat-service",
+    "required_annotations": [
+      "summary",
+      "description",
+      "runbook_action"
+    ],
+    "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [],
+    "workers": []
+  },
+  "dashboard": {
+    "application_selector": "service_name=\"chat-service\"",
+    "editable": false,
+    "minimum_prometheus_targets": 20,
+    "path": "dashboard.json",
+    "refresh": "30s",
+    "required_markers": [
+      "\"type\": \"loki\"",
+      "\"type\": \"tempo\"",
+      "trace_id",
+      "Healthy idle",
+      "missing telemetry",
+      "container_cpu_usage_seconds_total{namespace=\\\"qa-svc\\\",pod=~\\\"qa-chat-api-.*\\\",pod!~\\\"qa-chat-api-legacy-.*\\\"",
+      "pod!~\\\"qa-chat-api-legacy-.*\\\""
+    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Chat failure logs",
+          "Chat traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Active sessions",
+          "Handshake outcomes",
+          "Handshake latency",
+          "Broadcast delivery outcomes",
+          "Slow-peer closes",
+          "Shutdown failures"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {},
+      "workers": {}
+    },
+    "required_query_filters": [
+      "deployment_environment_name=~\"$environment\"",
+      "service_implementation=~\"$implementation\""
+    ],
+    "uid": "insurance-hub-chat-service",
+    "variables": {
+      "environment": "deployment_environment_name",
+      "implementation": "service_implementation"
+    }
+  },
+  "fixture": {
+    "minimum_scrapes_per_series": 4,
+    "path": "fixture.json"
+  },
+  "schema_version": 2,
+  "service": "chat",
+  "service_name": "chat-service",
+  "supported_environments": [
+    "qa"
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_chat_connections_active"
+      ],
+      "traces": [
+        "chat-service"
+      ]
+    },
+    "probe": "chat"
+  }
+}

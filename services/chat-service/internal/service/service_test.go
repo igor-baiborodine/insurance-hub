@@ -14,13 +14,20 @@ import (
 	"testing"
 	"time"
 
+	gorilla "github.com/gorilla/websocket"
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/chat"
 	"github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/config"
+	chatwebsocket "github.com/igor-baiborodine/insurance-hub/services/chat-service/internal/websocket"
 )
 
-func TestRun_ServesManagementAndExactBusinessNotFound(t *testing.T) {
+func TestRun_ServesManagementAndExactChatWebSocket(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
@@ -35,6 +42,11 @@ func TestRun_ServesManagementAndExactBusinessNotFound(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
+	var registry *ConnectionRegistry
+	deps.newRegistry = func() connectionLifecycle {
+		registry = NewConnectionRegistry()
+		return registry
+	}
 
 	// when
 	go func() { result <- run(ctx, settings, discardLogger(), deps) }()
@@ -48,26 +60,26 @@ func TestRun_ServesManagementAndExactBusinessNotFound(t *testing.T) {
 	waitForResponse(
 		t,
 		client,
-		"http://"+businessAddress+"/ws/chat/main/test",
+		"http://"+businessAddress+"/ws/chat/main",
 		http.StatusNotFound,
 		"404 page not found\n",
 	)
-	request, err := http.NewRequest(
-		http.MethodGet,
+	waitForStatus(
+		t,
+		client,
 		"http://"+businessAddress+"/ws/chat/main/test",
-		nil,
+		http.StatusBadRequest,
 	)
-	if err != nil {
+	alice := dialWebSocket(t, businessAddress, "/ws/chat/main/alice")
+	bob := dialWebSocket(t, businessAddress, "/ws/chat/Main/bob")
+	assertWebSocketText(t, alice, "<p>[bob] Joined!</p>")
+	if err := bob.WriteMessage(gorilla.TextMessage, []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Connection", "Upgrade")
-	request.Header.Set("Upgrade", "websocket")
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertResponse(t, response, http.StatusNotFound, "404 page not found\n")
+	assertWebSocketText(t, alice, "hello")
 	cancel()
+	assertWebSocketClose(t, alice, gorilla.CloseGoingAway)
+	assertWebSocketClose(t, bob, gorilla.CloseGoingAway)
 	select {
 	case err := <-result:
 		if err != nil {
@@ -75,6 +87,12 @@ func TestRun_ServesManagementAndExactBusinessNotFound(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("service did not stop")
+	}
+	registry.mutex.Lock()
+	remaining := len(registry.connections)
+	registry.mutex.Unlock()
+	if remaining != 0 {
+		t.Fatalf("registered connections after shutdown = %d", remaining)
 	}
 }
 
@@ -135,6 +153,36 @@ func TestRun_TelemetryAcquisitionFailureStopsComposition(t *testing.T) {
 	}
 }
 
+func TestRun_ObserverAcquisitionFailureCleansUpTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	deps := productionDependencies()
+	provider := &recordingProvider{}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	observerErr := errors.New("observer initialization failed")
+	deps.newObserver = func(
+		*slog.Logger,
+		metric.MeterProvider,
+		trace.TracerProvider,
+	) (telemetryObserver, error) {
+		return nil, observerErr
+	}
+	deps.newHealth = func(time.Duration, health.Check) (*health.State, error) {
+		t.Fatal("health acquired after observer failure")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if !errors.Is(err, observerErr) || provider.shutdowns.Load() != 1 {
+		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
+	}
+}
+
 func TestRun_HealthAcquisitionFailureCleansUpTelemetry(t *testing.T) {
 	// given
 	settings := testConfig(t)
@@ -177,6 +225,30 @@ func TestRun_BusinessAcquisitionFailureCleansUpTelemetry(t *testing.T) {
 
 	// then
 	if !errors.Is(err, listenErr) || provider.shutdowns.Load() != 1 {
+		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
+	}
+}
+
+func TestRun_ChatCompositionFailureCleansUpTelemetry(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.WebSocket.OutboundQueueSize = 0
+	deps := productionDependencies()
+	provider := &recordingProvider{}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
+	deps.listen = func(string, string) (net.Listener, error) {
+		t.Fatal("listener acquired after Chat composition failure")
+		return nil, nil
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "initialize Chat hub") ||
+		provider.shutdowns.Load() != 1 {
 		t.Fatalf("run error = %v, telemetry shutdowns = %d", err, provider.shutdowns.Load())
 	}
 }
@@ -226,7 +298,10 @@ func TestRun_ServeAndCleanupErrorsArePreservedAndReadinessIsWithdrawn(t *testing
 
 func TestBusinessHandler_DrainRejectsNewWork(t *testing.T) {
 	// given
-	handler := newBusinessHandler()
+	delegated := false
+	handler := newBusinessHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		delegated = true
+	}))
 	request, err := http.NewRequest(
 		http.MethodGet,
 		"http://chat.invalid/ws/chat/main/test",
@@ -235,6 +310,8 @@ func TestBusinessHandler_DrainRejectsNewWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
 	recorder := &responseRecorder{header: make(http.Header)}
 
 	// when
@@ -243,7 +320,7 @@ func TestBusinessHandler_DrainRejectsNewWork(t *testing.T) {
 
 	// then
 	if recorder.status != http.StatusServiceUnavailable ||
-		recorder.body.String() != "service unavailable\n" {
+		recorder.body.String() != "service unavailable\n" || delegated {
 		t.Errorf("response = (%d, %q)", recorder.status, recorder.body.String())
 	}
 }
@@ -303,31 +380,76 @@ func TestShutdown_OrdersDrainServersAndTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.SetReady(true)
-	handler := newBusinessHandler()
-	calls := make([]string, 0, 5)
+	handler := newBusinessHandler(http.NotFoundHandler())
+	calls := make([]string, 0, 6)
+	hub := &orderedHub{calls: &calls}
 	registry := &orderedRegistry{calls: &calls}
 	business := &orderedServer{name: "business", calls: &calls}
 	management := &orderedServer{name: "management", calls: &calls}
 	provider := &orderedProvider{calls: &calls}
+	observer := &orderedTelemetryObserver{calls: &calls}
 
 	// when
-	err = shutdown(settings, state, handler, registry, business, management, provider)
+	err = shutdown(
+		settings, state, handler, hub, registry, business, management, provider, observer,
+	)
 	// then
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"registry begin",
+		"hub begin",
 		"business shutdown",
 		"registry drain",
 		"management shutdown",
 		"telemetry shutdown",
+		"observer close",
 	}
 	if !slices.Equal(calls, want) {
 		t.Errorf("shutdown calls = %v, want %v", calls, want)
 	}
 	if state.Ready() {
 		t.Error("readiness remained published during shutdown")
+	}
+	if !handler.draining.Load() {
+		t.Error("business handler still accepted upgrades during shutdown")
+	}
+}
+
+func TestShutdown_RecordsServiceCleanupFailureBeforeTelemetryStops(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	state, err := health.NewState(time.Second, func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdownErr := errors.New("business shutdown failed")
+	business := newFakeServer(nil)
+	business.shutdownErr = shutdownErr
+	provider := &recordingProvider{}
+	observer := &recordingTelemetryObserver{}
+
+	// when
+	err = shutdown(
+		settings,
+		state,
+		newBusinessHandler(http.NotFoundHandler()),
+		&orderedHub{calls: &[]string{}},
+		&orderedRegistry{calls: &[]string{}},
+		business,
+		newFakeServer(nil),
+		provider,
+		observer,
+	)
+
+	// then
+	if !errors.Is(err, shutdownErr) || observer.shutdownFailures.Load() != 1 {
+		t.Fatalf(
+			"shutdown result = error %v, observed failures %d",
+			err,
+			observer.shutdownFailures.Load(),
+		)
 	}
 }
 
@@ -349,6 +471,15 @@ func testConfig(t *testing.T) config.Config {
 		HTTPMaxHeaderBytes: kitconfig.DefaultHTTPMaxHeaderBytes,
 		ProbeTimeout:       100 * time.Millisecond,
 		ShutdownTimeout:    time.Second,
+		WebSocket: config.WebSocketSettings{
+			MaxConnections:    8,
+			MaxMessageBytes:   32 * 1024,
+			OutboundQueueSize: 8,
+			WriteTimeout:      100 * time.Millisecond,
+			PingInterval:      time.Second,
+			PongTimeout:       2 * time.Second,
+			CloseTimeout:      100 * time.Millisecond,
+		},
 		Telemetry: config.Telemetry{
 			Identity: config.DevelopmentIdentity(
 				config.DefaultServiceName,
@@ -389,6 +520,58 @@ func waitForResponse(t *testing.T, client *http.Client, url string, status int, 
 	t.Fatalf("%s did not return (%d, %q)", url, status, body)
 }
 
+func waitForStatus(t *testing.T, client *http.Client, url string, status int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		response, err := client.Get(url)
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == status {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%s did not return status %d", url, status)
+}
+
+func dialWebSocket(t *testing.T, address, path string) *gorilla.Conn {
+	t.Helper()
+	connection, _, err := gorilla.DefaultDialer.Dial("ws://"+address+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	return connection
+}
+
+func assertWebSocketText(t *testing.T, connection *gorilla.Conn, want string) {
+	t.Helper()
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	messageType, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != gorilla.TextMessage || string(payload) != want {
+		t.Fatalf("WebSocket message = (%d, %q), want text %q", messageType, payload, want)
+	}
+}
+
+func assertWebSocketClose(t *testing.T, connection *gorilla.Conn, want int) {
+	t.Helper()
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := connection.ReadMessage()
+	var closeErr *gorilla.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != want {
+		t.Fatalf("WebSocket close = %v, want code %d", err, want)
+	}
+}
+
 func waitForSignal(t *testing.T, signal <-chan struct{}, failure string) {
 	t.Helper()
 	select {
@@ -410,27 +593,17 @@ func waitForReady(t *testing.T, state *health.State) {
 	t.Fatal("readiness was not published")
 }
 
-func assertResponse(t *testing.T, response *http.Response, status int, body string) {
-	t.Helper()
-	defer func() { _ = response.Body.Close() }()
-	actual, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.StatusCode != status || string(actual) != body {
-		t.Errorf(
-			"response = (%d, %q), want (%d, %q)",
-			response.StatusCode,
-			actual,
-			status,
-			body,
-		)
-	}
-}
-
 type recordingProvider struct {
 	shutdowns atomic.Int32
 	err       error
+}
+
+func (*recordingProvider) MeterProvider() metric.MeterProvider {
+	return metricnoop.NewMeterProvider()
+}
+
+func (*recordingProvider) TracerProvider() trace.TracerProvider {
+	return tracenoop.NewTracerProvider()
 }
 
 func (provider *recordingProvider) Shutdown(context.Context) error {
@@ -459,10 +632,11 @@ func (address testAddress) Network() string { return "test" }
 func (address testAddress) String() string  { return string(address) }
 
 type fakeServer struct {
-	serveErr  error
-	release   chan struct{}
-	once      sync.Once
-	shutdowns atomic.Int32
+	serveErr    error
+	shutdownErr error
+	release     chan struct{}
+	once        sync.Once
+	shutdowns   atomic.Int32
 }
 
 type controlledServer struct {
@@ -498,6 +672,9 @@ func (*controlledServer) Close() error                   { return nil }
 
 type orderedRegistry struct{ calls *[]string }
 
+func (*orderedRegistry) Register(TrackedConnection) error { return nil }
+func (*orderedRegistry) Unregister(TrackedConnection)     {}
+
 func (registry *orderedRegistry) BeginDrain() {
 	*registry.calls = append(*registry.calls, "registry begin")
 }
@@ -506,6 +683,10 @@ func (registry *orderedRegistry) Drain(context.Context) error {
 	*registry.calls = append(*registry.calls, "registry drain")
 	return nil
 }
+
+type orderedHub struct{ calls *[]string }
+
+func (hub *orderedHub) BeginDrain() { *hub.calls = append(*hub.calls, "hub begin") }
 
 type orderedServer struct {
 	name  string
@@ -521,10 +702,53 @@ func (*orderedServer) Close() error { return nil }
 
 type orderedProvider struct{ calls *[]string }
 
+func (*orderedProvider) MeterProvider() metric.MeterProvider {
+	return metricnoop.NewMeterProvider()
+}
+
+func (*orderedProvider) TracerProvider() trace.TracerProvider {
+	return tracenoop.NewTracerProvider()
+}
+
 func (provider *orderedProvider) Shutdown(context.Context) error {
 	*provider.calls = append(*provider.calls, "telemetry shutdown")
 	return nil
 }
+
+type orderedTelemetryObserver struct{ calls *[]string }
+
+func (*orderedTelemetryObserver) ObserveBroadcast(chat.BroadcastEvent, chat.DeliveryOutcome) {}
+func (*orderedTelemetryObserver) ObserveHandshake(
+	context.Context,
+	time.Time,
+	chatwebsocket.HandshakeOutcome,
+) {
+}
+func (*orderedTelemetryObserver) ConnectionOpened()                          {}
+func (*orderedTelemetryObserver) ConnectionClosed(chatwebsocket.CloseReason) {}
+func (*orderedTelemetryObserver) RecordShutdownFailure(context.Context)      {}
+func (observer *orderedTelemetryObserver) Close() error {
+	*observer.calls = append(*observer.calls, "observer close")
+	return nil
+}
+
+type recordingTelemetryObserver struct{ shutdownFailures atomic.Int32 }
+
+func (*recordingTelemetryObserver) ObserveBroadcast(chat.BroadcastEvent, chat.DeliveryOutcome) {}
+func (*recordingTelemetryObserver) ObserveHandshake(
+	context.Context,
+	time.Time,
+	chatwebsocket.HandshakeOutcome,
+) {
+}
+func (*recordingTelemetryObserver) ConnectionOpened() {}
+func (*recordingTelemetryObserver) ConnectionClosed(chatwebsocket.CloseReason) {
+}
+
+func (observer *recordingTelemetryObserver) RecordShutdownFailure(context.Context) {
+	observer.shutdownFailures.Add(1)
+}
+func (*recordingTelemetryObserver) Close() error { return nil }
 
 func newFakeServer(serveErr error) *fakeServer {
 	return &fakeServer{serveErr: serveErr, release: make(chan struct{})}
@@ -542,7 +766,7 @@ func (server *fakeServer) Serve(listener net.Listener) error {
 func (server *fakeServer) Shutdown(context.Context) error {
 	server.shutdowns.Add(1)
 	server.once.Do(func() { close(server.release) })
-	return nil
+	return server.shutdownErr
 }
 
 func (server *fakeServer) Close() error {

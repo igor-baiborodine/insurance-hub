@@ -112,6 +112,7 @@ PYTHON_OBSERVABILITY_FILES := \
 	k8s/scripts/alloy/disposable_acceptance.py \
 	k8s/scripts/alloy/disposable_acceptance_phase.py \
 	k8s/scripts/alloy/probe_dashboard.py \
+	k8s/scripts/alloy/probe_chat.py \
 	k8s/scripts/alloy/probe_document.py \
 	k8s/scripts/alloy/probe_policy_search.py \
 	k8s/scripts/alloy/probe_product.py \

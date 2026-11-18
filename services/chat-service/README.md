@@ -13,10 +13,9 @@
 
 # Chat service
 
-`chat-service` is the standalone Go foundation for Insurance Hub Chat. In C01 it deliberately
-implements no Chat or WebSocket behavior: Java remains the only Chat route authority. The Go
-business listener returns the standard-library HTTP 404 response for every request, including an
-upgrade attempt to `/ws/chat/main/test`.
+`chat-service` is the standalone Go implementation of the accepted Insurance Hub Chat WebSocket
+contract. It exposes the private candidate route while Java remains the only deployed browser Chat
+upstream until the later route-transfer milestone.
 
 ## Architecture and ownership
 
@@ -25,25 +24,31 @@ flowchart LR
     Main["cmd/server"] -->|"source: loads"| Config["internal/config"]
     Main -->|"source: calls Run"| Service["internal/service"]
     Service -->|"source: constructs"| Telemetry["internal/telemetry"]
-    Service -->|"runtime: serves :8080"| Business["business handler"]
+    Service -->|"source: composes"| WebSocket["internal/websocket"]
+    Service -->|"source: composes"| Hub["internal/chat hub"]
+    Service -->|"runtime: serves :8080"| Business["drain-guarded Chat handler"]
     Service -->|"runtime: serves :8081"| Management["Servicekit management server"]
     Service -->|"runtime: owns lifecycle"| Registry["connection registry"]
-    Business -->|"runtime: every request"| NotFound["HTTP 404"]
+    Business -->|"runtime: exact upgrade route"| WebSocket
+    WebSocket -->|"runtime: join/broadcast/leave"| Hub
+    WebSocket -->|"runtime: tracked Close/Wait"| Registry
     Management -->|"runtime: reads"| Health["health state"]
     Telemetry -->|"source: wraps"| KitTelemetry["Servicekit telemetry"]
 ```
 
 `cmd/server` is the composition root, `internal/config` owns typed environment loading and fixed
 identity, `internal/service` owns both listeners and bounded shutdown, and `internal/telemetry`
-adapts the shared Servicekit telemetry provider. The connection registry is the protocol-neutral
-C02 seam; it does not add a protocol or route in C01.
+adapts the shared Servicekit telemetry provider. `internal/chat` owns process-local room state and
+bounded queues; `internal/websocket` owns the Gorilla upgrade, frames, deadlines and close policy.
+The protocol-neutral connection registry owns upgraded connections that `net/http` shutdown cannot
+join.
 
-A representative business request reaches the `:8080` listener, passes the drain guard and then
-uses `http.NotFound`; for example, `/ws/chat/main/test` returns HTTP 404 without performing a
-WebSocket upgrade. A management request to `:8081/readyz` reaches the Servicekit management server
-and reads the lifecycle health state. That state becomes ready only after both listeners start and
-is withdrawn before shutdown begins, so the response is either `200 ready` or `503 not ready`
-according to process lifecycle.
+A representative business connection reaches `:8080`, passes the drain guard and upgrades only at
+`GET /ws/chat/{topic}/{username}`. Wrong paths remain 404, wrong methods remain 405 and a
+non-upgrade request to the exact route is rejected without registering a session. A management
+request to `:8081/readyz` reaches the Servicekit management server and reads the lifecycle health
+state. Readiness is withdrawn before new upgrades are rejected and tracked sessions receive close
+1001 during bounded shutdown.
 
 The module depends on the published `libs/servicekit` version in `go.mod`. It has no Go workspace,
 filesystem replacement, template import, sibling-service private import, Java runtime dependency,
@@ -51,23 +56,27 @@ gRPC listener, protobuf surface, generated API contract, persistence or message 
 
 Source-copy provenance is recorded in [COPYING.md](COPYING.md).
 
+Operational procedures are owned by the [deployment and private qualification runbook](deployment-runbook.md)
+and the [observability runbook](observability-runbook.md).
+
 ## Runtime contract
 
 The process owns exactly two HTTP listeners:
 
 | Listener | Default address | Contract |
 | --- | --- | --- |
-| Business | `127.0.0.1:8080` | Every request returns HTTP 404 and `404 page not found\n`. |
+| Business | `127.0.0.1:8080` | `GET /ws/chat/{topic}/{username}` upgrades to the bounded Chat protocol; no other business route is exposed. |
 | Management | `127.0.0.1:8081` | `/livez` reports process liveness; `/readyz` follows lifecycle readiness. |
 
 Readiness is published only after both listeners start. Cancellation or an unexpected server exit
-withdraws readiness, rejects new business work and connection registration, stops business HTTP,
-closes and joins tracked connections within the non-exporter shutdown budget, stops management and
-then gives telemetry its reserved exporter budget. Cleanup errors are preserved with the initiating
-failure.
+withdraws readiness, rejects new upgrades and connection registration, begins the hub drain,
+suppresses room disconnect broadcasts, sends close 1001 and joins tracked connections within the
+eight-second non-exporter shutdown budget. Management then stops and telemetry receives its
+reserved two-second exporter budget. Cleanup errors are preserved with the initiating failure.
 
-The connection registry is intentionally protocol-neutral and is tested with fakes. C02 owns the
-WebSocket library, route, close policy, rooms and sessions.
+Rooms are process-local and case-insensitive. The sender and other topics are excluded from each
+broadcast; accepted text, including empty text, is forwarded byte-for-byte. The route remains
+anonymous and retains the existing HTML payload contract.
 
 ## Configuration
 
@@ -90,6 +99,13 @@ without logging raw configuration values.
 | `OTEL_ENABLED` | `false`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Required only when telemetry is enabled. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | Application default `2s`; positive and reserved from shutdown. Deployed configuration omits the override and guards reject one so the OpenTelemetry SDK cannot independently reinterpret it. |
+| `WEBSOCKET_MAX_CONNECTIONS` | `128`; positive and no greater than 128. |
+| `WEBSOCKET_MAX_MESSAGE_BYTES` | `32768`; positive and no greater than 32 KiB. |
+| `WEBSOCKET_OUTBOUND_QUEUE_SIZE` | `8`; positive and no greater than eight. |
+| `WEBSOCKET_WRITE_TIMEOUT` | `5s`; positive and inside the service shutdown budget. |
+| `WEBSOCKET_PING_INTERVAL` | `30s`; positive and less than the pong timeout. |
+| `WEBSOCKET_PONG_TIMEOUT` | `60s`; positive. |
+| `WEBSOCKET_CLOSE_TIMEOUT` | `2s`; positive and reserved with the write timeout inside the service budget. |
 | `DEPLOYMENT_ENVIRONMENT` | Defaults to `development`; explicit when telemetry is enabled. |
 | `SERVICE_VERSION` | Development default locally; otherwise `git-` plus 12 nonzero-capable lowercase hexadecimal characters. |
 | `SERVICE_INSTANCE_ID` | Local process identity by default; explicit when telemetry is enabled. |
@@ -120,7 +136,7 @@ lint, unit/race and real-listener smoke tests, build, dependency synchronization
 analysis, generated Dockerfile drift and Servicekit selection. Controlled defects cover only the
 implemented Dockerfile, format, lint, test and dependency boundaries.
 
-Generated-source and compatibility-breaking phases are explicit no-ops because C01 owns no
+Generated-source and compatibility-breaking phases are explicit no-ops because Chat owns no
 generated source or published protobuf/gateway contract. There is no active source-copy phase.
 
 ## Image and delivery boundary
@@ -137,10 +153,12 @@ release, the QA service aggregate keeps only `./chat/legacy`; the generic releas
 after publishing the image and canonical identity. Both Vue environments retain the legacy Chat URL
 as their only route authority.
 
-`deploy-check` validates both renders, exact source-derived version mapping, legacy coexistence and
-unchanged Vue authority without contacting a cluster. `deploy-test-tooling` uses fake boundaries to
-exercise target selection, failure and bounded cleanup. `deploy-smoke` builds the exact candidate,
-loads it into the cataloged local Kind cluster, verifies it in a uniquely owned namespace and
+The base Deployment owns `replicas: 1` and the `Recreate` strategy, so neither overlay can run two
+process-local room owners during replacement. `deploy-check` validates both renders, exact
+source-derived version mapping, legacy coexistence and unchanged Vue authority without contacting a
+cluster. `deploy-test-tooling` uses fake boundaries to exercise target selection, failure and
+bounded cleanup. `deploy-smoke` builds the exact candidate, loads it into the cataloged local Kind
+cluster, verifies health and negative HTTP route behavior in a uniquely owned namespace, and
 deletes that namespace within a fixed deadline. It does not touch the shared local-dev namespace.
 
 ### Live deployment operations
