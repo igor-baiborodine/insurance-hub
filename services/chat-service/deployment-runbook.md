@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Chat deployment and private qualification runbook](#chat-deployment-and-private-qualification-runbook)
+- [Chat deployment, qualification and route-transfer runbook](#chat-deployment-qualification-and-route-transfer-runbook)
   - [Exact targets and ownership](#exact-targets-and-ownership)
   - [Source and disposable qualification](#source-and-disposable-qualification)
   - [Candidate identity gate](#candidate-identity-gate)
@@ -10,16 +10,18 @@
   - [Run private real-client qualification through Nginx](#run-private-real-client-qualification-through-nginx)
   - [Stop conditions, cleanup and recovery](#stop-conditions-cleanup-and-recovery)
   - [Evidence checklist](#evidence-checklist)
+  - [Verify the deployed public route](#verify-the-deployed-public-route)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Chat deployment and private qualification runbook
+# Chat deployment, qualification and route-transfer runbook
 
-This runbook owns deployment preparation and loopback-only real-client qualification through the
-unchanged Nginx proxy for the Go Chat candidate. Java remains the deployed Vue Chat upstream
-throughout issue 390. Image publication, shared-environment mutation, port-forwarding and private
-qualification each require their own authorization; source checks do not grant it. Browser tests
-and manual browser observation are explicitly forfeited.
+This runbook owns deployment preparation, private candidate qualification and bounded public-route
+verification through the unchanged Nginx proxy. Java remains the deployed Vue Chat upstream
+throughout issue 390. Issue 391 transfers that authority directly to Go, local-dev before QA.
+Image publication, shared-environment mutation, port-forwarding and qualification each require
+their own authorization; source checks do not grant it. Browser tests and manual browser
+observation are explicitly forfeited.
 
 Use the companion [observability runbook](observability-runbook.md) for monitoring provisioning,
 signal verification and investigation.
@@ -218,3 +220,33 @@ Retain no credentials or message payloads. Record:
 The automated real-client/Nginx result supports CHAT-C09 or CHAT-C10 only when all identity and
 cleanup fields are present. Browser-test evidence is neither required nor accepted. Qualification
 does not transfer the public route or authorize Java retirement.
+
+## Verify the deployed public route
+
+The route-transfer owner is read-only: it never applies a manifest, reconciles Flux, changes a
+workload or restores Java. It reads the exact Go candidate and deployment-derived Vue ConfigMap,
+requires ready Java and Vue Deployments, distinct Java/Go Service selectors and no second Ingress
+or HTTPRoute that references the Go Chat Service. It then owns one loopback port-forward to the
+deployed `web-vue-legacy` Service and bounds `verify-live-java-parity` to 60 seconds.
+
+Before the authorized route change, require Java public authority and baseline parity:
+
+```sh
+export CHAT_ROUTE_TRANSFER_CONFIRM="preflight-${QUALIFICATION_ENV}-chat-route-transfer"
+make -C services/chat-service route-transfer-preflight
+unset CHAT_ROUTE_TRANSFER_CONFIRM
+```
+
+After the authorized route change, require the exact Go `CHAT_URL` and the same public parity:
+
+```sh
+export CHAT_ROUTE_TRANSFER_CONFIRM="verify-${QUALIFICATION_ENV}-chat-route-transfer"
+make -C services/chat-service route-transfer-verify
+unset CHAT_ROUTE_TRANSFER_CONFIRM
+```
+
+Both targets reuse the exact `QUALIFICATION_*` target, source and digest inputs from the candidate
+identity gate. A wrong coordinate, authority, candidate, readiness state, selector, second route,
+parity result, deadline or cleanup result fails closed without printing Chat values. A preflight
+failure leaves Java authoritative. A verification failure records the actual state and stops;
+automatic Java restoration and Java retirement are outside this owner.

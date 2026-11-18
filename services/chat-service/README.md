@@ -14,8 +14,8 @@
 # Chat service
 
 `chat-service` is the standalone Go implementation of the accepted Insurance Hub Chat WebSocket
-contract. It exposes the private candidate route while Java remains the only deployed browser Chat
-upstream until the later route-transfer milestone.
+contract. The candidate is qualified privately before the environment-owned Vue/Nginx route is
+transferred directly from Java to Go, local-dev before QA.
 
 ## Architecture and ownership
 
@@ -56,7 +56,7 @@ gRPC listener, protobuf surface, generated API contract, persistence or message 
 
 Source-copy provenance is recorded in [COPYING.md](COPYING.md).
 
-Operational procedures are owned by the [deployment and private qualification runbook](deployment-runbook.md)
+Operational procedures are owned by the [deployment, qualification and route-transfer runbook](deployment-runbook.md)
 and the [observability runbook](observability-runbook.md).
 
 ## Runtime contract
