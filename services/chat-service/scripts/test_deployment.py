@@ -216,10 +216,10 @@ def test_qa_aggregate_current_repository_state_is_valid() -> None:
     ("environment", "wrong_route"),
     [
         ("local-dev", "http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local"),
-        ("qa", "http://qa-chat-api.qa-svc.svc.cluster.local"),
+        ("qa", "http://qa-chat-api-legacy.qa-svc.svc.cluster.local"),
     ],
 )
-def test_vue_route_authority_matches_the_pr1_staged_state(
+def test_vue_route_authority_matches_the_final_go_state(
     environment: str,
     wrong_route: str,
 ) -> None:
@@ -244,27 +244,35 @@ def test_vue_route_authority_matches_the_pr1_staged_state(
         checks.validate_legacy_and_route_authority(environment)
 
 
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
 @pytest.mark.parametrize("mutation", ["multiple", "wrong-namespace"])
-def test_local_dev_route_rejects_ambiguous_or_wrong_go_authority(mutation: str) -> None:
+def test_route_rejects_ambiguous_or_wrong_go_authority(
+    environment: str,
+    mutation: str,
+) -> None:
     # given
-    environment = "local-dev"
+    namespace = "local-dev-all" if environment == "local-dev" else "qa-svc"
+    wrong_namespace = "qa-svc" if environment == "local-dev" else "local-dev-all"
     legacy = checks.run(
         [
             os.environ.get("KUBECTL", "kubectl"),
             "kustomize",
-            str(checks.ROOT / "k8s/overlays/local-dev/svc/chat/legacy"),
+            str(checks.ROOT / f"k8s/overlays/{environment}/svc/chat/legacy"),
         ]
     )
-    path = checks.ROOT / "k8s/overlays/local-dev/svc/web-vue/legacy/kustomization.yaml"
+    path = checks.ROOT / f"k8s/overlays/{environment}/svc/web-vue/legacy/kustomization.yaml"
     changed = path.read_text()
     if mutation == "multiple":
         changed = changed.replace(
             "      - CHAT_URL=",
-            "      - CHAT_URL=http://local-dev-chat-api-legacy.local-dev-all.svc.cluster.local\n"
+            f"      - CHAT_URL=http://{environment}-chat-api-legacy.{namespace}.svc.cluster.local\n"
             "      - CHAT_URL=",
         )
     else:
-        changed = changed.replace("local-dev-all.svc.cluster.local", "qa-svc.svc.cluster.local")
+        changed = changed.replace(
+            f"{namespace}.svc.cluster.local",
+            f"{wrong_namespace}.svc.cluster.local",
+        )
 
     # when / then
     with (
