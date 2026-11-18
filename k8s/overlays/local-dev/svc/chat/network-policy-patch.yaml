@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chat-api
+spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web-vue-legacy
+              app.kubernetes.io/instance: insurance-hub-web-vue-legacy
+              app.kubernetes.io/component: web
+              environment: local-dev
+      ports:
+        - port: 8080
+          protocol: TCP

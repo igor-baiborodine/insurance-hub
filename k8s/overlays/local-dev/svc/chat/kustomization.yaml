@@ -24,6 +24,10 @@ patches:
     target:
       kind: Deployment
       name: chat-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: chat-api
 replacements:
   - source:
       kind: ConfigMap

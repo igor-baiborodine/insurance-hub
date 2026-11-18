@@ -112,10 +112,9 @@ def prepared_resources(
         version
     )
     policy = checks.resource(items, "NetworkPolicy", "local-dev-chat-api")
-    require(
-        policy.get("spec", {}).get("ingress") == [] and policy.get("spec", {}).get("egress") == [],
-        "disposable NetworkPolicy must remain default deny",
-    )
+    policy_spec = policy.setdefault("spec", {})
+    policy_spec["ingress"] = []
+    policy_spec["egress"] = []
     return items
 
 

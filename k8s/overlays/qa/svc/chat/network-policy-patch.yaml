@@ -3,6 +3,20 @@ kind: NetworkPolicy
 metadata:
   name: chat-api
 spec:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-svc
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web-vue-legacy
+              app.kubernetes.io/instance: insurance-hub-web-vue-legacy
+              app.kubernetes.io/component: web
+              environment: qa
+      ports:
+        - port: 8080
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
