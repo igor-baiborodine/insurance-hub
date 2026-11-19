@@ -426,6 +426,25 @@
           }
         }
       }
+    },
+    "pricing": {
+      "repositoryRoot": "services",
+      "modulePath": "services/pricing-service",
+      "localImage": "insurance-hub-pricing-api",
+      "registryImage": "ghcr.io/igor-baiborodine/insurance-hub/pricing-api",
+      "kustomizeBase": "k8s/apps/svc/pricing/base",
+      "overlays": {
+        "local-dev": "k8s/overlays/local-dev/svc/pricing",
+        "qa": "k8s/overlays/qa/svc/pricing"
+      },
+      "environments": [
+        "local-dev",
+        "qa"
+      ],
+      "capabilities": [
+        "image-build",
+        "image-check"
+      ]
     }
   }
 }

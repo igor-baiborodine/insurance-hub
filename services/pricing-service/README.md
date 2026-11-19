@@ -194,7 +194,7 @@ the only environment exempt from canonical-version validation. Enabled telemetry
 non-development environment/version/instance values and rejects the `local-` instance prefix.
 Kubernetes deployments use the Downward API to inject Pod `metadata.uid`; the existing release
 process derives the matching canonical version from verified full source. See the common
-[Go service identity contract](../../docs/migration/phase-4/pricing-service-identity-and-validation.md).
+[Go service identity contract](../../docs/migration/phase-4/go-service-identity-and-validation.md).
 
 Logs are JSON with UTC timestamps and `service_namespace`, `service_name`, `service_version`,
 `service_instance_id`, `deployment_environment_name`, and `service_implementation`. Valid logging
