@@ -438,24 +438,30 @@ class Target:
 
 
 def image_id(target: Target, image: str) -> str:
-    if target.configuration["mode"] == "flux":
-        result = os.environ.get("DEPLOY_IMAGE_DIGEST", "")
-    else:
-        records = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
-        require(len(records) == 1, "local Pricing image inspection differs")
-        labels = records[0]["Config"]["Labels"]
-        revision = os.environ.get("DEPLOY_IMAGE_SOURCE_REVISION", "")
-        require(
-            labels.get("org.opencontainers.image.revision") == revision
-            and labels.get("org.opencontainers.image.version") == source_version(revision),
-            "local Pricing OCI labels differ from the selected source",
-        )
-        result = records[0]["Id"]
+    flux = target.configuration["mode"] == "flux"
+    digest = os.environ.get("DEPLOY_IMAGE_DIGEST", "") if flux else ""
+    if flux:
+        require(valid_digest(digest), "recorded publication digest is required")
+        image = f"{target.record['registryImage']}@{digest}"
+    records = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
+    require(len(records) == 1, "Pricing image inspection differs")
+    labels = records[0]["Config"]["Labels"]
+    revision = os.environ.get("DEPLOY_IMAGE_SOURCE_REVISION", "")
     require(
-        bool(re.fullmatch(r"sha256:[0-9a-f]{64}", result)) and result != "sha256:" + "0" * 64,
-        "exact Pricing image digest is required",
+        labels.get("org.opencontainers.image.revision") == revision
+        and labels.get("org.opencontainers.image.version") == source_version(revision),
+        "Pricing OCI labels differ from the selected source",
     )
+    if flux:
+        require(image in records[0].get("RepoDigests", []), "Pricing publication digest differs")
+        return digest
+    result = records[0]["Id"]
+    require(valid_digest(result), "exact Pricing image ID is required")
     return result
+
+
+def valid_digest(value: str) -> bool:
+    return bool(re.fullmatch(r"sha256:[0-9a-f]{64}", value)) and value != "sha256:" + "0" * 64
 
 
 def secret_and_image(target: Target, image: str) -> None:

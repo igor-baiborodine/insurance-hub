@@ -75,19 +75,21 @@ commit. Keep image source and Flux configuration commits separate.
 
 From the checkout of the applied release configuration, set the full image source and applied
 Flux commits from the workflow and Flux records. Set `RELEASE_VERSION` to the published
-semantic version. Obtain the registry digest and compare it with the release workflow output.
+semantic version. Set `DEPLOY_IMAGE_DIGEST` to the digest recorded by the release workflow.
 
 ```bash
 : "${DEPLOY_IMAGE_SOURCE_REVISION:?set the full image source commit}"
 : "${DEPLOY_SOURCE_REVISION:?set the full Flux-applied configuration commit}"
 : "${RELEASE_VERSION:?set the published semantic version}"
-export DEPLOY_IMAGE_SOURCE_REVISION DEPLOY_SOURCE_REVISION
+: "${DEPLOY_IMAGE_DIGEST:?set the immutable digest recorded by the release workflow}"
+export DEPLOY_IMAGE_SOURCE_REVISION DEPLOY_SOURCE_REVISION DEPLOY_IMAGE_DIGEST
 export DEPLOY_ENV=qa DEPLOY_CONTEXT=qa-insurance-hub DEPLOY_SVC_NS=qa-svc
 unset DEPLOY_IMAGE_REF
 image=ghcr.io/igor-baiborodine/insurance-hub/pricing-api
-DEPLOY_IMAGE_DIGEST="$(docker buildx imagetools inspect "$image:$RELEASE_VERSION" \
+observed_digest="$(docker buildx imagetools inspect "$image:$RELEASE_VERSION" \
   --format '{{json .Manifest.Digest}}' | tr -d '"')"
-export DEPLOY_IMAGE_DIGEST
+test "$observed_digest" = "$DEPLOY_IMAGE_DIGEST"
+docker pull "$image@$DEPLOY_IMAGE_DIGEST"
 kubectl config use-context "$DEPLOY_CONTEXT"
 kubectl --context "$DEPLOY_CONTEXT" -n flux-system get gitrepository insurance-hub
 kubectl --context "$DEPLOY_CONTEXT" -n flux-system get kustomization qa-svc
@@ -96,8 +98,8 @@ make go-svc-deploy-verify SVC_NAME=pricing
 ```
 
 Status checks the exact deployment, ready Pod, Pod UID, version and running image ID. Use a
-digest-qualified image reference to inspect the matching OCI revision and version. A tag by
-itself cannot establish deployed image identity.
+digest-qualified image reference for OCI revision and version checks. Status and verification
+inspect that pulled image and require the published digest to match the ready Pod image ID.
 
 ## Private smoke and recovery
 

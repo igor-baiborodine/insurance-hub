@@ -88,6 +88,49 @@ def test_qa_refuses_placeholder_activation_and_runtime(
         pricing.Target().rendered()
 
 
+@pytest.mark.parametrize("revision_matches", [True, False])
+def test_qa_image_requires_published_digest_and_matching_oci_labels(
+    monkeypatch: pytest.MonkeyPatch, revision_matches: bool
+) -> None:
+    # given
+    revision = "a" * 40
+    digest = "sha256:" + "b" * 64
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setenv("DEPLOY_IMAGE_SOURCE_REVISION", revision)
+    monkeypatch.setenv("DEPLOY_IMAGE_DIGEST", digest)
+    target = pricing.Target()
+    registry = target.record["registryImage"]
+
+    def inspect(arguments: list[str]) -> str:
+        assert arguments[1:] == ["image", "inspect", f"{registry}@{digest}"]
+        return json.dumps(
+            [
+                {
+                    "RepoDigests": [f"{registry}@{digest}"],
+                    "Config": {
+                        "Labels": {
+                            "org.opencontainers.image.revision": revision
+                            if revision_matches
+                            else "c" * 40,
+                            "org.opencontainers.image.version": "git-" + revision[:12],
+                        }
+                    },
+                }
+            ]
+        )
+
+    monkeypatch.setattr(pricing, "run", inspect)
+
+    # when / then
+    if revision_matches:
+        assert pricing.image_id(target, f"{registry}:1.0.0") == digest
+    else:
+        with pytest.raises(DeploymentError, match="OCI labels"):
+            pricing.image_id(target, f"{registry}:1.0.0")
+
+
 def test_release_prepares_published_version_and_activation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
