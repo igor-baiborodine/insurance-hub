@@ -8,7 +8,7 @@ metadata:
     insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
     insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
     insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
-    insurance-hub.io/staged-predecessor: "true"
+    insurance-hub.io/staged-predecessor: 'true'
 spec:
   interval: 5m
   url: https://github.com/igor-baiborodine/insurance-hub
@@ -24,7 +24,7 @@ metadata:
     insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
     insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
     insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
-    insurance-hub.io/staged-predecessor: "true"
+    insurance-hub.io/staged-predecessor: 'true'
 spec:
   suspend: true
   interval: 5m
@@ -37,19 +37,78 @@ spec:
     name: qa-pricing-release-bdea85438d7d4494
   path: ./k8s/overlays/qa/svc/pricing/administration
   images:
-    - name: insurance-hub-pricing-api
-      newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
-      digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+  - name: insurance-hub-pricing-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+    digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
   retryInterval: 1m
   nameSuffix: -bdea85438d7d4494-a1
   postBuild:
     substitute:
       MIGRATION_TIMEOUT: 120s
   healthChecks:
-    - apiVersion: batch/v1
-      kind: Job
-      name: qa-pricing-init-bdea85438d7d4494-a1
-      namespace: qa-svc
+  - apiVersion: batch/v1
+    kind: Job
+    name: qa-pricing-init-bdea85438d7d4494-a1
+    namespace: qa-svc
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: qa-pricing-release-35d96cb40a0d3ec4
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 35d96cb40a0d3ec4646d7bacb1e5b7a10f3b59f5dcff7306b085646c0484690a
+    insurance-hub.io/source-revision: 7d8deb74ed2b4ace9ce6e1008a490fe7a22d770e
+    insurance-hub.io/image-digest: sha256:47fa6d9f31309f75cb904cb8d3e0453cc0df6d52e70971ba009796391942e4ac
+    insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
+      "migration": "5544ed4280ab8ed8ceb01ff6a6e2640ebcda1d2c4b0fa2934f8756be80abe26c"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: 7d8deb74ed2b4ace9ce6e1008a490fe7a22d770e
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-pricing-init-35d96cb40a0d3ec4-a1
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 35d96cb40a0d3ec4646d7bacb1e5b7a10f3b59f5dcff7306b085646c0484690a
+    insurance-hub.io/source-revision: 7d8deb74ed2b4ace9ce6e1008a490fe7a22d770e
+    insurance-hub.io/image-digest: sha256:47fa6d9f31309f75cb904cb8d3e0453cc0df6d52e70971ba009796391942e4ac
+    insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
+      "migration": "5544ed4280ab8ed8ceb01ff6a6e2640ebcda1d2c4b0fa2934f8756be80abe26c"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-pricing-release-35d96cb40a0d3ec4
+  path: ./k8s/overlays/qa/svc/pricing/administration
+  images:
+  - name: insurance-hub-pricing-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+    digest: sha256:47fa6d9f31309f75cb904cb8d3e0453cc0df6d52e70971ba009796391942e4ac
+  retryInterval: 1m
+  nameSuffix: -35d96cb40a0d3ec4-a1
+  postBuild:
+    substitute:
+      MIGRATION_TIMEOUT: 120s
+  healthChecks:
+  - apiVersion: batch/v1
+    kind: Job
+    name: qa-pricing-init-35d96cb40a0d3ec4-a1
+    namespace: qa-svc
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -57,10 +116,14 @@ metadata:
   name: qa-pricing-api
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
-    insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
-    insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
-    insurance-hub.io/staged-predecessor: "true"
+    insurance-hub.io/release-identity: 35d96cb40a0d3ec4646d7bacb1e5b7a10f3b59f5dcff7306b085646c0484690a
+    insurance-hub.io/source-revision: 7d8deb74ed2b4ace9ce6e1008a490fe7a22d770e
+    insurance-hub.io/image-digest: sha256:47fa6d9f31309f75cb904cb8d3e0453cc0df6d52e70971ba009796391942e4ac
+    insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
+      "migration": "5544ed4280ab8ed8ceb01ff6a6e2640ebcda1d2c4b0fa2934f8756be80abe26c"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
 spec:
   interval: 5m
   timeout: 5m
@@ -69,9 +132,14 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-pricing-release-bdea85438d7d4494
+    name: qa-pricing-release-35d96cb40a0d3ec4
   path: ./k8s/overlays/qa/svc/pricing
   images:
-    - name: insurance-hub-pricing-api
-      newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
-      digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+  - name: insurance-hub-pricing-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+    digest: sha256:47fa6d9f31309f75cb904cb8d3e0453cc0df6d52e70971ba009796391942e4ac
+  dependsOn:
+  - name: qa-pricing-init-35d96cb40a0d3ec4-a1
+  postBuild:
+    substitute:
+      PRICING_SERVICE_VERSION: git-7d8deb74ed2b
