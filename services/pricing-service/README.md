@@ -10,6 +10,7 @@
     - [Repository onboarding](#repository-onboarding)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
+  - [PostgreSQL migration command](#postgresql-migration-command)
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
@@ -31,6 +32,7 @@ to serve Policy's pricing requests.
 - GNU Make 4.3 or newer
 - Git for the default changed-file formatting scope; `FORMAT_SCOPE=all` also works outside Git
 - GCC on Linux for `test-race`
+- Docker for the disposable PostgreSQL migration smoke in `coverage-check` and `test-integration`
 - kubectl with Kustomize replacements and field creation support (verified with kubectl 1.34.1)
   and a full repository checkout for the Pricing deployment and release fixtures
 - Network access when the Go module proxy/checksum service, source-based tool installation, Buf
@@ -65,7 +67,7 @@ These operations are explicit and are never hidden inside `check`:
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | `make python-toolchain-setup` | Installs managed CPython 3.14.8 when needed and creates or synchronizes the repository's ignored `.venv/` from the root lock. | uv 0.13.1 and Python package/index access unless cached; rejects a conflicting existing root environment. |
 | `make bootstrap-tools`   | Runs the repository Python setup, then installs or replaces only binaries under the module's ignored `.tools/bin/`; it does not change source, generated output, or manifests. | uv 0.13.1, Go 1.27.4, and source/module download access unless cached; finishes by running `verify-tools`. |
-| `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
+| `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned Go dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
 | `make format-proto`      | Rewrites only `api/pricing/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
@@ -103,9 +105,10 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
+| `make test-integration` | Production composition and one disposable TLS-enabled PostgreSQL smoke for migration and status. | Docker, the pinned PostgreSQL test image, and a C compiler. |
+| `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It writes only the coverage profiles and tool-managed output. The real-listener tests use disposable loopback listeners. |
+| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It writes only the coverage profiles and tool-managed output. Integration uses disposable loopback listeners and PostgreSQL. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The shared `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -114,7 +117,6 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-The Echo foundation has no database, broker, generated mocks, migrations, or Go workspace.
 Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
@@ -268,6 +270,22 @@ HTTP handlers finish before closing the gateway connection. It then gracefully o
 gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
+
+## PostgreSQL migration command
+
+`cmd/migrate` runs independently from the Echo server. It accepts `--operation` with
+`status`, `version` or `migrate`, and requires `--environment`, `--context`, `--target-file`,
+`--database-url-file` and `--ca-file`. The connection URL uses the enrolled host, the migrator
+login, `sslmode=verify-full`, and `sslrootcert` set to the selected CA file.
+
+`internal/service` owns the migration connection lifecycle, and `internal/postgres` opens and
+configures the database connection. `internal/administration` verifies the database marker and
+roles and applies the migration. Status reports `uninitialized` for a fresh database,
+`unmanaged` when legacy schema exists without Pricing migration history, and `version=1`
+after migration. The version operation reports `uninitialized` or `1`.
+Both inspect PostgreSQL in a read-only transaction. Goose commits the schema and its history
+together under an advisory lock. Existing Java tariff rows retain their IDs and relationships.
+Rule positions stay nullable until the seeder can match each tariff to the reviewed rule order.
 
 ## Example RPC and HTTP gateway
 

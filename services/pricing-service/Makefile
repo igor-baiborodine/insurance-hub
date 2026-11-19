@@ -51,6 +51,10 @@ OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.1.0
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
+PGX_VERSION := v5.11.0
+GOOSE_VERSION := v3.27.0
+TESTCONTAINERS_VERSION := v0.44.0
+BUILD_EXECUTABLES := server migrate
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
@@ -146,6 +150,9 @@ update-deps:
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
+		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
+		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@$(OTEL_HTTP_VERSION) \
@@ -183,12 +190,16 @@ check-candidate-servicekit:
 
 check: check-go-pr
 
-test-integration:
+# Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
+coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
+
+test-integration: ## Run the service composition and disposable PostgreSQL smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
-		-run TestRun_ProductionComposition ./internal/service \
+		-tags=integration -run '^TestRun_(ProductionComposition|PostgreSQLMigration$$)' \
+		./internal/service ./internal/administration \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:
@@ -268,4 +279,6 @@ help: ## Show the explicit setup and validation entry points without installing 
 	@printf '%s\n' 'Go service commands (see README.md for the full interface):' \
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
-		'  make run              Start the service with environment configuration'
+		'  make run              Start the service with environment configuration' \
+		'  make build            Compile the server and standalone migrator' \
+		'  make test-integration Run service composition and disposable PostgreSQL smoke tests'
