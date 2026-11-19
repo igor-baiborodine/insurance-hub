@@ -671,13 +671,21 @@ def verify_denial(target: Target, pod: dict) -> None:
         )
         print("\n".join(observed))
     finally:
-        actual = target.json("get", "pod", name, "--ignore-not-found")
-        if actual:
-            require(
-                actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
-                "Pricing denial probe ownership differs",
+        primary_failure = sys.exception()
+        try:
+            actual = target.json("get", "pod", name, "--ignore-not-found")
+            if actual:
+                require(
+                    actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
+                    "Pricing denial probe ownership differs",
+                )
+                target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
+        except Exception as cleanup_error:
+            if primary_failure is None:
+                raise
+            print(
+                f"pricing-deployment: denial probe cleanup failed: {cleanup_error}", file=sys.stderr
             )
-            target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
 
 
 def main() -> int:

@@ -235,6 +235,28 @@ def test_release_prepares_published_version_and_activation(
     assert {item["kind"]: item for item in added.values()} == items
 
 
+def test_denial_cleanup_preserves_primary_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = pricing.Target()
+    reads = iter(({}, {"metadata": {"labels": {}}}))
+
+    def create(*_args: str, **_kwargs: object) -> str:
+        raise DeploymentError("probe creation failed")
+
+    monkeypatch.setattr(target, "json", lambda *_args: next(reads))
+    monkeypatch.setattr(target, "kubectl", create)
+
+    # when / then
+    with pytest.raises(DeploymentError, match="probe creation failed"):
+        pricing.verify_denial(target, {"status": {"podIP": "192.0.2.10"}})
+    assert "cleanup failed: Pricing denial probe ownership differs" in capsys.readouterr().err
+
+
 @pytest.mark.integration
 def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     # given
