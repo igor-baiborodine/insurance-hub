@@ -271,6 +271,36 @@ def test_cli_signal_exit_status(
     assert pricing.cli() == status
 
 
+def test_stop_uses_remaining_poll_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = pricing.Target()
+    time_values = iter((100.0, 185.0))
+    monkeypatch.setattr(pricing.time, "monotonic", lambda: next(time_values))
+    monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: {})
+    scale_timeouts: list[float] = []
+    poll_timeouts: list[float] = []
+
+    def scale(*_args: str, timeout: float) -> None:
+        scale_timeouts.append(timeout)
+
+    def poll(*_args: str, timeout: float) -> dict:
+        poll_timeouts.append(timeout)
+        return {"metadata": {"generation": 1}, "status": {"observedGeneration": 1}}
+
+    monkeypatch.setattr(target, "kubectl", scale)
+    monkeypatch.setattr(target, "json", poll)
+
+    # when
+    pricing.stop(target, {})
+
+    # then
+    assert scale_timeouts == [65]
+    assert poll_timeouts == [5]
+
+
 @pytest.mark.integration
 def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     # given

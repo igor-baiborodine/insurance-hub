@@ -53,7 +53,7 @@ def safe_environment() -> dict[str, str]:
     }
 
 
-def run(argv: list[str], *, input_text: str | None = None, timeout: int = 30) -> str:
+def run(argv: list[str], *, input_text: str | None = None, timeout: float = 30) -> str:
     return run_command(
         argv,
         cwd=ROOT,
@@ -308,15 +308,15 @@ class Target:
         self.deployment = f"{self.environment}-pricing-api"
         self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
 
-    def kubectl(self, *args: str, input_text: str | None = None, timeout: int = 30) -> str:
+    def kubectl(self, *args: str, input_text: str | None = None, timeout: float = 30) -> str:
         return run(
             [self.kubectl_binary, "--context", self.context, "--namespace", self.namespace, *args],
             input_text=input_text,
             timeout=timeout,
         )
 
-    def json(self, *args: str) -> dict:
-        return json.loads(self.kubectl(*args, "-o", "json") or "{}")
+    def json(self, *args: str, timeout: float = 30) -> dict:
+        return json.loads(self.kubectl(*args, "-o", "json", timeout=timeout) or "{}")
 
     def coordinates(self) -> None:
         require(
@@ -511,17 +511,19 @@ def rollout(target: Target) -> None:
 
 def stop(target: Target, items: dict[str, dict]) -> None:
     target.live(items, require_deployment=False)
-    target.kubectl("scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s")
+    target.kubectl(
+        "scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s", timeout=65
+    )
     deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
-        deployment = target.json("get", "deployment", target.deployment)
+    while (remaining := deadline - time.monotonic()) > 0:
+        deployment = target.json("get", "deployment", target.deployment, timeout=min(30, remaining))
         status = deployment.get("status", {})
         if (
             status.get("observedGeneration") == deployment["metadata"]["generation"]
             and status.get("replicas", 0) == 0
         ):
             return
-        time.sleep(1)
+        time.sleep(max(0, min(1, deadline - time.monotonic())))
     raise lifecycle.DeploymentError("Pricing stop exceeded 90 seconds")
 
 
