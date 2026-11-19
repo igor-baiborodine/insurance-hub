@@ -93,16 +93,9 @@ def test_release_prepares_published_version_and_activation(
 ) -> None:
     # given
     source = pricing.ROOT
-    for relative in (
-        "scripts/go/service/catalog.json",
-        "services/pricing-service/Dockerfile",
-        str(QA / "kustomization.yaml"),
-        str(QA / "pricing/kustomization.yaml"),
-        str(QA / "pricing/network-policy-patch.yaml"),
-        "k8s/apps/svc/pricing/base/kustomization.yaml",
-        "k8s/apps/svc/pricing/base/deployment.yaml",
-        "k8s/apps/svc/pricing/base/network-policy.yaml",
-    ):
+    for relative in ("k8s/apps", "k8s/overlays/qa"):
+        shutil.copytree(source / relative, tmp_path / relative)
+    for relative in ("scripts/go/service/catalog.json", "services/pricing-service/Dockerfile"):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / relative, target)
@@ -115,6 +108,23 @@ def test_release_prepares_published_version_and_activation(
     ]
     parent.write_text(yaml.safe_dump(aggregate))
     previous = parent.read_bytes()
+
+    def inventory() -> dict:
+        rendered = pricing.run(["kubectl", "kustomize", str(parent.parent)])
+        objects = list(yaml.safe_load_all(rendered))
+        result = {
+            (
+                item["apiVersion"],
+                item["kind"],
+                item["metadata"].get("namespace", ""),
+                item["metadata"]["name"],
+            ): item
+            for item in objects
+        }
+        assert len(result) == len(objects)
+        return result
+
+    before = inventory()
     selection = release.select_service(
         ["services/pricing-service/Dockerfile"], tmp_path, repository
     )
@@ -137,6 +147,15 @@ def test_release_prepares_published_version_and_activation(
         "ghcr.io/igor-baiborodine/insurance-hub/pricing-api:1.0.0"
     )
     pricing.qa_activation(yaml.safe_load(parent.read_text())["resources"], items)
+    after = inventory()
+    added = {key: item for key, item in after.items() if key not in before}
+    assert {key: after[key] for key in before} == before
+    assert {key[3] for key in added} == {
+        "qa-pricing-api",
+        "qa-pricing-config",
+    }
+    assert len(added) == 3
+    assert {item["kind"]: item for item in added.values()} == items
 
 
 @pytest.mark.integration
