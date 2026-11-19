@@ -1,0 +1,4 @@
+/.tools/bin/
+/.tools/ruff-cache/
+/coverage.txt
+/integration-coverage.txt
