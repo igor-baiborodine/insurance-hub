@@ -127,6 +127,34 @@ def pod_image_allowed(
     )
 
 
+def published_image_digest(mode: str) -> str:
+    """Return the QA release digest the running Pods must report, or "" outside QA."""
+    if mode != "flux":
+        return ""
+    digest = os.environ.get("DEPLOY_IMAGE_DIGEST", "")
+    require(
+        bool(re.fullmatch(r"sha256:[0-9a-f]{64}", digest)),
+        "DEPLOY_IMAGE_DIGEST is required for QA live verification",
+    )
+    return digest
+
+
+def require_running_image_digest(pods: list[dict[str, Any]], digest: str) -> None:
+    # Same rule as the other Go services: the published digest, optionally repository-qualified.
+    for pod in pods:
+        if pod.get("metadata", {}).get("deletionTimestamp"):
+            continue
+        statuses = pod.get("status", {}).get("containerStatuses", [])
+        require(
+            bool(statuses)
+            and all(
+                status.get("imageID") == digest or status.get("imageID", "").endswith("@" + digest)
+                for status in statuses
+            ),
+            "running Product Pod image digest differs",
+        )
+
+
 class Target:
     def __init__(self) -> None:
         self.environment = os.environ.get("DEPLOY_ENV", "")
@@ -242,6 +270,7 @@ class Target:
         engine.validate_flux_source(self, require_release=require_release)
 
     def live(self, items: list[dict[str, Any]], *, require_deployment: bool) -> None:
+        digest = published_image_digest(self.mode) if require_deployment else ""
         go = self.json("get", "deployment", self.deployment, "--ignore-not-found")
         if go.get("kind") == "Deployment":
             desired = resource(items, "Deployment", self.deployment)
@@ -442,6 +471,8 @@ class Target:
                     "product-deployment: pod image IDs "
                     + ", ".join(status["imageID"] for status in statuses)
                 )
+        if digest:
+            require_running_image_digest(pods.get("items", []), digest)
         slices = self.json(
             "get", "endpointslices", "-l", f"kubernetes.io/service-name={self.business}"
         )
