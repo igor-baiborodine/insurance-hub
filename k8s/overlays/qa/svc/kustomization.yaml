@@ -11,5 +11,6 @@ resources:
 - ./payment/legacy
 - ./policy-search
 - ./policy/legacy
+- ./pricing
 - ./pricing/legacy
 - ./web-vue/legacy
