@@ -632,6 +632,69 @@ class DeploymentGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(deployment.DeploymentError, "unexpected Service"):
             target.live(items, require_deployment=False)
 
+    def test_qa_live_requires_published_digest_before_cluster_reads(self) -> None:
+        values = {
+            "DEPLOY_ENV": "qa",
+            "DEPLOY_CONTEXT": "qa-insurance-hub",
+            "DEPLOY_SVC_NS": "qa-svc",
+            "DEPLOY_DATA_NS": "qa-data",
+        }
+        for digest in (None, "sha256:" + "A" * 64, "c" * 64):
+            # given
+            environment = values if digest is None else {**values, "DEPLOY_IMAGE_DIGEST": digest}
+            with self.subTest(digest=digest), patch.dict(os.environ, environment, clear=True):
+                target = deployment.Target()
+                with patch.object(target, "json") as read:
+                    # when / then
+                    with self.assertRaisesRegex(deployment.DeploymentError, "DEPLOY_IMAGE_DIGEST"):
+                        target.live([], require_deployment=True)
+                    read.assert_not_called()
+
+    def test_published_digest_applies_only_to_running_qa_releases(self) -> None:
+        # given
+        digest = "sha256:" + "d" * 64
+        with patch.dict(os.environ, {"DEPLOY_IMAGE_DIGEST": digest}, clear=True):
+            # when / then
+            self.assertEqual(deployment.published_image_digest("flux"), digest)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(deployment.published_image_digest("direct"), "")
+
+    def test_running_pods_must_report_the_published_digest(self) -> None:
+        # given
+        digest = "sha256:" + "d" * 64
+        repository = "ghcr.io/igor-baiborodine/insurance-hub/product-api"
+
+        def pod(image_id: str, *, terminating: bool = False) -> dict:
+            metadata = {"deletionTimestamp": "2026-11-19T00:00:00Z"} if terminating else {}
+            return {"metadata": metadata, "status": {"containerStatuses": [{"imageID": image_id}]}}
+
+        accepted = {
+            "repository-qualified": [pod(f"{repository}@{digest}")],
+            "bare digest": [pod(digest)],
+            "terminating predecessor": [
+                pod(f"{repository}@{digest}"),
+                pod(f"{repository}@sha256:" + "e" * 64, terminating=True),
+            ],
+        }
+        rejected = {
+            "one of two differs": [
+                pod(f"{repository}@{digest}"),
+                pod(f"{repository}@sha256:" + "e" * 64),
+            ],
+            "status missing": [{"metadata": {}, "status": {}}],
+        }
+
+        # when / then
+        for name, pods in accepted.items():
+            with self.subTest(name):
+                deployment.require_running_image_digest(pods, digest)
+        for name, pods in rejected.items():
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(deployment.DeploymentError, "image digest differs"),
+            ):
+                deployment.require_running_image_digest(pods, digest)
+
 
 if __name__ == "__main__":
     unittest.main()

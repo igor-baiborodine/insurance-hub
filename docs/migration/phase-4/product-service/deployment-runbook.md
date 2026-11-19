@@ -364,6 +364,17 @@ digest, role proof, schema/history, accepted catalog identity, gateway reads, Ne
 stable resource UIDs. Then run the guarded QA status and verification commands with the complete QA
 selection. Direct QA deployment, image load, and stop remain forbidden.
 
+Set `DEPLOY_IMAGE_DIGEST` to the digest the release workflow recorded for the reviewed release, the
+same value as `qa-product-api`'s `images[0].digest`. Status and verification reject a missing or
+malformed value before reading the cluster. Every running, non-terminating `product-api` Pod must
+report that digest as its `imageID`, either bare or repository-qualified (`<repository>@<digest>`):
+
+```sh
+export DEPLOY_IMAGE_DIGEST='sha256:<64-hex-release-digest>'
+make go-svc-deploy-status SVC_NAME=product
+make go-svc-deploy-verify SVC_NAME=product
+```
+
 ## Abort, stop, and restoration
 
 Abort on target/Cluster UID mismatch, incomplete role/Secret pairs, unexpected writer,
