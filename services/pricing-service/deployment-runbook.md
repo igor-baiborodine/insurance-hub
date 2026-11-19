@@ -137,6 +137,21 @@ Use the [Dashboard runbook](../dashboard-service/deployment-runbook.md) first fo
 image, Flux and transport troubleshooting. In local-dev, `make go-svc-stop SVC_NAME=pricing`
 with the same coordinates and image selection scales only the Go Deployment to zero.
 Redeploy the approved previous Go image by selecting its full source revision and tag and
-rerunning the direct deployment steps. In QA, use a reviewed Go-only desired-state correction
-through the shared Flux owner and observe the resulting revision. Java Pricing remains serving
-during either recovery.
+rerunning the direct deployment steps.
+
+If first activation in QA stalls the shared owner, prepare a reviewed recovery commit that removes
+`./pricing` from `k8s/overlays/qa/svc/kustomization.yaml` and restores
+`newTag: 0.0.0-unpublished` and `SERVICE_VERSION=git-000000000000` in the Go Pricing QA overlay.
+Keep `./pricing/legacy` in the parent. Run `make go-svc-deploy-check SVC_NAME=pricing` before
+publishing that correction. After Flux applies it, verify the applied revision and pruning.
+
+```bash
+kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc -o yaml
+kubectl --context qa-insurance-hub -n qa-svc get deployment qa-pricing-api --ignore-not-found
+kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
+  -l kubernetes.io/service-name=qa-pricing-api-legacy \
+  -o 'custom-columns=POD:.endpoints[*].targetRef.name,READY:.endpoints[*].conditions.ready'
+```
+
+Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
+absent, and the Java Pricing endpoint to remain ready.
