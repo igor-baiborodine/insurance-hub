@@ -458,6 +458,17 @@
       "releaseTargets": [
         "qa"
       ],
+      "administration": {
+        "assets": {
+          "migration": "services/pricing-service/internal/administration/migrations/00001_pricing.sql",
+          "catalog": "services/pricing-service/internal/administration/seeds/base.json"
+        },
+        "maxMigrationSeconds": 180,
+        "seedSeconds": 60,
+        "minimumJobReserveSeconds": 60,
+        "jobDeadlineSeconds": 300,
+        "migrationContainer": "migrate"
+      },
       "deploymentTargets": {
         "local-dev": {
           "mode": "direct",
@@ -465,6 +476,15 @@
           "namespace": "local-dev-all",
           "dataNamespace": "local-dev-all",
           "overlay": "k8s/overlays/local-dev/svc/pricing",
+          "initialization": {
+            "overlay": "k8s/overlays/local-dev/svc/pricing/administration",
+            "jobName": "local-dev-pricing-init",
+            "migrationTimeout": "120s",
+            "targetRevision": "1",
+            "credentialRevision": "1",
+            "attempt": 1,
+            "waitSeconds": 420
+          },
           "kindCluster": "local-dev-insurance-hub"
         },
         "qa": {
@@ -473,6 +493,15 @@
           "namespace": "qa-svc",
           "dataNamespace": "qa-data",
           "overlay": "k8s/overlays/qa/svc/pricing",
+          "initialization": {
+            "overlay": "k8s/overlays/qa/svc/pricing/administration",
+            "jobName": "qa-pricing-init",
+            "migrationTimeout": "120s",
+            "targetRevision": "1",
+            "credentialRevision": "1",
+            "attempt": 1,
+            "waitSeconds": 420
+          },
           "flux": {
             "namespace": "flux-system",
             "sourcePrefix": "qa-pricing-release",
@@ -482,8 +511,9 @@
             "sharedOwner": "qa-svc",
             "sharedPath": "./k8s/overlays/qa/svc",
             "branch": "main",
-            "activationKustomization": "k8s/overlays/qa/svc/kustomization.yaml",
-            "activationResource": "./pricing"
+            "initializationTimeout": "6m",
+            "apiTimeout": "5m",
+            "runtimeVersionVariable": "PRICING_SERVICE_VERSION"
           }
         }
       }

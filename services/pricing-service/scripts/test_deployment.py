@@ -15,7 +15,6 @@ from scripts.go.service.deployment import DeploymentError, apply
 
 import deployment as pricing
 
-QA = Path("k8s/overlays/qa/svc")
 SMOKE_LABEL = "insurance-hub.io/pricing-disposable"
 
 
@@ -27,7 +26,7 @@ def test_wrong_target_is_rejected_before_access(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(pricing, "run", lambda *_args, **_kwargs: pytest.fail("unexpected access"))
 
     # when / then
-    with pytest.raises(DeploymentError, match="coordinates"):
+    with pytest.raises(DeploymentError, match="DEPLOY_CONTEXT"):
         pricing.Target()
 
 
@@ -61,31 +60,46 @@ def test_local_egress_rejects_broad_dns() -> None:
         pricing.validate_render("local-dev", yaml.safe_dump_all(items.values()))
 
 
-def test_qa_refuses_placeholder_activation_and_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_qa_render_rejects_placeholder_release_identity() -> None:
     # given
     items = pricing.validate_render("qa", pricing.render("qa"))
-    items["ConfigMap"]["data"]["SERVICE_VERSION"] = pricing.PLACEHOLDER
     deployment = items["Deployment"]
     template = deployment["spec"]["template"]
+    items["ConfigMap"]["data"]["SERVICE_VERSION"] = pricing.PLACEHOLDER
     for metadata in (deployment["metadata"], template["metadata"]):
         metadata["labels"][pricing.VERSION_LABEL] = pricing.PLACEHOLDER
     template["spec"]["containers"][0]["image"] = (
         "ghcr.io/igor-baiborodine/insurance-hub/pricing-api:0.0.0-unpublished"
     )
-    monkeypatch.setattr(pricing, "render", lambda _environment: yaml.safe_dump_all(items.values()))
-    monkeypatch.setenv("DEPLOY_ENV", "qa")
-    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
-    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
-    monkeypatch.setenv("DEPLOY_IMAGE_SOURCE_REVISION", "a" * 40)
-    monkeypatch.delenv("DEPLOY_IMAGE_REF", raising=False)
 
     # when / then
-    with pytest.raises(DeploymentError, match="activation"):
-        pricing.qa_activation(["./pricing/legacy", "./pricing"], items)
-    with pytest.raises(DeploymentError, match="inactive or differs"):
-        pricing.Target().rendered()
+    with pytest.raises(DeploymentError, match="QA image and release version"):
+        pricing.validate_render("qa", yaml.safe_dump_all(items.values()))
+
+
+def test_qa_staging_keeps_go_out_of_shared_owner_and_suspends_old_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given
+    for relative in (
+        "k8s/overlays/qa/svc/kustomization.yaml",
+        "k8s/flux/qa/kustomization.yaml",
+        "k8s/flux/qa/releases/pricing/release.yaml",
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pricing.ROOT / relative, target)
+    monkeypatch.setattr(pricing, "ROOT", tmp_path)
+
+    # when
+    pricing.qa_release_ownership()
+
+    # then
+    shared = yaml.safe_load((tmp_path / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
+    shared["resources"].append("./pricing")
+    (tmp_path / "k8s/overlays/qa/svc/kustomization.yaml").write_text(yaml.safe_dump(shared))
+    with pytest.raises(DeploymentError, match="shared QA ownership"):
+        pricing.qa_release_ownership()
 
 
 @pytest.mark.parametrize("revision_matches", [True, False])
@@ -98,6 +112,7 @@ def test_qa_image_requires_published_digest_and_matching_oci_labels(
     monkeypatch.setenv("DEPLOY_ENV", "qa")
     monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
     monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setenv("DEPLOY_DATA_NS", "qa-data")
     monkeypatch.setenv("DEPLOY_IMAGE_SOURCE_REVISION", revision)
     monkeypatch.setenv("DEPLOY_IMAGE_DIGEST", digest)
     target = pricing.Target()
@@ -131,84 +146,64 @@ def test_qa_image_requires_published_digest_and_matching_oci_labels(
             pricing.image_id(target, f"{registry}:1.0.0")
 
 
-def test_qa_requires_exact_flux_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resource_snapshot_rejects_secret_bearing_or_unknown_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # given
-    revision = "a" * 40
-    monkeypatch.setenv("DEPLOY_ENV", "qa")
-    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
-    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
-    monkeypatch.setenv("DEPLOY_SOURCE_REVISION", revision)
-    target = pricing.Target()
-    items = pricing.validate_render("qa", pricing.render("qa"))
-    entries = [
-        {"id": "qa-svc_qa-pricing-api_apps_Deployment", "v": "v1"},
-        {"id": "qa-svc_qa-pricing-api_networking.k8s.io_NetworkPolicy", "v": "v1"},
-        {"id": "qa-svc_qa-pricing-config__ConfigMap", "v": "v1"},
-    ]
+    safe = {
+        "roles": [],
+        "memberships": [],
+        "target": None,
+        "databaseCompatible": False,
+        "credentials": {
+            "go_pricing_reader": "missing",
+            "go_pricing_migrator": "missing",
+            "go_pricing_seeder": "missing",
+        },
+        "markerMatchesEnrollment": False,
+    }
+    monkeypatch.setattr(pricing, "resource_action", lambda *_args: json.dumps(safe))
 
-    def owner(*args: str) -> dict:
-        assert args == ("get", "kustomization", "qa-svc", "-n", "flux-system")
-        return {
-            "status": {
-                "conditions": [{"type": "Ready", "status": "True"}],
-                "lastAppliedRevision": f"main@sha1:{revision}",
-                "inventory": {"entries": entries},
-            }
-        }
+    # when
+    assert pricing.resource_snapshot(object()) == safe
 
-    monkeypatch.setattr(target, "json", owner)
-
-    # when / then
-    target.verify_flux_inventory(items)
-    entries.pop()
-    with pytest.raises(DeploymentError, match="does not own"):
-        target.verify_flux_inventory(items)
+    # then
+    monkeypatch.setattr(
+        pricing,
+        "resource_action",
+        lambda *_args: json.dumps({**safe, "database-url": "synthetic-secret"}),
+    )
+    with pytest.raises(DeploymentError, match="unexpected state"):
+        pricing.resource_snapshot(object())
 
 
-def test_release_prepares_published_version_and_activation(
+def test_release_prepares_initialization_before_stable_api(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # given
     source = pricing.ROOT
-    for relative in ("k8s/apps", "k8s/overlays/qa"):
+    for relative in ("k8s/apps", "k8s/overlays/qa", "k8s/flux/qa/releases/pricing"):
         shutil.copytree(source / relative, tmp_path / relative)
-    for relative in ("scripts/go/service/catalog.json", "services/pricing-service/Dockerfile"):
+    for relative in (
+        "scripts/go/service/catalog.json",
+        "services/pricing-service/Dockerfile",
+        "services/pricing-service/internal/administration/migrations/00001_pricing.sql",
+        "services/pricing-service/internal/administration/seeds/base.json",
+    ):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / relative, target)
     repository = "igor-baiborodine/insurance-hub"
     sha = "0123456789ab" + "c" * 28
-    parent = tmp_path / QA / "kustomization.yaml"
-    aggregate = yaml.safe_load(parent.read_text())
-    aggregate["resources"] = [
-        resource for resource in aggregate["resources"] if resource != "./pricing"
-    ]
-    parent.write_text(yaml.safe_dump(aggregate))
-    previous = parent.read_bytes()
-
-    def inventory() -> dict:
-        rendered = pricing.run(["kubectl", "kustomize", str(parent.parent)])
-        objects = list(yaml.safe_load_all(rendered))
-        result = {
-            (
-                item["apiVersion"],
-                item["kind"],
-                item["metadata"].get("namespace", ""),
-                item["metadata"]["name"],
-            ): item
-            for item in objects
-        }
-        assert len(result) == len(objects)
-        return result
-
-    before = inventory()
+    bundle = tmp_path / "k8s/flux/qa/releases/pricing/release.yaml"
+    before = bundle.read_bytes()
     selection = release.select_service(
         ["services/pricing-service/Dockerfile"], tmp_path, repository
     )
     assert selection.service == "pricing"
     with pytest.raises(release.ReleaseSelectionError, match="digest"):
         release.prepare_release(tmp_path, "pricing", repository, "1.0.0", sha, "unpublished")
-    assert parent.read_bytes() == previous
+    assert bundle.read_bytes() == before
 
     # when
     paths = release.prepare_release(
@@ -216,23 +211,24 @@ def test_release_prepares_published_version_and_activation(
     )
 
     # then
-    assert set(paths) == {parent, tmp_path / QA / "pricing/kustomization.yaml"}
-    monkeypatch.setattr(pricing, "ROOT", tmp_path)
-    items = pricing.validate_render("qa", pricing.render("qa"))
-    assert items["ConfigMap"]["data"]["SERVICE_VERSION"] == "git-0123456789ab"
-    assert items["Deployment"]["spec"]["template"]["spec"]["containers"][0]["image"] == (
-        "ghcr.io/igor-baiborodine/insurance-hub/pricing-api:1.0.0"
+    assert paths == [bundle]
+    retained_source, retained_init, source_owner, initialize, api = list(
+        yaml.safe_load_all(bundle.read_text())
     )
-    pricing.qa_activation(yaml.safe_load(parent.read_text())["resources"], items)
-    after = inventory()
-    added = {key: item for key, item in after.items() if key not in before}
-    assert {key: after[key] for key in before} == before
-    assert {key[3] for key in added} == {
-        "qa-pricing-api",
-        "qa-pricing-config",
-    }
-    assert len(added) == 3
-    assert {item["kind"]: item for item in added.values()} == items
+    assert (
+        retained_source["metadata"]["annotations"]["insurance-hub.io/staged-predecessor"] == "true"
+    )
+    assert retained_init["spec"]["suspend"] is True
+    assert source_owner["spec"]["ref"] == {"commit": sha}
+    assert initialize["spec"]["path"].endswith("/pricing/administration")
+    assert initialize["spec"]["postBuild"]["substitute"] == {"MIGRATION_TIMEOUT": "120s"}
+    assert api["spec"]["dependsOn"] == [{"name": initialize["metadata"]["name"]}]
+    assert api["spec"]["postBuild"]["substitute"] == {"PRICING_SERVICE_VERSION": "git-0123456789ab"}
+    assert api["spec"]["images"][0]["digest"] == "sha256:" + "d" * 64
+    monkeypatch.setattr(pricing, "ROOT", tmp_path)
+    rendered = pricing.render("qa").replace("${PRICING_SERVICE_VERSION}", "git-0123456789ab")
+    items = pricing.validate_render("qa", rendered)
+    assert items["ConfigMap"]["data"]["SERVICE_VERSION"] == "git-0123456789ab"
 
 
 def test_denial_cleanup_preserves_primary_error(
@@ -242,6 +238,7 @@ def test_denial_cleanup_preserves_primary_error(
     monkeypatch.setenv("DEPLOY_ENV", "local-dev")
     monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
     monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    monkeypatch.setenv("DEPLOY_DATA_NS", "local-dev-all")
     target = pricing.Target()
     reads = iter(({}, {"metadata": {"labels": {}}}))
 
@@ -276,10 +273,12 @@ def test_stop_uses_remaining_poll_budget(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("DEPLOY_ENV", "local-dev")
     monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
     monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    monkeypatch.setenv("DEPLOY_DATA_NS", "local-dev-all")
     target = pricing.Target()
     time_values = iter((100.0, 185.0))
     monkeypatch.setattr(pricing.time, "monotonic", lambda: next(time_values))
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(pricing, "resource_snapshot", lambda *_args: {"safe": True})
     scale_timeouts: list[float] = []
     poll_timeouts: list[float] = []
 
@@ -308,6 +307,7 @@ def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("DEPLOY_ENV", "local-dev")
     monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
     monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    monkeypatch.setenv("DEPLOY_DATA_NS", "local-dev-all")
     target = pricing.Target()
     require = pricing.require
     require(

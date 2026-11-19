@@ -18,4 +18,11 @@ configMapGenerator:
       - HTTP_ADDR=127.0.0.1:8080
       - GRPC_ADDR=127.0.0.1:9090
       - HEALTH_ADDR=0.0.0.0:8081
+      - DB_MAX_CONNS=8
+      - DB_CONNECT_TIMEOUT=3s
+      - DB_ACQUIRE_TIMEOUT=2s
+      - DB_QUERY_TIMEOUT=5s
+      - STARTUP_TIMEOUT=10s
+      - REQUEST_TIMEOUT=8s
+      - PROBE_TIMEOUT=2s
       - OTEL_ENABLED=false

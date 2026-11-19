@@ -1,0 +1,77 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: qa-pricing-release-bdea85438d7d4494
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
+    insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
+    insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+    insurance-hub.io/staged-predecessor: "true"
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: eef4a83c272ee478fec1d05920e59a1898382383
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-pricing-init-bdea85438d7d4494-a1
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
+    insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
+    insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+    insurance-hub.io/staged-predecessor: "true"
+spec:
+  suspend: true
+  interval: 5m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-pricing-release-bdea85438d7d4494
+  path: ./k8s/overlays/qa/svc/pricing/administration
+  images:
+    - name: insurance-hub-pricing-api
+      newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+      digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+  retryInterval: 1m
+  nameSuffix: -bdea85438d7d4494-a1
+  postBuild:
+    substitute:
+      MIGRATION_TIMEOUT: 120s
+  healthChecks:
+    - apiVersion: batch/v1
+      kind: Job
+      name: qa-pricing-init-bdea85438d7d4494-a1
+      namespace: qa-svc
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-pricing-api
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: bdea85438d7d4494d24a299011feaee3159f119bbfcbdff8bdf01cc6eca98a5a
+    insurance-hub.io/source-revision: eef4a83c272ee478fec1d05920e59a1898382383
+    insurance-hub.io/image-digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660
+    insurance-hub.io/staged-predecessor: "true"
+spec:
+  interval: 5m
+  timeout: 5m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-pricing-release-bdea85438d7d4494
+  path: ./k8s/overlays/qa/svc/pricing
+  images:
+    - name: insurance-hub-pricing-api
+      newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+      digest: sha256:6e6f8e0712c14e735c3486704a8609802aa73a2c57116d046169a6e2e0f16660

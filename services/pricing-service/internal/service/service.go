@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
@@ -25,6 +26,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/telemetry"
 )
 
@@ -64,6 +66,8 @@ type gatewayConnection interface {
 }
 
 type dependencies struct {
+	openPool       func(context.Context, config.Database) (*pgxpool.Pool, error)
+	checkDatabase  func(context.Context, *pgxpool.Pool, time.Duration, time.Duration) error
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
@@ -77,7 +81,9 @@ type dependencies struct {
 
 func productionDependencies() dependencies {
 	return dependencies{
-		listen: net.Listen,
+		openPool:      postgres.OpenPool,
+		checkDatabase: postgres.CheckReadAccess,
+		listen:        net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
@@ -129,6 +135,7 @@ func newGatewayConnection(
 }
 
 type runningService struct {
+	pool               *pgxpool.Pool
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -155,8 +162,20 @@ func run(
 		return errors.New("run service: shutdown budgets must be positive and reserved")
 	}
 
+	if settings.StartupTimeout <= 0 {
+		return errors.New("run service: startup timeout must be positive")
+	}
+	if settings.Database.URL.Value() == "" && settings.Identity.Environment != "" &&
+		settings.Identity.Environment != "development" {
+		return errors.New(
+			"PRICING_DATABASE_URL is required for the deployed Pricing reader",
+		)
+	}
+	startupCtx, cancelStartup := context.WithTimeout(ctx, settings.StartupTimeout)
+	defer cancelStartup()
+
 	runtime := &runningService{}
-	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
+	provider, err := deps.newTelemetry(startupCtx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
 	}
@@ -166,6 +185,26 @@ func run(
 			failure,
 			runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 		)
+	}
+	checkDatabase := func(ctx context.Context) error {
+		if runtime.pool == nil {
+			return nil
+		}
+		return deps.checkDatabase(
+			ctx,
+			runtime.pool,
+			settings.Database.AcquireTimeout,
+			settings.Database.QueryTimeout,
+		)
+	}
+	if settings.Database.URL.Value() != "" {
+		runtime.pool, err = deps.openPool(startupCtx, settings.Database)
+		if err != nil {
+			return fail(fmt.Errorf("run service: open Pricing database: %w", err))
+		}
+		if err := checkDatabase(startupCtx); err != nil {
+			return fail(fmt.Errorf("run service: verify Pricing database: %w", err))
+		}
 	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
 	if err != nil {
@@ -213,17 +252,20 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	readyContext, cancelReady := context.WithTimeout(ctx, settings.ProbeTimeout)
+	readyContext, cancelReady := context.WithTimeout(startupCtx, settings.ProbeTimeout)
 	err = waitForConnection(readyContext, runtime.connection)
+	if err == nil {
+		err = checkDatabase(readyContext)
+	}
 	cancelReady()
 	if err != nil {
-		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
+		return fail(fmt.Errorf("run service: dependency not ready: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
+	state, err := health.NewState(settings.ProbeTimeout, func(ctx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return nil
+		return checkDatabase(ctx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -424,6 +466,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	if runtime.pool != nil {
+		runtime.pool.Close()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

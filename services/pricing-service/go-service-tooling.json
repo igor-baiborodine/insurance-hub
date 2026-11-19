@@ -63,6 +63,18 @@
         "output": "/out/pricing-service",
         "destination": "/pricing-service",
         "mode": "0555"
+      },
+      {
+        "package": "./cmd/migrate",
+        "output": "/out/pricing-migrate",
+        "destination": "/pricing-migrate",
+        "mode": "0555"
+      },
+      {
+        "package": "./cmd/seed",
+        "output": "/out/pricing-seed",
+        "destination": "/pricing-seed",
+        "mode": "0555"
       }
     ],
     "runtimeCopies": [],
@@ -82,12 +94,25 @@
       "generatedPath": "gen/openapiv2/pricing/v1/example_service.swagger.json",
       "contractPath": "testdata/http-contract.json"
     },
-    "dependencies": [],
+    "dependencies": [
+      {
+        "name": "postgres",
+        "kind": "postgres",
+        "image": "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
+        "ports": [
+          5432
+        ]
+      }
+    ],
     "deployment": {
       "portForwardSeconds": 30
     },
     "administration": {
-      "transports": [],
+      "transports": [
+        "https",
+        "kubectl",
+        "stdin"
+      ],
       "secretEnvironment": []
     }
   }

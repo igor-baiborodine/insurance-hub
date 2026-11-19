@@ -38,6 +38,25 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/gateway"
 )
 
+func TestRun_RejectsDeploymentWithoutReaderBeforeOpeningListeners(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.Identity.Environment = "qa"
+	deps := productionDependencies()
+	deps.listen = func(string, string) (net.Listener, error) {
+		t.Fatal("service opened a listener without reader credentials")
+		return nil, nil
+	}
+
+	// when
+	err := run(t.Context(), settings, discardLogger(), deps)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "PRICING_DATABASE_URL is required") {
+		t.Fatalf("expected missing reader refusal, got %v", err)
+	}
+}
+
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
 	// given
 	settings := testConfig(t)
@@ -324,7 +343,7 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	// when
 	err = run(context.Background(), settings, discardLogger(), deps)
 	// then
-	if err == nil || !strings.Contains(err.Error(), "gateway connection not ready") {
+	if err == nil || !strings.Contains(err.Error(), "dependency not ready") {
 		t.Fatalf("run error = %v", err)
 	}
 	if managementCreated {
@@ -940,6 +959,7 @@ func testConfig(t *testing.T) config.Config {
 		return address
 	}
 	return config.Config{
+		StartupTimeout: 3 * time.Second,
 		Runtime: kitconfig.Runtime{
 			RequestTimeout:  500 * time.Millisecond,
 			ProbeTimeout:    500 * time.Millisecond,

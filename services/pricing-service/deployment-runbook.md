@@ -6,6 +6,7 @@
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke and recovery](#private-smoke-and-recovery)
+  - [PostgreSQL resource administration](#postgresql-resource-administration)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -15,12 +16,13 @@ Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Java 
 its environment-specific `pricing-api-legacy:80` upstream. Go Pricing serves only the bootstrap
 Echo. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
 Operators use a loopback-bound Kubernetes API port-forward. The foundation has no Kubernetes
-Service, ingress route, workload token or business credentials.
+Service, ingress route or workload token. The API receives only the Pricing reader Secret and
+its CA; migration and seed credentials are mounted only into the retained administration Job.
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
 | local-dev | `kind-local-dev-insurance-hub` | `local-dev-all` | Guarded direct deployment into Kind cluster `local-dev-insurance-hub` |
-| QA | `qa-insurance-hub` | `qa-svc` | `flux-system/qa-svc` reconciles `./k8s/overlays/qa/svc` from `flux-system/insurance-hub` on `main` |
+| QA | `qa-insurance-hub` | `qa-svc` | `flux-system/qa-pricing-api` owns the reviewed release after its release-specific initialization succeeds. |
 
 ## Candidate checks
 
@@ -32,10 +34,12 @@ make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=qa
 ```
 
-The initial QA overlay contains an inactive release placeholder. The parent Kustomization
-includes only `./pricing/legacy` until release preparation adds `./pricing`. An activated
-placeholder fails the check. Local-dev requires an explicit, source-matched image to perform
-operations. For disposable qualification, build a local image as below, then run
+The shared QA owner includes only `./pricing/legacy`. The staged Pricing release bundle keeps the
+previous API image and suspends predecessor initialization, so merging these manifests cannot run
+new commands against the old image. Release preparation creates an immutable source, a
+migration-before-seed prerequisite, and the stable API owner in one reviewed bundle. Local-dev
+requires an explicit, source-matched image to perform operations. For disposable qualification,
+build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=pricing` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
 
@@ -56,7 +60,8 @@ the version must equal `git-${DEPLOY_IMAGE_SOURCE_REVISION:0:12}`. With local-de
 authorized, select the configured context and run the guarded operations.
 
 ```bash
-export DEPLOY_ENV=local-dev DEPLOY_CONTEXT=kind-local-dev-insurance-hub DEPLOY_SVC_NS=local-dev-all
+export DEPLOY_ENV=local-dev DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all DEPLOY_DATA_NS=local-dev-all
 kubectl config use-context "$DEPLOY_CONTEXT"
 make go-svc-deploy-preflight SVC_NAME=pricing
 make go-svc-image-load SVC_NAME=pricing
@@ -69,9 +74,12 @@ make go-svc-deploy-verify SVC_NAME=pricing
 
 The [release workflow](../../.github/workflows/go-release-svc.yml) builds once, pushes the
 semantic and source tags, and resolves the registry digest before calling
-`go-svc-release-prepare`. Release preparation records the semantic tag and source-derived
-runtime version and adds `./pricing` to the parent QA Kustomization in the same release
-commit. Keep image source and Flux configuration commits separate.
+`go-svc-release-prepare`. Release preparation records the immutable digest and source-derived
+runtime version in `k8s/flux/qa/releases/pricing/release.yaml`. Its initialization owner runs the
+target-guarded migrator first and seeder second with `backoffLimit: 0`, bounded deadlines and
+retained failure evidence. Inspect a failed Job and prepare an explicit next attempt; do not delete
+or automatically retry it. The stable API owner depends on that exact successful attempt. Keep
+image source and Flux configuration commits separate.
 
 From the checkout of the applied release configuration, set the full image source and applied
 Flux commits from the workflow and Flux records. Set `RELEASE_VERSION` to the published
@@ -83,16 +91,18 @@ semantic version. Set `DEPLOY_IMAGE_DIGEST` to the digest recorded by the releas
 : "${RELEASE_VERSION:?set the published semantic version}"
 : "${DEPLOY_IMAGE_DIGEST:?set the immutable digest recorded by the release workflow}"
 export DEPLOY_IMAGE_SOURCE_REVISION DEPLOY_SOURCE_REVISION DEPLOY_IMAGE_DIGEST
-export DEPLOY_ENV=qa DEPLOY_CONTEXT=qa-insurance-hub DEPLOY_SVC_NS=qa-svc
-unset DEPLOY_IMAGE_REF
+export DEPLOY_ENV=qa DEPLOY_CONTEXT=qa-insurance-hub
+export DEPLOY_SVC_NS=qa-svc DEPLOY_DATA_NS=qa-data
 image=ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+export DEPLOY_IMAGE_REF="$image@$DEPLOY_IMAGE_DIGEST"
 observed_digest="$(docker buildx imagetools inspect "$image:$RELEASE_VERSION" \
   --format '{{json .Manifest.Digest}}' | tr -d '"')"
 test "$observed_digest" = "$DEPLOY_IMAGE_DIGEST"
 docker pull "$image@$DEPLOY_IMAGE_DIGEST"
 kubectl config use-context "$DEPLOY_CONTEXT"
-kubectl --context "$DEPLOY_CONTEXT" -n flux-system get gitrepository insurance-hub
-kubectl --context "$DEPLOY_CONTEXT" -n flux-system get kustomization qa-svc
+kubectl --context "$DEPLOY_CONTEXT" -n flux-system get gitrepository -l \
+  insurance-hub.io/release-identity
+kubectl --context "$DEPLOY_CONTEXT" -n flux-system get kustomization qa-pricing-api
 make go-svc-deploy-status SVC_NAME=pricing
 make go-svc-deploy-verify SVC_NAME=pricing
 ```
@@ -128,8 +138,10 @@ curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz
 ```
 
-Local-dev permits only TCP and UDP 53 to kube-dns and disables telemetry. QA additionally
-permits OTLP/gRPC to the selected Alloy Pods. Inspect the six identity fields in the Pricing startup record and verify corresponding
+Local-dev permits only TCP and UDP 53 to kube-dns and PostgreSQL 5432 to the selected local Pricing
+cluster. QA permits the same exact database path plus OTLP/gRPC to the selected Alloy Pods. The API
+mounts only `database-url` and `ca.crt` from the environment reader Secret. Inspect the six identity
+fields in the Pricing startup record and verify corresponding
 telemetry by `service.name=pricing-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
@@ -139,19 +151,57 @@ with the same coordinates and image selection scales only the Go Deployment to z
 Redeploy the approved previous Go image by selecting its full source revision and tag and
 rerunning the direct deployment steps.
 
-If first activation in QA stalls the shared owner, prepare a reviewed recovery commit that removes
-`./pricing` from `k8s/overlays/qa/svc/kustomization.yaml` and restores
-`newTag: 0.0.0-unpublished` and `SERVICE_VERSION=git-000000000000` in the Go Pricing QA overlay.
-Keep `./pricing/legacy` in the parent. Run `make go-svc-deploy-check SVC_NAME=pricing` before
-publishing that correction. After Flux applies it, verify the applied revision and pruning.
+If initialization fails, retain the Job and inspect its safe status and logs. Correct the cause,
+increment the reviewed release attempt, and publish a new bundle; never point the stable API owner
+at an incomplete attempt. If API reconciliation fails after successful initialization, restore the
+previous reviewed Pricing release bundle. Keep `./pricing/legacy` in the shared parent and run
+`make go-svc-deploy-check SVC_NAME=pricing` before publishing the correction.
 
 ```bash
-kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc -o yaml
+kubectl --context qa-insurance-hub -n flux-system get kustomization qa-pricing-api -o yaml
 kubectl --context qa-insurance-hub -n qa-svc get deployment qa-pricing-api --ignore-not-found
 kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
   -l kubernetes.io/service-name=qa-pricing-api-legacy \
   -o 'custom-columns=POD:.endpoints[*].targetRef.name,READY:.endpoints[*].conditions.ready'
 ```
 
-Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
-absent, and the Java Pricing endpoint to remain ready.
+Expect the release owner to show the reviewed source and digest. Java Pricing remains selected only
+by `qa-pricing-api-legacy`, so Policy's upstream is unchanged throughout staging and rollback.
+
+## PostgreSQL resource administration
+
+Set all target variables explicitly before running a resource command. Use the same context
+as the selected target.
+
+| Variable | local-dev | QA |
+| --- | --- | --- |
+| `PRICING_RESOURCE_ENV` | `local-dev` | `qa` |
+| `PRICING_RESOURCE_CONTEXT` | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
+| `PRICING_RESOURCE_DATA_NS` | `local-dev-all` | `qa-data` |
+| `PRICING_RESOURCE_SVC_NS` | `local-dev-all` | `qa-svc` |
+| `PRICING_RESOURCE_CLUSTER` | `local-dev-postgres-pricing` | `qa-postgres-pricing` |
+| `PRICING_RESOURCE_READER_SECRET` | `local-dev-postgres-pricing-reader-creds` | `qa-postgres-pricing-reader-creds` |
+| `PRICING_RESOURCE_DB_HOST` | `local-dev-postgres-pricing-rw.local-dev-all.svc.cluster.local` | `qa-postgres-pricing-rw.qa-data.svc.cluster.local` |
+
+From the repository root, run `make -C services/pricing-service resource-inspect`
+to check roles, enrollment and Secret presence. For an authorized change use
+`resource-ensure` with `PRICING_RESOURCE_CONFIRM=ensure-<environment>-pricing-resources`.
+Ensure publishes missing managed Secrets before enabling roles. Retry using the same Secrets
+after a failure. An existing role without a recoverable Secret needs inspection before retry.
+Use `resource-verify` to verify the enrolled role identities, CA, and denial of privileged
+SQL using the workload Secrets. Effective checks use a temporary loopback port-forward and
+local `psql`. Probe transactions roll back.
+
+Set `PRICING_DATABASE_URL` from the reader Secret's `database-url` key, following Product's
+`secretKeyRef` pattern. Mount the reader CA at `/etc/pricing-service/postgres/ca.crt`.
+Startup recognizes only the Pricing reader role, verifies PostgreSQL TLS and tariff reads, and
+uses a read-only pool. The migrator and seeder use separate credentials and remain explicit
+commands. Kubernetes startup requires the reader dependency; local standalone development may
+omit it.
+
+The reader uses the same defaults as Product. `DB_MAX_CONNS` (8) bounds the pool,
+`DB_CONNECT_TIMEOUT` (3s) bounds connection setup, `DB_ACQUIRE_TIMEOUT` (2s) bounds pool
+acquisition, and `DB_QUERY_TIMEOUT` (5s) bounds the query. When the reader is configured,
+both acquisition and probe timeouts must fit within the query budget, which must fit
+within `REQUEST_TIMEOUT`. Connection setup must fit within `STARTUP_TIMEOUT` (10s),
+which also bounds gateway startup.
