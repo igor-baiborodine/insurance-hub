@@ -65,3 +65,30 @@ func RunMigration(
 	}
 	return status, nil
 }
+
+// RunSeed opens and closes the connection for the enrolled seeder operation.
+func RunSeed(
+	ctx context.Context, environment, contextName, targetPath, urlPath, caPath string,
+) (result administration.SeedResult, resultErr error) {
+	target, err := administration.ReadTarget(targetPath, environment, contextName)
+	if err != nil {
+		return result, err
+	}
+	databaseURL, ca, err := target.SeedConnection(urlPath, caPath)
+	if err != nil {
+		return result, err
+	}
+	db, err := postgres.OpenSeedDatabase(ctx, databaseURL, target.Host, ca)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			resultErr = errors.Join(
+				resultErr,
+				errors.New("close Pricing seed database failed"),
+			)
+		}
+	}()
+	return administration.Seed(ctx, db, target)
+}

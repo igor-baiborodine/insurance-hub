@@ -15,27 +15,33 @@ import (
 )
 
 func TestOpenMigrationDatabase_RejectsUntrustedInputs(t *testing.T) {
-	// Given bad trust material, when the adapter opens, then it rejects it before dialing.
+	// when
 	db, err := OpenMigrationDatabase(t.Context(), "", "", nil)
-	if db != nil || err == nil || err.Error() != "selected CA contains no certificates" {
+	// then
+	if db != nil || err == nil || !errors.Is(err, errInvalidCA) {
 		t.Fatalf("expected missing CA error, got %v", err)
 	}
 
+	// given
 	databaseURL, ca := migrationConnectionFixture(t)
+	// when
 	db, err = OpenMigrationDatabase(t.Context(), databaseURL, "different-host", ca)
+	// then
 	if db != nil || err == nil ||
-		err.Error() != "invalid Pricing PostgreSQL connection configuration" {
+		!errors.Is(err, errInvalidConnection) {
 		t.Fatalf("expected enrollment mismatch error, got %v", err)
 	}
 }
 
 func TestOpenMigrationDatabase_HonorsCancellation(t *testing.T) {
-	// Given valid inputs and a canceled context, when the connection opens, then it stops.
+	// given
 	databaseURL, ca := migrationConnectionFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
+	// when
 	db, err := OpenMigrationDatabase(ctx, databaseURL, "127.0.0.1", ca)
+	// then
 	if db != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected a canceled connection, got %v", err)
 	}

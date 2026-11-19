@@ -1,0 +1,1 @@
+REVOKE pricing FROM go_pricing_migrator

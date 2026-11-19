@@ -54,7 +54,7 @@ GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
-BUILD_EXECUTABLES := server migrate
+BUILD_EXECUTABLES := server migrate seed
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
@@ -280,5 +280,5 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
 		'  make run              Start the service with environment configuration' \
-		'  make build            Compile the server and standalone migrator' \
+		'  make build            Compile the server, migrator and seeder' \
 		'  make test-integration Run service composition and disposable PostgreSQL smoke tests'

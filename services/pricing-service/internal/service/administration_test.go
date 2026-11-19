@@ -2,20 +2,22 @@ package service
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestRunMigration_RejectsInvalidOperationAndMissingEnrollment(t *testing.T) {
-	// Given invalid operation or missing enrollment, the service rejects it before opening PostgreSQL.
+	// given
 	missing := filepath.Join(t.TempDir(), "target.json")
 	for _, tc := range []struct {
-		operation string
-		want      string
+		name, operation string
+		want            string
 	}{
-		{"unsupported", "operation must be migrate, status or version"},
-		{MigrationOperationStatus, "target enrollment must be a protected regular file"},
+		{"unsupported operation", "unsupported", "operation must be migrate, status or version"},
+		{"missing enrollment", MigrationOperationStatus, "target enrollment must be a protected regular file"},
 	} {
-		t.Run(tc.operation, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			// when
 			state, err := RunMigration(
 				t.Context(),
 				tc.operation,
@@ -25,7 +27,8 @@ func TestRunMigration_RejectsInvalidOperationAndMissingEnrollment(t *testing.T) 
 				"",
 				"",
 			)
-			if state != "" || err == nil || err.Error() != tc.want {
+			// then
+			if state != "" || err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf(
 					"expected %q and empty state, got %v and %q",
 					tc.want,

@@ -28,7 +28,7 @@ func Migrate(ctx context.Context, db *sql.DB, target Target) error {
 		RunTx: func(ctx context.Context, tx *sql.Tx) error {
 			if _, err := tx.ExecContext(
 				ctx,
-				"SELECT pg_advisory_xact_lock($1)",
+				acquireAdministrationLockQuery,
 				administrationLockID,
 			); err != nil {
 				return databaseError("acquire Pricing administration lock", err)
@@ -42,7 +42,7 @@ func Migrate(ctx context.Context, db *sql.DB, target Target) error {
 			}
 			if _, err := tx.ExecContext(
 				ctx,
-				"INSERT INTO public.pricing_schema_version (version_id) VALUES ($1)",
+				recordMigrationVersionQuery,
 				schemaVersion,
 			); err != nil {
 				return databaseError("record Pricing schema version", err)

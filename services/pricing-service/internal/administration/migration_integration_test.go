@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/url"
@@ -34,27 +35,17 @@ const (
 )
 
 func TestRun_PostgreSQLMigration(t *testing.T) {
-	// Given one isolated Pricing database with platform-owned enrollment and TLS.
+	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	admin, address, ca := disposablePostgres(t, ctx)
 	password := rand.Text()
-	execSQL(t, ctx, admin, `
-		CREATE ROLE pricing NOLOGIN;
-		ALTER DATABASE pricing OWNER TO pricing;
-		CREATE ROLE go_pricing_migrator LOGIN NOINHERIT PASSWORD '`+password+`';
-		GRANT pricing TO go_pricing_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
-		CREATE SCHEMA pricing_admin AUTHORIZATION postgres;
-		CREATE TABLE pricing_admin.target_identity (
-			singleton boolean PRIMARY KEY CHECK (singleton),
-			environment text NOT NULL, instance_id uuid NOT NULL,
-			cluster_uid text NOT NULL, seed_allowed boolean NOT NULL
-		);
-		INSERT INTO pricing_admin.target_identity
-		VALUES (true, 'disposable', '`+instanceID+`', '`+clusterUID+`', true);
-		GRANT USAGE ON SCHEMA pricing_admin TO pricing, go_pricing_migrator;
-		GRANT SELECT ON pricing_admin.target_identity TO pricing, go_pricing_migrator;
-	`)
+	execSQL(
+		t,
+		ctx,
+		admin,
+		fmt.Sprintf(setupMigrationFixtureQuery, password, instanceID, clusterUID),
+	)
 
 	targetPath := filepath.Join(t.TempDir(), "target.json")
 	target := map[string]any{
@@ -88,7 +79,7 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 	}.Encode()
 	writeFixture(t, credentialPath, []byte(migratorURL.String()))
 
-	call := func(operation, want string) {
+	call := func(t *testing.T, operation, want string, refusal ...string) {
 		t.Helper()
 		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
@@ -102,8 +93,16 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 			ca,
 		)
 		if want == "" {
-			if err == nil || output != "" || strings.Contains(err.Error(), password) {
-				t.Fatal("expected a redacted refusal and empty output")
+			if len(refusal) != 1 || err == nil || output != "" ||
+				!strings.Contains(
+					err.Error(),
+					refusal[0],
+				) || strings.Contains(err.Error(), password) {
+				t.Fatalf(
+					"expected redacted %s refusal matching %v and empty output",
+					operation,
+					refusal,
+				)
 			}
 			return
 		}
@@ -112,13 +111,10 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 		}
 	}
 
-	// When status inspects an empty database, no catalog objects appear.
 	snapshot := func() string {
 		t.Helper()
 		var state string
-		err := admin.QueryRow(ctx, `SELECT coalesce(string_agg(c.relname || ':' || c.relkind::text,
-			',' ORDER BY c.relname), '') FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public'`).
+		err := admin.QueryRow(ctx, snapshotCatalogQuery).
 			Scan(&state)
 		if err != nil {
 			t.Fatal(err)
@@ -126,89 +122,121 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 		return state
 	}
 	before := snapshot()
-	call("status", "uninitialized")
-	call("version", "uninitialized")
+	// when
+	call(t, "status", "uninitialized")
+	call(t, "version", "uninitialized")
+	// then
 	if snapshot() != before {
 		t.Fatal("status changed the fresh schema or initialized migration history")
 	}
 
-	// Then an untrusted certificate, wrong marker and wrong role all refuse mutation.
-	trustedCA, err := os.ReadFile(ca)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeCertificate(t, ca, filepath.Join(t.TempDir(), "unused-key.pem"))
-	call("migrate", "")
-	writeFixture(t, ca, trustedCA)
-	target["instanceID"] = clusterUID
-	writeTarget()
-	call("migrate", "")
-	target["instanceID"] = instanceID
-	writeTarget()
-	execSQL(t, ctx, admin, "REVOKE pricing FROM go_pricing_migrator")
-	call("migrate", "")
-	execSQL(t, ctx, admin,
-		"GRANT pricing TO go_pricing_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE")
-	if snapshot() != before {
-		t.Fatal("a refused migration changed the schema or history")
+	checkRefusal := func(t *testing.T, want string) {
+		t.Helper()
+		// given
+		prior := snapshot()
+		// when
+		call(t, "migrate", "", want)
+		// then
+		if snapshot() != prior {
+			t.Fatal("refused migration changed the catalog")
+		}
 	}
 
-	call("migrate", "version=1")
-	call("version", "1")
-	call("status", "version=1")
+	t.Run("untrusted certificate", func(t *testing.T) {
+		// given
+		trustedCA, err := os.ReadFile(ca)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { writeFixture(t, ca, trustedCA) })
+		writeCertificate(t, ca, filepath.Join(t.TempDir(), "unused-key.pem"))
+
+		checkRefusal(t, "connect to enrolled Pricing database failed")
+	})
+	t.Run("wrong target marker", func(t *testing.T) {
+		// given
+		t.Cleanup(func() {
+			target["instanceID"] = instanceID
+			writeTarget()
+		})
+		target["instanceID"] = clusterUID
+		writeTarget()
+
+		checkRefusal(t, "target marker differs from enrollment")
+	})
+	t.Run("missing owner membership", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { execSQL(t, ctx, admin, grantMigratorQuery) })
+		execSQL(t, ctx, admin, revokeMigratorQuery)
+
+		checkRefusal(t, "cannot assume Pricing database owner role")
+	})
+
+	// when
+	call(t, "migrate", "version=1")
+	// then
+	call(t, "version", "1")
+	call(t, "status", "version=1")
+	t.Run("invalid migration history schema", func(t *testing.T) {
+		// given
+		execSQL(t, ctx, admin, dropHistoryTimestampRequiredQuery)
+		t.Cleanup(func() { execSQL(t, ctx, admin, restoreHistoryTimestampRequiredQuery) })
+		before := snapshot()
+		version := queryString(t, ctx, admin, readMigrationTimestampQuery)
+
+		// when
+		call(t, "status", "", "invalid Pricing migration history schema")
+		call(t, "migrate", "", "invalid Pricing migration history schema")
+
+		// then
+		if snapshot() != before ||
+			queryString(t, ctx, admin, readMigrationTimestampQuery) != version {
+			t.Fatal("refusal changed the migration history or catalog")
+		}
+	})
 	migrated := snapshot()
 	versionStamp := queryString(
 		t,
 		ctx,
 		admin,
-		"SELECT applied_at::text FROM public.pricing_schema_version",
+		readMigrationTimestampQuery,
 	)
-	call("migrate", "version=1")
+	// when
+	call(t, "migrate", "version=1")
+	// then
 	if snapshot() != migrated ||
 		queryString(
 			t,
 			ctx,
 			admin,
-			"SELECT applied_at::text FROM public.pricing_schema_version",
+			readMigrationTimestampQuery,
 		) != versionStamp {
 		t.Fatal("replay changed the schema or recorded migration")
 	}
 
-	// Given the Hibernate layout populated through the Java owner, with a conflicting column
+	// given
+	// The Hibernate layout populated through the Java owner, with a conflicting column
 	// in the second table. The first ALTER and history creation must not survive a failure.
-	execSQL(t, ctx, admin, `
-		SET ROLE pricing;
-		DROP TABLE public.pricing_schema_version;
-		ALTER TABLE public.base_price_rules DROP COLUMN position;
-		ALTER TABLE public.discount_markup_rule DROP COLUMN position;
-		ALTER TABLE public.discount_markup_rule ADD COLUMN position text;
-		INSERT INTO public.tariff (id, code) VALUES (11, 'HSI');
-		INSERT INTO public.base_price_rules (tariff_id, cover_code, price_formula) VALUES (11, 'C2', '0.25');
-		INSERT INTO public.discount_markup_rule (id, type, tariff_id, apply_if_formula, param_value)
-		VALUES (32, 'perc_markup', 11, 'FLOOD == "YES"', 1.50);
-		RESET ROLE;
-	`)
-	call("status", "unmanaged")
-	call("version", "uninitialized")
-	call("migrate", "")
+	execSQL(t, ctx, admin, setupIncompatibleSchemaQuery)
+	call(t, "status", "unmanaged")
+	call(t, "version", "uninitialized")
+	// when
+	call(t, "migrate", "", "SQLSTATE 42701")
+	// then
 	if got := queryString(
 		t,
 		ctx,
 		admin,
-		`SELECT (to_regclass('public.pricing_schema_version') IS NULL
-		AND NOT EXISTS (SELECT FROM pg_attribute WHERE attrelid = 'public.base_price_rules'::regclass
-			AND attname = 'position' AND NOT attisdropped))::text`,
+		verifyMigrationRollbackQuery,
 	); got != "true" {
 		t.Fatal("failed migration left partially applied schema or history")
 	}
-	execSQL(t, ctx, admin, "ALTER TABLE public.discount_markup_rule DROP COLUMN position")
-	call("migrate", "version=1")
-	execSQL(t, ctx, admin, "SET ROLE pricing")
-	got := queryString(t, ctx, admin, `SELECT concat_ws('|', t.id, t.code, b.cover_code,
-		b.price_formula, b.apply_if_formula IS NULL, m.id, m.type, m.apply_if_formula, m.param_value)
-		FROM public.tariff t JOIN public.base_price_rules b ON b.tariff_id = t.id
-		JOIN public.discount_markup_rule m ON m.tariff_id = t.id
-		WHERE b.position IS NULL AND m.position IS NULL`)
+	execSQL(t, ctx, admin, removeConflictingColumnQuery)
+	// when
+	call(t, "migrate", "version=1")
+	// then
+	execSQL(t, ctx, admin, assumePricingOwnerQuery)
+	got := queryString(t, ctx, admin, readLegacyTariffQuery)
 	if got != `11|HSI|C2|0.25|t|32|perc_markup|FLOOD == "YES"|1.50` {
 		t.Fatalf("adoption changed Java-owned rows: %q", got)
 	}
@@ -216,8 +244,10 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 		t,
 		ctx,
 		admin,
-		"INSERT INTO public.base_price_rules (tariff_id, cover_code, price_formula) VALUES (11, 'C3', '1.00')",
+		insertUnpositionedRuleQuery,
 	)
+	execSQL(t, ctx, admin, resetRoleQuery)
+	verifyOrderedSeed(t, ctx, admin, address, ca, targetPath, credentialPath)
 }
 
 func disposablePostgres(t *testing.T, ctx context.Context) (*pgx.Conn, *url.URL, string) {
@@ -315,9 +345,9 @@ func writeFixture(t *testing.T, path string, content []byte) {
 	}
 }
 
-func execSQL(t *testing.T, ctx context.Context, db *pgx.Conn, statement string) {
+func execSQL(t *testing.T, ctx context.Context, db *pgx.Conn, statement string, args ...any) {
 	t.Helper()
-	if _, err := db.Exec(ctx, statement); err != nil {
+	if _, err := db.Exec(ctx, statement, args...); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -10,7 +10,7 @@
     - [Repository onboarding](#repository-onboarding)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
-  - [PostgreSQL migration command](#postgresql-migration-command)
+  - [PostgreSQL administration commands](#postgresql-administration-commands)
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
@@ -106,7 +106,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
 | `make test-integration` | Production composition and one disposable TLS-enabled PostgreSQL smoke for migration and status. | Docker, the pinned PostgreSQL test image, and a C compiler. |
-| `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
+| `make build`                | Every package under `./...` and the `server`, `migrate`, and `seed` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It writes only the coverage profiles and tool-managed output. Integration uses disposable loopback listeners and PostgreSQL. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
@@ -271,7 +271,7 @@ gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
-## PostgreSQL migration command
+## PostgreSQL administration commands
 
 `cmd/migrate` runs independently from the Echo server. It accepts `--operation` with
 `status`, `version` or `migrate`, and requires `--environment`, `--context`, `--target-file`,
@@ -286,6 +286,12 @@ after migration. The version operation reports `uninitialized` or `1`.
 Both inspect PostgreSQL in a read-only transaction. Goose commits the schema and its history
 together under an advisory lock. Existing Java tariff rows retain their IDs and relationships.
 Rule positions stay nullable until the seeder can match each tariff to the reviewed rule order.
+
+`cmd/seed` accepts the same target and credential file flags with the dedicated seeder login.
+It loads the embedded version-1 tariff catalog, checks the target seed policy and migration
+version, and applies the complete corpus in one transaction. It inserts missing tariffs,
+assigns positions to uniquely matched Java rows, and reports inserted and existing counts.
+Replay preserves IDs and positions. A mismatch in any of the four tariffs aborts the transaction.
 
 ## Example RPC and HTTP gateway
 

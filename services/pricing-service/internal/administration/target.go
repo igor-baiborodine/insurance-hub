@@ -15,6 +15,7 @@ import (
 const (
 	databaseName = "pricing"
 	migratorRole = "go_pricing_migrator"
+	seederRole   = "go_pricing_seeder"
 	fileLimit    = 16 * 1024
 )
 
@@ -107,20 +108,32 @@ func (t Target) validate(environment, contextName string) error {
 
 // MigrationConnection loads the migrator credential and trust root for the enrolled host.
 func (t Target) MigrationConnection(path, caPath string) (string, []byte, error) {
-	content, err := readProtectedFile(path, "migrator credential")
+	return t.connection(path, caPath, migratorRole, "migrator")
+}
+
+// SeedConnection requires seed approval and the dedicated seeder credential.
+func (t Target) SeedConnection(path, caPath string) (string, []byte, error) {
+	if t.SeedAllowed == nil || !*t.SeedAllowed {
+		return "", nil, errors.New("seeding is disabled for the Pricing enrollment")
+	}
+	return t.connection(path, caPath, seederRole, "seeder")
+}
+
+func (t Target) connection(path, caPath, role, kind string) (string, []byte, error) {
+	content, err := readProtectedFile(path, kind+" credential")
 	if err != nil {
 		return "", nil, err
 	}
 	parsed, err := url.Parse(strings.TrimSpace(string(content)))
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
-		parsed.User == nil || parsed.User.Username() != migratorRole ||
+		parsed.User == nil || parsed.User.Username() != role ||
 		parsed.Hostname() != t.Host || parsed.Path != "/"+t.Database || parsed.Fragment != "" {
 		return "", nil, errors.New(
-			"database URL does not match enrolled Pricing migrator target",
+			"database URL does not match enrolled Pricing " + kind + " target",
 		)
 	}
 	if password, ok := parsed.User.Password(); !ok || password == "" {
-		return "", nil, errors.New("migrator credential is missing")
+		return "", nil, errors.New(kind + " credential is missing")
 	}
 	port := parsed.Port()
 	if port == "" {
