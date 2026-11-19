@@ -426,19 +426,42 @@ def qa_release_ownership() -> None:
         yaml.safe_load_all((ROOT / "k8s/flux/qa/releases/pricing/release.yaml").read_text())
     )
     api = [item for item in bundle if item.get("metadata", {}).get("name") == "qa-pricing-api"]
-    sources = [item for item in bundle if item.get("kind") == "GitRepository"]
-    initialization = [
-        item
+    sources = {item["metadata"]["name"] for item in bundle if item.get("kind") == "GitRepository"}
+    initialization = {
+        item["metadata"]["name"]: item
         for item in bundle
         if item.get("kind") == "Kustomization"
         and item.get("spec", {}).get("path", "").endswith("/administration")
-    ]
+    }
     require(
-        len(api) == len(sources) == len(initialization) == 1
-        and initialization[0]["spec"].get("suspend") is True
-        and "dependsOn" not in api[0]["spec"]
-        and api[0]["spec"]["sourceRef"]["name"] == sources[0]["metadata"]["name"],
-        "staged Pricing release must retain the old API without running initialization",
+        len(api) == 1 and bool(initialization) and api[0]["spec"]["sourceRef"]["name"] in sources,
+        "QA Pricing release bundle must contain one API owner and its sources",
+    )
+    # The staged predecessor's image predates the administration commands; it must never run.
+    require(
+        all(
+            item["spec"].get("suspend") is True
+            for item in initialization.values()
+            if item["metadata"].get("annotations", {}).get("insurance-hub.io/staged-predecessor")
+            == "true"
+        ),
+        "staged Pricing predecessor must not run initialization",
+    )
+    dependencies = api[0]["spec"].get("dependsOn")
+    if dependencies is None:
+        require(
+            all(item["spec"].get("suspend") is True for item in initialization.values()),
+            "staged Pricing release must retain the old API without running initialization",
+        )
+        return
+    prerequisite = (
+        initialization.get(dependencies[0].get("name")) if len(dependencies) == 1 else None
+    )
+    require(
+        prerequisite is not None
+        and prerequisite["spec"].get("suspend") is not True
+        and prerequisite["spec"]["sourceRef"] == api[0]["spec"]["sourceRef"],
+        "QA Pricing API must depend on its own release initialization",
     )
 
 

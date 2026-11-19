@@ -102,6 +102,85 @@ def test_qa_staging_keeps_go_out_of_shared_owner_and_suspends_old_initialization
         pricing.qa_release_ownership()
 
 
+def _released_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    for relative in ("k8s/overlays/qa/svc/kustomization.yaml", "k8s/flux/qa/kustomization.yaml"):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(pricing.ROOT / relative, target)
+    monkeypatch.setattr(pricing, "ROOT", tmp_path)
+    return [
+        {"kind": "GitRepository", "metadata": {"name": "old-source"}},
+        {
+            "kind": "Kustomization",
+            "metadata": {
+                "name": "old-init",
+                "annotations": {"insurance-hub.io/staged-predecessor": "true"},
+            },
+            "spec": {
+                "suspend": True,
+                "path": "./k8s/overlays/qa/svc/pricing/administration",
+                "sourceRef": {"kind": "GitRepository", "name": "old-source"},
+            },
+        },
+        {"kind": "GitRepository", "metadata": {"name": "new-source"}},
+        {
+            "kind": "Kustomization",
+            "metadata": {"name": "new-init"},
+            "spec": {
+                "path": "./k8s/overlays/qa/svc/pricing/administration",
+                "sourceRef": {"kind": "GitRepository", "name": "new-source"},
+            },
+        },
+        {
+            "kind": "Kustomization",
+            "metadata": {"name": "qa-pricing-api"},
+            "spec": {
+                "path": "./k8s/overlays/qa/svc/pricing",
+                "sourceRef": {"kind": "GitRepository", "name": "new-source"},
+                "dependsOn": [{"name": "new-init"}],
+            },
+        },
+    ]
+
+
+def _staged_only(bundle: list[dict]) -> None:
+    del bundle[2:4]
+    bundle[-1]["spec"]["sourceRef"]["name"] = "old-source"
+    del bundle[-1]["spec"]["dependsOn"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        (lambda bundle: None, None),
+        (_staged_only, None),
+        (lambda bundle: bundle[1]["spec"].pop("suspend"), "predecessor must not run"),
+        (
+            lambda bundle: bundle[-1]["spec"].update(dependsOn=[{"name": "old-init"}]),
+            "own release initialization",
+        ),
+        (lambda bundle: bundle[-1]["spec"].pop("dependsOn"), "retain the old API"),
+    ],
+    ids=["released", "staged", "predecessor-active", "old-prerequisite", "no-prerequisite"],
+)
+def test_qa_release_bundle_requires_api_to_follow_its_own_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate, error: str | None
+) -> None:
+    # given
+    bundle = _released_bundle(tmp_path, monkeypatch)
+    mutate(bundle)
+    path = tmp_path / "k8s/flux/qa/releases/pricing/release.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump_all(bundle))
+
+    # when / then
+    if error is None:
+        pricing.qa_release_ownership()
+    else:
+        with pytest.raises(DeploymentError, match=error):
+            pricing.qa_release_ownership()
+
+
 @pytest.mark.parametrize("revision_matches", [True, False])
 def test_qa_image_requires_published_digest_and_matching_oci_labels(
     monkeypatch: pytest.MonkeyPatch, revision_matches: bool
@@ -212,13 +291,17 @@ def test_release_prepares_initialization_before_stable_api(
 
     # then
     assert paths == [bundle]
-    retained_source, retained_init, source_owner, initialize, api = list(
-        yaml.safe_load_all(bundle.read_text())
+    # Earlier released prerequisites are retained ahead of the new source, init and API owner.
+    *retained, source_owner, initialize, api = list(yaml.safe_load_all(bundle.read_text()))
+    staged = [
+        item
+        for item in retained
+        if item["metadata"]["annotations"].get("insurance-hub.io/staged-predecessor") == "true"
+    ]
+    assert {item["kind"] for item in staged} == {"GitRepository", "Kustomization"}
+    assert all(
+        item["spec"]["suspend"] is True for item in staged if item["kind"] != "GitRepository"
     )
-    assert (
-        retained_source["metadata"]["annotations"]["insurance-hub.io/staged-predecessor"] == "true"
-    )
-    assert retained_init["spec"]["suspend"] is True
     assert source_owner["spec"]["ref"] == {"commit": sha}
     assert initialize["spec"]["path"].endswith("/pricing/administration")
     assert initialize["spec"]["postBuild"]["substitute"] == {"MIGRATION_TIMEOUT": "120s"}
