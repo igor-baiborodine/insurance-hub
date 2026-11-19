@@ -397,6 +397,8 @@ class Target:
             )
         if not require_deployment:
             return {}
+        if self.configuration["mode"] == "flux":
+            self.verify_flux_inventory(items)
         desired = items["Deployment"]["spec"]["template"]
         actual = deployment["spec"]["template"]
         version = desired["metadata"]["labels"][VERSION_LABEL]
@@ -435,6 +437,28 @@ class Target:
             f"version={version} image={image} imageID={statuses[0]['imageID']}"
         )
         return pod
+
+    def verify_flux_inventory(self, items: dict[str, dict]) -> None:
+        flux = self.configuration["flux"]
+        owner = self.json("get", "kustomization", flux["sharedOwner"], "-n", flux["namespace"])
+        status = owner.get("status", {})
+        revision = os.environ.get("DEPLOY_SOURCE_REVISION", "")
+        require(
+            lifecycle.ready(owner)
+            and bool(re.fullmatch(r"[0-9a-f]{40}", revision))
+            and status.get("lastAppliedRevision", "").rsplit(":", 1)[-1] == revision,
+            "shared Flux inventory is not ready at the selected revision",
+        )
+        observed = {
+            (entry["id"], entry["v"]) for entry in status.get("inventory", {}).get("entries", [])
+        }
+        expected = set()
+        for kind, item in items.items():
+            group, _, version = item["apiVersion"].rpartition("/")
+            metadata = item["metadata"]
+            identity = f"{metadata['namespace']}_{metadata['name']}_{group}_{kind}"
+            expected.add((identity, version))
+        require(expected <= observed, "shared Flux inventory does not own all Pricing resources")
 
 
 def image_id(target: Target, image: str) -> str:

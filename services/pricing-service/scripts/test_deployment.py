@@ -131,6 +131,40 @@ def test_qa_image_requires_published_digest_and_matching_oci_labels(
             pricing.image_id(target, f"{registry}:1.0.0")
 
 
+def test_qa_requires_exact_flux_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    revision = "a" * 40
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setenv("DEPLOY_SOURCE_REVISION", revision)
+    target = pricing.Target()
+    items = pricing.validate_render("qa", pricing.render("qa"))
+    entries = [
+        {"id": "qa-svc_qa-pricing-api_apps_Deployment", "v": "v1"},
+        {"id": "qa-svc_qa-pricing-api_networking.k8s.io_NetworkPolicy", "v": "v1"},
+        {"id": "qa-svc_qa-pricing-config__ConfigMap", "v": "v1"},
+    ]
+
+    def owner(*args: str) -> dict:
+        assert args == ("get", "kustomization", "qa-svc", "-n", "flux-system")
+        return {
+            "status": {
+                "conditions": [{"type": "Ready", "status": "True"}],
+                "lastAppliedRevision": f"main@sha1:{revision}",
+                "inventory": {"entries": entries},
+            }
+        }
+
+    monkeypatch.setattr(target, "json", owner)
+
+    # when / then
+    target.verify_flux_inventory(items)
+    entries.pop()
+    with pytest.raises(DeploymentError, match="does not own"):
+        target.verify_flux_inventory(items)
+
+
 def test_release_prepares_published_version_and_activation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
