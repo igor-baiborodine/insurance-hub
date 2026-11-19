@@ -81,13 +81,16 @@ retained failure evidence. Inspect a failed Job and prepare an explicit next att
 or automatically retry it. The stable API owner depends on that exact successful attempt. Keep
 image source and Flux configuration commits separate.
 
-From the checkout of the applied release configuration, set the full image source and applied
-Flux commits from the workflow and Flux records. Set `RELEASE_VERSION` to the published
-semantic version. Set `DEPLOY_IMAGE_DIGEST` to the digest recorded by the release workflow.
+From the checkout of the applied release configuration, set `DEPLOY_IMAGE_SOURCE_REVISION`
+and `DEPLOY_SOURCE_REVISION` to the full release source commit recorded in the bundle's
+`insurance-hub.io/source-revision` annotation. Record the Flux-applied configuration commit
+separately; it is not an input. Set `RELEASE_VERSION` to the published semantic version and
+`DEPLOY_IMAGE_DIGEST` to the digest recorded by the release workflow. Status and verification
+require the ready Pod's `imageID` to be that digest, optionally repository-qualified.
 
 ```bash
 : "${DEPLOY_IMAGE_SOURCE_REVISION:?set the full image source commit}"
-: "${DEPLOY_SOURCE_REVISION:?set the full Flux-applied configuration commit}"
+: "${DEPLOY_SOURCE_REVISION:?set the full release source commit from the bundle}"
 : "${RELEASE_VERSION:?set the published semantic version}"
 : "${DEPLOY_IMAGE_DIGEST:?set the immutable digest recorded by the release workflow}"
 export DEPLOY_IMAGE_SOURCE_REVISION DEPLOY_SOURCE_REVISION DEPLOY_IMAGE_DIGEST

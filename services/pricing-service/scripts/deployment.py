@@ -622,14 +622,15 @@ class Target:
         pod = pods[0]
         statuses = pod["status"].get("containerStatuses", [])
         digest = image_id(self, image)
-        expected_ids = {digest, f"{image.split(':', 1)[0]}@{digest}", f"containerd://{digest}"}
         require(
             pod["metadata"]["labels"].get(VERSION_LABEL) == version
             and pod["spec"]["containers"][0]["image"] == image
             and len(statuses) == 1
             and statuses[0].get("name") == "pricing-api"
             and statuses[0].get("ready") is True
-            and statuses[0].get("imageID") in expected_ids,
+            and running_image_matches(
+                self.configuration["mode"], image, digest, statuses[0].get("imageID", "")
+            ),
             "Pricing Pod image identity or readiness differs",
         )
         print(
@@ -637,6 +638,13 @@ class Target:
             f"version={version} image={image} imageID={statuses[0]['imageID']}"
         )
         return pod
+
+
+def running_image_matches(mode: str, image: str, digest: str, running: str) -> bool:
+    if mode == "flux":
+        # Same rule as the other Go services: the published digest, optionally repository-qualified.
+        return running == digest or running.endswith("@" + digest)
+    return running in {digest, f"{image.split(':', 1)[0]}@{digest}", f"containerd://{digest}"}
 
 
 def image_id(target: Target, image: str) -> str:

@@ -225,6 +225,37 @@ def test_qa_image_requires_published_digest_and_matching_oci_labels(
             pricing.image_id(target, f"{registry}:1.0.0")
 
 
+@pytest.mark.parametrize(
+    ("mode", "image", "running", "accepted"),
+    [
+        (
+            "flux",
+            "registry/pricing-api@sha256:" + "d" * 64,
+            "registry/pricing-api@sha256:" + "d" * 64,
+            True,
+        ),
+        ("flux", "registry/pricing-api:1.1.0", "sha256:" + "d" * 64, True),
+        (
+            "flux",
+            "registry/pricing-api@sha256:" + "d" * 64,
+            "registry/pricing-api@sha256:" + "e" * 64,
+            False,
+        ),
+        ("direct", "pricing-api:1.0.0-local.aaaaaaaaaaaa", "sha256:" + "d" * 64, True),
+        ("direct", "pricing-api:1.0.0-local.aaaaaaaaaaaa", "sha256:" + "e" * 64, False),
+    ],
+    ids=["qa-digest-ref", "qa-bare-digest", "qa-other-digest", "local-id", "local-other-id"],
+)
+def test_running_image_matches_published_digest_or_local_id(
+    mode: str, image: str, running: str, accepted: bool
+) -> None:
+    # given
+    digest = "sha256:" + "d" * 64
+
+    # when / then
+    assert pricing.running_image_matches(mode, image, digest, running) is accepted
+
+
 def test_resource_snapshot_rejects_secret_bearing_or_unknown_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
