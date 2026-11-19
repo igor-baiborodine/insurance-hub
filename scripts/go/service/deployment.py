@@ -151,6 +151,11 @@ def local_administration_job(target: Any, image: str, run: Any) -> tuple[str, st
     job["metadata"].setdefault("annotations", {}).update(release_annotations(release))
     pod = job["spec"]["template"]["spec"]
     containers = pod.get("initContainers", []) + pod.get("containers", [])
+    # An overlay may keep the unselected local tag; select the inspected image as the API render does.
+    placeholder = re.sub(r"\.[0-9a-f]{12}$", ".000000000000", image)
+    for item in containers:
+        if placeholder != image and item.get("image") == placeholder:
+            item["image"] = image
     require(
         bool(containers) and all(item["image"] == image for item in containers),
         "administration Job image differs from the API release",

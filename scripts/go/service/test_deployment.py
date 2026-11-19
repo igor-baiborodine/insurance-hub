@@ -170,6 +170,68 @@ def test_local_job_uses_selected_assets_timeout_and_attempt(tmp_path, monkeypatc
     assert value["metadata"]["annotations"]["insurance-hub.io/source-revision"] == "a" * 40
 
 
+@pytest.mark.parametrize(
+    ("rendered_image", "accepted"),
+    [
+        ("claims:1.0.0-local.000000000000", True),
+        ("claims:1.0.0-local.bbbbbbbbbbbb", False),
+    ],
+)
+def test_local_job_selects_image_only_for_unselected_local_tag(
+    tmp_path, monkeypatch, rendered_image, accepted
+):
+    # given
+    create_service(tmp_path, "claims", environment="sandbox", initialization=True)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["services"]["claims"]["deploymentTargets"]["sandbox"].update(
+        mode="direct", kindCluster="sandbox-cluster"
+    )
+    catalog_path.write_text(json.dumps(catalog))
+    record = service_record(tmp_path, "claims")
+    image = "claims:1.0.0-local.aaaaaaaaaaaa"
+    container = {"image": rendered_image, "args": ["--timeout=120s"]}
+    job = {
+        "kind": "Job",
+        "metadata": {"name": "sandbox-claims-init"},
+        "spec": {
+            "backoffLimit": 0,
+            "activeDeadlineSeconds": 300,
+            "template": {
+                "spec": {
+                    "initContainers": [{"name": "migrate", **container}],
+                    "containers": [{"name": "seed", **container}],
+                }
+            },
+        },
+    }
+    target = SimpleNamespace(
+        service="claims",
+        environment="sandbox",
+        record=record,
+        configuration=target_record(tmp_path, record, "sandbox"),
+        kubectl=lambda *a: yaml.safe_dump(job),
+    )
+    inspect = json.dumps(
+        [
+            {
+                "Id": "sha256:" + "b" * 64,
+                "Config": {"Labels": {"org.opencontainers.image.revision": "a" * 40}},
+            }
+        ]
+    )
+    monkeypatch.setattr(deployment, "ROOT", tmp_path)
+
+    # when / then
+    if not accepted:
+        with pytest.raises(deployment.DeploymentError, match="image differs"):
+            deployment.local_administration_job(target, image, lambda *a: inspect)
+        return
+    _, rendered = deployment.local_administration_job(target, image, lambda *a: inspect)
+    pod = yaml.safe_load(rendered)["spec"]["template"]["spec"]
+    assert [item["image"] for item in pod["initContainers"] + pod["containers"]] == [image, image]
+
+
 def test_release_image_uses_digest_and_rejects_wrong_source(tmp_path, monkeypatch):
     # given
     from scripts.go.service.release import prepare_release
