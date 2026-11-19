@@ -1,0 +1,198 @@
+"""Pricing render, release, target, and disposable deployment checks."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import uuid
+from pathlib import Path
+
+import pytest
+import yaml
+from scripts.go.service import release
+from scripts.go.service.deployment import DeploymentError, apply
+
+import deployment as pricing
+
+QA = Path("k8s/overlays/qa/svc")
+SMOKE_LABEL = "insurance-hub.io/pricing-disposable"
+
+
+def test_wrong_target_is_rejected_before_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setattr(pricing, "run", lambda *_args, **_kwargs: pytest.fail("unexpected access"))
+
+    # when / then
+    with pytest.raises(DeploymentError, match="coordinates"):
+        pricing.Target()
+
+
+@pytest.mark.parametrize("defect", ["legacy selector", "public service", "allow Pod ingress"])
+def test_render_rejects_access_or_selector_defects(defect: str) -> None:
+    # given
+    items = pricing.validate_render("qa", pricing.render("qa"))
+    if defect == "legacy selector":
+        items["Deployment"]["spec"]["selector"]["matchLabels"] = {
+            "app.kubernetes.io/name": "pricing-api-legacy",
+            "app.kubernetes.io/component": "api",
+        }
+    elif defect == "public service":
+        items["Service"] = {"kind": "Service", "spec": {"type": "LoadBalancer"}}
+    else:
+        items["NetworkPolicy"]["spec"]["ingress"] = [{}]
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        pricing.validate_render("qa", yaml.safe_dump_all(items.values()))
+
+
+def test_local_egress_rejects_broad_dns() -> None:
+    # given
+    items = pricing.validate_render("local-dev", pricing.render("local-dev"))
+    dns = items["NetworkPolicy"]["spec"]["egress"][0]
+    del dns["to"][0]["podSelector"]
+
+    # when / then
+    with pytest.raises(DeploymentError, match="NetworkPolicy"):
+        pricing.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+def test_qa_refuses_placeholder_activation_and_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    items = pricing.validate_render("qa", pricing.render("qa"))
+    items["ConfigMap"]["data"]["SERVICE_VERSION"] = pricing.PLACEHOLDER
+    deployment = items["Deployment"]
+    template = deployment["spec"]["template"]
+    for metadata in (deployment["metadata"], template["metadata"]):
+        metadata["labels"][pricing.VERSION_LABEL] = pricing.PLACEHOLDER
+    template["spec"]["containers"][0]["image"] = (
+        "ghcr.io/igor-baiborodine/insurance-hub/pricing-api:0.0.0-unpublished"
+    )
+    monkeypatch.setattr(pricing, "render", lambda _environment: yaml.safe_dump_all(items.values()))
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setenv("DEPLOY_IMAGE_SOURCE_REVISION", "a" * 40)
+    monkeypatch.delenv("DEPLOY_IMAGE_REF", raising=False)
+
+    # when / then
+    with pytest.raises(DeploymentError, match="activation"):
+        pricing.qa_activation(["./pricing/legacy", "./pricing"], items)
+    with pytest.raises(DeploymentError, match="inactive or differs"):
+        pricing.Target().rendered()
+
+
+def test_release_prepares_published_version_and_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # given
+    source = pricing.ROOT
+    for relative in (
+        "scripts/go/service/catalog.json",
+        "services/pricing-service/Dockerfile",
+        str(QA / "kustomization.yaml"),
+        str(QA / "pricing/kustomization.yaml"),
+        str(QA / "pricing/network-policy-patch.yaml"),
+        "k8s/apps/svc/pricing/base/kustomization.yaml",
+        "k8s/apps/svc/pricing/base/deployment.yaml",
+        "k8s/apps/svc/pricing/base/network-policy.yaml",
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, target)
+    repository = "igor-baiborodine/insurance-hub"
+    sha = "0123456789ab" + "c" * 28
+    parent = tmp_path / QA / "kustomization.yaml"
+    aggregate = yaml.safe_load(parent.read_text())
+    aggregate["resources"] = [
+        resource for resource in aggregate["resources"] if resource != "./pricing"
+    ]
+    parent.write_text(yaml.safe_dump(aggregate))
+    previous = parent.read_bytes()
+    selection = release.select_service(
+        ["services/pricing-service/Dockerfile"], tmp_path, repository
+    )
+    assert selection.service == "pricing"
+    with pytest.raises(release.ReleaseSelectionError, match="digest"):
+        release.prepare_release(tmp_path, "pricing", repository, "1.0.0", sha, "unpublished")
+    assert parent.read_bytes() == previous
+
+    # when
+    paths = release.prepare_release(
+        tmp_path, "pricing", repository, "1.0.0", sha, "sha256:" + "d" * 64
+    )
+
+    # then
+    assert set(paths) == {parent, tmp_path / QA / "pricing/kustomization.yaml"}
+    monkeypatch.setattr(pricing, "ROOT", tmp_path)
+    items = pricing.validate_render("qa", pricing.render("qa"))
+    assert items["ConfigMap"]["data"]["SERVICE_VERSION"] == "git-0123456789ab"
+    assert items["Deployment"]["spec"]["template"]["spec"]["containers"][0]["image"] == (
+        "ghcr.io/igor-baiborodine/insurance-hub/pricing-api:1.0.0"
+    )
+    pricing.qa_activation(yaml.safe_load(parent.read_text())["resources"], items)
+
+
+@pytest.mark.integration
+def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = pricing.Target()
+    require = pricing.require
+    require(
+        target.configuration["kindCluster"] == "local-dev-insurance-hub"
+        and target.context == "kind-local-dev-insurance-hub",
+        "unexpected disposable cluster",
+    )
+    image = os.environ.get("DEPLOY_IMAGE_REF", "")
+    pricing.image_id(target, image)
+    require(
+        target.configuration["kindCluster"] in pricing.run(["kind", "get", "clusters"]).split(),
+        "configured Kind cluster is missing",
+    )
+    _, items, selected = target.rendered()
+    require(selected == image, "disposable image differs")
+    token = uuid.uuid4().hex[:12]
+    target.namespace = f"pricing-smoke-{token}"
+    namespace = {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
+    }
+    for item in items.values():
+        item["metadata"]["namespace"] = target.namespace
+
+    try:
+        # when
+        target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
+        pricing.run(
+            ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
+            timeout=120,
+        )
+        apply(target, yaml.safe_dump_all(items.values()), "insurance-hub-pricing-smoke")
+        pricing.rollout(target)
+
+        # then
+        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
+        pricing.verify(target, items)
+        pricing.stop(target, items)
+        assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0
+    finally:
+        actual = target.json("get", "namespace", target.namespace, "--ignore-not-found")
+        if actual:
+            require(
+                actual["metadata"]["labels"].get(SMOKE_LABEL) == token,
+                "disposable namespace ownership differs",
+            )
+            target.kubectl("delete", "namespace", target.namespace, "--timeout=100s", timeout=110)
+            assert not target.json("get", "namespace", target.namespace, "--ignore-not-found")
+            print(f"Removed disposable namespace {target.namespace}")

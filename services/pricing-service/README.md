@@ -238,6 +238,8 @@ compression returns and records `UNIMPLEMENTED`. Unknown status values normalize
 Local tests use an owned loopback OTLP receiver to verify actual trace/metric transport; they do
 not prove Alloy pipelines or deployed delivery.
 
+For deployment, private verification and recovery, see the [Pricing deployment runbook](deployment-runbook.md).
+
 ## Run and stop the service
 
 Start the executable from this module root:
