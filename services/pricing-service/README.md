@@ -31,6 +31,8 @@ to serve Policy's pricing requests.
 - GNU Make 4.3 or newer
 - Git for the default changed-file formatting scope; `FORMAT_SCOPE=all` also works outside Git
 - GCC on Linux for `test-race`
+- kubectl with Kustomize replacements and field creation support (verified with kubectl 1.34.1)
+  and a full repository checkout for the Pricing deployment and release fixtures
 - Network access when the Go module proxy/checksum service, source-based tool installation, Buf
   Schema Registry dependencies, or `vuln.go.dev` are not already cached
 
@@ -88,7 +90,7 @@ require `bootstrap-tools` to have been run explicitly.
 |-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `make verify-tools`         | Exact Go/tool versions, golangci-lint schema and formatter order, module/import prefix, 100-column settings, readonly loading, all-test lint scope, and vet-equivalent coverage.                                                                                           | All seven pinned binaries already installed; no installation.                                                                                                                      |
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
-| `make python-check`         | Ruff format/lint plus fast gateway contract tests. | Passing `python-toolchain-check`; no Go tools or network mutation. |
+| `make python-check`         | Ruff format/lint plus fast gateway, deployment render and release fixtures. | Passing `python-toolchain-check`, kubectl/Kustomize and repository overlays. The fixtures do not access a cluster. |
 | `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
 | `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint, exposed ports, liveness, and graceful shutdown. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
@@ -112,9 +114,8 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation, migrations, deployment, workspace
-validation, and live infrastructure are not applicable to this standalone module. It has no such
-dependencies or placeholder targets.
+The Echo foundation has no database, broker, generated mocks, migrations, or Go workspace.
+Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
 

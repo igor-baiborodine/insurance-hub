@@ -188,6 +188,7 @@
         "managed CPython 3.14.8",
         "pinned Pricing Go tools installed by make -C services/pricing-service bootstrap-go-tools",
         "GCC for race-enabled tests",
+        "kubectl with Kustomize replacements and field creation support (verified with v1.34.1)",
         "Docker Engine with daemon and Buildx access for runtime image checks",
         "public module, schema, tool, vulnerability and container services unless cached"
       ],
