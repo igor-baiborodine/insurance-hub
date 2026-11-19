@@ -52,6 +52,9 @@ var duplicateCarRuleQuery string
 //go:embed testdata/sql/update-base-price-rules-car-position.sql
 var contradictCarPositionQuery string
 
+//go:embed testdata/sql/update-discount-markup-rule-hsi-factor.sql
+var changeHSIMarkupFactorQuery string
+
 //go:embed testdata/sql/insert-legacy-tariff.sql
 var insertLegacyTariffQuery string
 

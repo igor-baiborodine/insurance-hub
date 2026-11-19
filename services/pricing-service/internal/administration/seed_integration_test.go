@@ -182,10 +182,11 @@ func verifyOrderedSeed(
 		}
 	})
 
-	for _, conflict := range []struct{ name, change string }{
-		{"changed expression", changeCarFormulaQuery},
-		{"duplicate rule", duplicateCarRuleQuery},
-		{"contradictory position", contradictCarPositionQuery},
+	for _, conflict := range []struct{ name, change, code string }{
+		{"changed expression", changeCarFormulaQuery, "CAR"},
+		{"duplicate rule", duplicateCarRuleQuery, "CAR"},
+		{"contradictory position", contradictCarPositionQuery, "CAR"},
+		{"changed markup factor", changeHSIMarkupFactorQuery, "HSI"},
 	} {
 		t.Run(conflict.name, func(t *testing.T) {
 			// given
@@ -195,7 +196,7 @@ func verifyOrderedSeed(
 			before := seedSnapshot(t, ctx, admin)
 
 			// when
-			refuse(t, credential, "seed conflict for CAR")
+			refuse(t, credential, "seed conflict for "+conflict.code)
 
 			// then
 			if seedSnapshot(t, ctx, admin) != before {
