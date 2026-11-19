@@ -705,16 +705,21 @@ def main() -> int:
     return 0
 
 
+class Terminated(KeyboardInterrupt):
+    """Handled SIGTERM after cleanup."""
+
+
 def interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
+    raise Terminated
 
 
-if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, interrupt)
+def cli() -> int:
     try:
-        raise SystemExit(main())
+        return main()
+    except Terminated:
+        return 143
     except KeyboardInterrupt:
-        raise SystemExit(130) from None
+        return 130
     except (
         ValueError,
         OSError,
@@ -725,4 +730,9 @@ if __name__ == "__main__":
         http.client.HTTPException,
     ) as error:
         print(f"pricing-deployment: {error}", file=sys.stderr)
-        raise SystemExit(1) from None
+        return 1
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, interrupt)
+    raise SystemExit(cli())

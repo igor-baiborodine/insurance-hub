@@ -257,6 +257,20 @@ def test_denial_cleanup_preserves_primary_error(
     assert "cleanup failed: Pricing denial probe ownership differs" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("error, status", [(KeyboardInterrupt, 130), (pricing.Terminated, 143)])
+def test_cli_signal_exit_status(
+    monkeypatch: pytest.MonkeyPatch, error: type[KeyboardInterrupt], status: int
+) -> None:
+    # given
+    def interrupted() -> int:
+        raise error
+
+    monkeypatch.setattr(pricing, "main", interrupted)
+
+    # when / then
+    assert pricing.cli() == status
+
+
 @pytest.mark.integration
 def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     # given
