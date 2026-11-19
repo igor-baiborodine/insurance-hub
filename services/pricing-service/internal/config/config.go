@@ -1,9 +1,11 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -15,8 +17,37 @@ const DefaultServiceName = "pricing-service"
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"
 
+const (
+	databaseURLSetting      = "PRICING_DATABASE_URL"
+	databaseMaxConnsSetting = "DB_MAX_CONNS"
+	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
+	databaseAcquireSetting  = "DB_ACQUIRE_TIMEOUT"
+	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
+	startupTimeoutSetting   = "STARTUP_TIMEOUT"
+)
+
+// Database contains the restricted Pricing reader connection and pool limits.
+type Database struct {
+	URL            DatabaseURL
+	MaxConnections int32
+	ConnectTimeout time.Duration
+	AcquireTimeout time.Duration
+	QueryTimeout   time.Duration
+}
+
+// DatabaseURL redacts the reader credential from ordinary formatting.
+type DatabaseURL struct{ value string }
+
+// Value returns the reader connection URL to the PostgreSQL adapter.
+func (databaseURL DatabaseURL) Value() string { return databaseURL.value }
+
+func (DatabaseURL) String() string   { return "[REDACTED]" }
+func (DatabaseURL) GoString() string { return "[REDACTED]" }
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
+	Database       Database
+	StartupTimeout time.Duration
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -247,7 +278,63 @@ func load(lookup lookupEnv) (Config, error) {
 		}
 	}
 
+	databaseURL, err := loadDatabaseURL(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	maxConnections, err := kitconfig.LoadBoundedInt(lookup, databaseMaxConnsSetting, "8", 1, 32)
+	if err != nil {
+		return Config{}, err
+	}
+	connectTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseConnectSetting, "3s")
+	if err != nil {
+		return Config{}, err
+	}
+	acquireTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseAcquireSetting, "2s")
+	if err != nil {
+		return Config{}, err
+	}
+	queryTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseQuerySetting, "5s")
+	if err != nil {
+		return Config{}, err
+	}
+	startupTimeout, err := kitconfig.LoadPositiveDuration(lookup, startupTimeoutSetting, "10s")
+	if err != nil {
+		return Config{}, err
+	}
+	if connectTimeout > startupTimeout {
+		return Config{}, kitconfig.Invalid(
+			databaseConnectSetting,
+			"must not exceed STARTUP_TIMEOUT",
+		)
+	}
+	if databaseURL.Value() != "" {
+		for _, relationship := range []struct {
+			setting string
+			value   time.Duration
+			bound   string
+			maximum time.Duration
+		}{
+			{databaseAcquireSetting, acquireTimeout, databaseQuerySetting, queryTimeout},
+			{databaseQuerySetting, queryTimeout, kitconfig.EnvRequestTimeout, runtime.RequestTimeout},
+			{kitconfig.EnvProbeTimeout, runtime.ProbeTimeout, databaseQuerySetting, queryTimeout},
+		} {
+			if relationship.value > relationship.maximum {
+				return Config{}, kitconfig.Invalid(
+					relationship.setting, "must not exceed "+relationship.bound,
+				)
+			}
+		}
+	}
 	return Config{
+		Database: Database{
+			URL:            databaseURL,
+			MaxConnections: int32(maxConnections),
+			ConnectTimeout: connectTimeout,
+			AcquireTimeout: acquireTimeout,
+			QueryTimeout:   queryTimeout,
+		},
+		StartupTimeout:     startupTimeout,
 		Runtime:            runtime,
 		GRPC:               grpc,
 		HTTPServer:         httpServer,
@@ -259,6 +346,45 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxBodyBytes:   maxBodyBytes,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
+	value, ok := lookup(databaseURLSetting)
+	if !ok {
+		return DatabaseURL{}, nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return DatabaseURL{}, kitconfig.Invalid(databaseURLSetting, "must not be empty")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
+		parsed.User == nil || parsed.User.Username() != "go_pricing_reader" ||
+		parsed.Path != "/pricing" || !kitconfig.ValidHost(parsed.Hostname()) || parsed.Fragment != "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must identify the Pricing reader",
+		)
+	}
+	if port := parsed.Port(); port != "" {
+		portNumber, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || portNumber == 0 {
+			return DatabaseURL{}, kitconfig.Invalid(
+				databaseURLSetting,
+				"must use a valid port",
+			)
+		}
+	}
+	password, ok := parsed.User.Password()
+	params, err := url.ParseQuery(parsed.RawQuery)
+	if !ok || password == "" || err != nil || len(params) != 2 ||
+		len(params["sslmode"]) != 1 || params.Get("sslmode") != "verify-full" ||
+		len(params["sslrootcert"]) != 1 || params.Get("sslrootcert") == "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must require TLS hostname and CA verification",
+		)
+	}
+	return DatabaseURL{value: value}, nil
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {

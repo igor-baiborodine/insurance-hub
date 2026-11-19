@@ -34,17 +34,26 @@ const (
 	instanceID    = "22222222-2222-4222-8222-222222222222"
 )
 
-func TestRun_PostgreSQLMigration(t *testing.T) {
+func TestRun_PostgreSQLMigrationAndSeed(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	admin, address, ca := disposablePostgres(t, ctx)
 	password := rand.Text()
+	readerPassword := rand.Text()
+	seederPassword := rand.Text()
 	execSQL(
 		t,
 		ctx,
 		admin,
-		fmt.Sprintf(setupMigrationFixtureQuery, password, instanceID, clusterUID),
+		fmt.Sprintf(
+			setupMigrationFixtureQuery,
+			password,
+			readerPassword,
+			seederPassword,
+			instanceID,
+			clusterUID,
+		),
 	)
 
 	targetPath := filepath.Join(t.TempDir(), "target.json")
@@ -177,6 +186,9 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 	// then
 	call(t, "version", "1")
 	call(t, "status", "version=1")
+	verifyOrderedSeed(t, ctx, admin, address, ca, targetPath, credentialPath, seederPassword)
+	verifyReaderStartup(t, ctx, admin, address, ca, readerPassword)
+
 	t.Run("invalid migration history schema", func(t *testing.T) {
 		// given
 		execSQL(t, ctx, admin, dropHistoryTimestampRequiredQuery)
@@ -215,8 +227,9 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 	}
 
 	// given
-	// The Hibernate layout populated through the Java owner, with a conflicting column
-	// in the second table. The first ALTER and history creation must not survive a failure.
+	// An existing populated schema has a conflicting column in the second rule table.
+	// The first schema change and history creation must roll back together.
+	execSQL(t, ctx, admin, truncateTariffsQuery)
 	execSQL(t, ctx, admin, setupIncompatibleSchemaQuery)
 	call(t, "status", "unmanaged")
 	call(t, "version", "uninitialized")
@@ -238,7 +251,7 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 	execSQL(t, ctx, admin, assumePricingOwnerQuery)
 	got := queryString(t, ctx, admin, readLegacyTariffQuery)
 	if got != `11|HSI|C2|0.25|t|32|perc_markup|FLOOD == "YES"|1.50` {
-		t.Fatalf("adoption changed Java-owned rows: %q", got)
+		t.Fatalf("migration changed existing tariff rows: %q", got)
 	}
 	execSQL(
 		t,
@@ -247,7 +260,6 @@ func TestRun_PostgreSQLMigration(t *testing.T) {
 		insertUnpositionedRuleQuery,
 	)
 	execSQL(t, ctx, admin, resetRoleQuery)
-	verifyOrderedSeed(t, ctx, admin, address, ca, targetPath, credentialPath)
 }
 
 func disposablePostgres(t *testing.T, ctx context.Context) (*pgx.Conn, *url.URL, string) {

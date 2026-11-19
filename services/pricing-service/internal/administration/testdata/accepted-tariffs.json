@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "tariffs": [
+    {
+      "code": "TRI",
+      "base": [
+        {"cover": "C1", "formula": "(NUM_OF_ADULTS) * (DESTINATION == 'EUR' ? 26.00B : 34.00B)", "condition": null},
+        {"cover": "C2", "formula": "(NUM_OF_ADULTS + NUM_OF_CHILDREN) * 26.00B", "condition": null},
+        {"cover": "C3", "formula": "(NUM_OF_ADULTS + NUM_OF_CHILDREN) * 10.00B", "condition": null}
+      ],
+      "markup": [
+        {"kind": "perc_markup", "factor": "1.50", "condition": "DESTINATION == 'WORLD'"}
+      ]
+    },
+    {
+      "code": "HSI",
+      "base": [
+        {"cover": "C1", "formula": "AREA * 1.25B", "condition": "TYP == 'APT'"},
+        {"cover": "C1", "formula": "AREA * 1.50B", "condition": "TYP == 'HOUSE'"},
+        {"cover": "C2", "formula": "AREA * 0.25B", "condition": "TYP == 'APT'"},
+        {"cover": "C2", "formula": "AREA * 0.45B", "condition": "TYP == 'HOUSE'"},
+        {"cover": "C3", "formula": "30B", "condition": null},
+        {"cover": "C4", "formula": "50B", "condition": null}
+      ],
+      "markup": [
+        {"kind": "perc_markup", "factor": "1.50", "condition": "FLOOD == 'YES'"},
+        {"kind": "perc_markup", "factor": "1.25", "condition": "NUM_OF_CLAIM > 1 "}
+      ]
+    },
+    {
+      "code": "FAI",
+      "base": [
+        {"cover": "C1", "formula": "10B", "condition": null},
+        {"cover": "C2", "formula": "20B", "condition": null},
+        {"cover": "C3", "formula": "30B", "condition": null},
+        {"cover": "C4", "formula": "40B", "condition": null}
+      ],
+      "markup": [
+        {"kind": "perc_markup", "factor": "1.50", "condition": "FLOOD == 'YES'"},
+        {"kind": "perc_markup", "factor": "2.00", "condition": "NUM_OF_CLAIM > 2"}
+      ]
+    },
+    {
+      "code": "CAR",
+      "base": [{"cover": "C1", "formula": "100B", "condition": null}],
+      "markup": [{"kind": "perc_markup", "factor": "50.00", "condition": "NUM_OF_CLAIM > 2"}]
+    }
+  ]
+}

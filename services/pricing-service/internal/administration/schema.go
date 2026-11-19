@@ -58,13 +58,13 @@ func inspectPlatform(
 }
 
 func inspectSchema(ctx context.Context, tx *sql.Tx) (string, error) {
-	var hasHistory, legacySchema bool
+	var hasHistory, hasTariffObjects bool
 	if err := tx.QueryRowContext(ctx, inspectSchemaObjectsQuery).
-		Scan(&legacySchema, &hasHistory); err != nil {
-		return "", databaseError("locate Pricing migration history and legacy schema", err)
+		Scan(&hasTariffObjects, &hasHistory); err != nil {
+		return "", databaseError("locate Pricing migration history and tariff schema", err)
 	}
 	if !hasHistory {
-		if legacySchema {
+		if hasTariffObjects {
 			return "unmanaged", nil
 		}
 		return "uninitialized", nil

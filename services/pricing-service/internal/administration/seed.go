@@ -1,11 +1,14 @@
 package administration
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 )
 
@@ -49,18 +52,36 @@ type tariffAdoption struct {
 	markup []positionUpdate
 }
 
+func decodeSeedCatalog(content []byte) (seedCatalog, error) {
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var catalog seedCatalog
+	if err := decoder.Decode(&catalog); err != nil {
+		return seedCatalog{}, fmt.Errorf("decode Pricing seed catalog: %w", err)
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return seedCatalog{}, errors.New(
+			"unexpected trailing content in Pricing seed catalog",
+		)
+	}
+	if catalog.Version != 1 {
+		return seedCatalog{}, errors.New("unsupported Pricing seed version")
+	}
+	if len(catalog.Tariffs) == 0 {
+		return seedCatalog{}, errors.New("empty Pricing seed catalog")
+	}
+	return catalog, nil
+}
+
 // Seed validates every existing tariff before it inserts or assigns any positions.
 func Seed(ctx context.Context, db *sql.DB, target Target) (SeedResult, error) {
 	if target.SeedAllowed == nil || !*target.SeedAllowed {
 		return SeedResult{}, errors.New("seeding is disabled for the Pricing enrollment")
 	}
-	var catalog seedCatalog
-	if err := json.Unmarshal(
-		seedAsset,
-		&catalog,
-	); err != nil || catalog.Version != 1 ||
-		len(catalog.Tariffs) == 0 {
-		return SeedResult{}, errors.New("invalid embedded Pricing seed version")
+	catalog, err := decodeSeedCatalog(seedAsset)
+	if err != nil {
+		return SeedResult{}, err
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -86,8 +107,8 @@ func Seed(ctx context.Context, db *sql.DB, target Target) (SeedResult, error) {
 		return SeedResult{}, errors.New("migrate the Pricing schema before seeding")
 	}
 
-	// Java does not acquire the administration lock. These relation locks allow readers
-	// to continue and prevent Java writes from changing the adoption plan mid-transaction.
+	// The relation locks allow reads and keep concurrent writes from changing
+	// the rows used to determine positions.
 	if _, err := tx.ExecContext(ctx, lockTariffsQuery); err != nil {
 		return SeedResult{}, databaseError("lock Pricing tariffs for adoption", err)
 	}
@@ -232,7 +253,7 @@ func matchRules(
 }
 
 func assignPositions(ctx context.Context, tx *sql.Tx, plan tariffAdoption) error {
-	// Hibernate's base-rule collection has no row ID. The ctid is transaction-local,
+	// The base rules have no row ID. The ctid is transaction-local,
 	// protected by the table lock and consumed once per matched row.
 	for _, update := range plan.base {
 		if _, err := tx.ExecContext(

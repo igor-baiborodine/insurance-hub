@@ -48,6 +48,18 @@ func TestLoad_Defaults(t *testing.T) {
 			got.ProbeTimeout,
 		)
 	}
+	if got.Database != (Database{
+		MaxConnections: 8,
+		ConnectTimeout: 3 * time.Second,
+		AcquireTimeout: 2 * time.Second,
+		QueryTimeout:   5 * time.Second,
+	}) || got.StartupTimeout != 10*time.Second {
+		t.Errorf(
+			"database defaults = %+v, startup timeout = %v",
+			got.Database,
+			got.StartupTimeout,
+		)
+	}
 	if got.MaxReceiveBytes != 1048576 || got.MaxSendBytes != 8388608 {
 		t.Errorf("gRPC limits = %+v, want 1048576 receive and 8388608 send", got.GRPC)
 	}
@@ -595,6 +607,142 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 					reason,
 					test.setting,
 					test.reason,
+				)
+			}
+		})
+	}
+}
+
+const readerURL = "postgresql://go_pricing_reader:synthetic@localhost:5432/pricing" +
+	"?sslmode=verify-full&sslrootcert=/etc/pricing-service/postgres/ca.crt"
+
+func TestLoad_DatabaseOverrides(t *testing.T) {
+	// given
+	values := map[string]string{
+		"PRICING_DATABASE_URL": readerURL,
+		"DB_MAX_CONNS":         "4",
+		"DB_CONNECT_TIMEOUT":   "1s",
+		"DB_ACQUIRE_TIMEOUT":   "500ms",
+		"DB_QUERY_TIMEOUT":     "3s",
+		"STARTUP_TIMEOUT":      "6s",
+	}
+
+	// when
+	settings, err := load(mapLookup(values))
+
+	// then
+	if err != nil || settings.Database.URL.Value() != readerURL {
+		t.Fatalf("reader credential did not load: %v", err)
+	}
+	if settings.Database.MaxConnections != 4 ||
+		settings.Database.ConnectTimeout != time.Second ||
+		settings.Database.AcquireTimeout != 500*time.Millisecond ||
+		settings.Database.QueryTimeout != 3*time.Second ||
+		settings.StartupTimeout != 6*time.Second {
+		t.Errorf(
+			"database overrides = %+v, startup timeout = %v",
+			settings.Database,
+			settings.StartupTimeout,
+		)
+	}
+	for _, rendered := range []string{
+		fmt.Sprint(settings.Database.URL), fmt.Sprintf("%#v", settings.Database.URL),
+	} {
+		if rendered != "[REDACTED]" {
+			t.Fatal("reader configuration formatting exposed credentials")
+		}
+	}
+}
+
+func TestLoadDatabaseURL_RejectsUnsafeReaderSettings(t *testing.T) {
+	// given
+	for _, test := range []struct {
+		name, value, want string
+	}{
+		{"blank credential", " ", "must not be empty"},
+		{
+			"migration identity",
+			strings.Replace(readerURL, "go_pricing_reader", "go_pricing_migrator", 1),
+			"Pricing reader",
+		},
+		{"insecure TLS", strings.Replace(readerURL, "verify-full", "require", 1), "TLS hostname and CA"},
+		{"invalid port", strings.Replace(readerURL, ":5432", ":65536", 1), "must use a valid port"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			lookup := mapLookup(map[string]string{"PRICING_DATABASE_URL": test.value})
+
+			// when
+			_, err := loadDatabaseURL(lookup)
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.want) ||
+				strings.Contains(err.Error(), "synthetic") {
+				t.Fatal("expected a redacted configuration refusal")
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsInvalidDatabaseStartupLimits(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"pool size outside bounds", map[string]string{"DB_MAX_CONNS": "33"}, "DB_MAX_CONNS"},
+		{"invalid connection timeout", map[string]string{"DB_CONNECT_TIMEOUT": "0s"}, "DB_CONNECT_TIMEOUT"},
+		{"invalid acquisition timeout", map[string]string{"DB_ACQUIRE_TIMEOUT": "0s"}, "DB_ACQUIRE_TIMEOUT"},
+		{"invalid query timeout", map[string]string{"DB_QUERY_TIMEOUT": "-1s"}, "DB_QUERY_TIMEOUT"},
+		{"invalid startup timeout", map[string]string{"STARTUP_TIMEOUT": "invalid"}, "STARTUP_TIMEOUT"},
+		{"connection exceeds startup budget", map[string]string{"DB_CONNECT_TIMEOUT": "4s", "STARTUP_TIMEOUT": "3s"}, "DB_CONNECT_TIMEOUT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			lookup := mapLookup(test.env)
+
+			// when
+			_, err := load(lookup)
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf(
+					"expected configuration refusal for %s, got %v",
+					test.want,
+					err,
+				)
+			}
+		})
+	}
+}
+
+func TestLoad_RejectsInconsistentDatabaseTimeouts(t *testing.T) {
+	for _, test := range []struct {
+		name, setting, value, bound string
+	}{
+		{"acquisition exceeds query budget", "DB_ACQUIRE_TIMEOUT", "6s", "DB_QUERY_TIMEOUT"},
+		{"query exceeds request budget", "DB_QUERY_TIMEOUT", "9s", "REQUEST_TIMEOUT"},
+		{"probe exceeds query budget", "PROBE_TIMEOUT", "6s", "DB_QUERY_TIMEOUT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			lookup := mapLookup(map[string]string{
+				"PRICING_DATABASE_URL": readerURL,
+				test.setting:           test.value,
+			})
+
+			// when
+			_, err := load(lookup)
+
+			// then
+			setting, reason := kitconfig.ErrorDetails(err)
+			if setting != test.setting || reason != "must not exceed "+test.bound {
+				t.Fatalf(
+					"error details = (%q, %q), want %s bounded by %s",
+					setting,
+					reason,
+					test.setting,
+					test.bound,
 				)
 			}
 		})

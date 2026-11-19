@@ -9,8 +9,10 @@ export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/test_tooling.py \
-	scripts/deployment.py scripts/test_deployment.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py)
+	scripts/deployment.py scripts/test_deployment.py scripts/administration.py \
+	scripts/resource_administration.py scripts/test_resource_administration.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py \
+	scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -198,7 +200,7 @@ test-integration: ## Run the service composition and disposable PostgreSQL smoke
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
-		-tags=integration -run '^TestRun_(ProductionComposition|PostgreSQLMigration$$)' \
+		-tags=integration -run '^TestRun_(ProductionComposition|PostgreSQLMigrationAndSeed$$)' \
 		./internal/service ./internal/administration \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
@@ -282,3 +284,16 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make run              Start the service with environment configuration' \
 		'  make build            Compile the server, migrator and seeder' \
 		'  make test-integration Run service composition and disposable PostgreSQL smoke tests'
+
+.PHONY: resource-inspect resource-ensure resource-verify resource-test-fast
+
+resource-inspect: ## Inspect Pricing PostgreSQL resources without mutation
+resource-ensure: ## Ensure Pricing PostgreSQL roles and workload Secrets
+resource-verify: ## Verify Pricing resources and effective workload permissions
+resource-inspect resource-ensure resource-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
+
+resource-test-fast: python-toolchain-check ## Exercise Pricing resource guards with fake adapters
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q -p no:cacheprovider \
+		-m 'not integration and not acceptance' scripts/test_resource_administration.py

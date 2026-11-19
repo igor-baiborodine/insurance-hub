@@ -6,6 +6,7 @@
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke and recovery](#private-smoke-and-recovery)
+  - [PostgreSQL resource administration](#postgresql-resource-administration)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -155,3 +156,40 @@ kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
 
 Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
 absent, and the Java Pricing endpoint to remain ready.
+
+## PostgreSQL resource administration
+
+Set all target variables explicitly before running a resource command. Use the same context
+as the selected target.
+
+| Variable | local-dev | QA |
+| --- | --- | --- |
+| `PRICING_RESOURCE_ENV` | `local-dev` | `qa` |
+| `PRICING_RESOURCE_CONTEXT` | `kind-local-dev-insurance-hub` | `qa-insurance-hub` |
+| `PRICING_RESOURCE_DATA_NS` | `local-dev-all` | `qa-data` |
+| `PRICING_RESOURCE_SVC_NS` | `local-dev-all` | `qa-svc` |
+| `PRICING_RESOURCE_CLUSTER` | `local-dev-postgres-pricing` | `qa-postgres-pricing` |
+| `PRICING_RESOURCE_READER_SECRET` | `local-dev-postgres-pricing-reader-creds` | `qa-postgres-pricing-reader-creds` |
+| `PRICING_RESOURCE_DB_HOST` | `local-dev-postgres-pricing-rw.local-dev-all.svc.cluster.local` | `qa-postgres-pricing-rw.qa-data.svc.cluster.local` |
+
+From the repository root, run `make -C services/pricing-service resource-inspect`
+to check roles, enrollment and Secret presence. For an authorized change use
+`resource-ensure` with `PRICING_RESOURCE_CONFIRM=ensure-<environment>-pricing-resources`.
+Ensure publishes missing managed Secrets before enabling roles. Retry using the same Secrets
+after a failure. An existing role without a recoverable Secret needs inspection before retry.
+Use `resource-verify` to verify the enrolled role identities, CA, and denial of privileged
+SQL using the workload Secrets. Effective checks use a temporary loopback port-forward and
+local `psql`. Probe transactions roll back.
+
+Set `PRICING_DATABASE_URL` from the reader Secret's `database-url` key, following Product's
+`secretKeyRef` pattern. Mount the reader CA at `/etc/pricing-service/postgres/ca.crt`.
+Startup recognizes only the Pricing reader role, verifies PostgreSQL TLS and tariff reads, and
+uses a read-only pool. The migrator and seeder use separate credentials and remain explicit
+commands. The development scaffold can start without a configured dependency.
+
+The reader uses the same defaults as Product. `DB_MAX_CONNS` (8) bounds the pool,
+`DB_CONNECT_TIMEOUT` (3s) bounds connection setup, `DB_ACQUIRE_TIMEOUT` (2s) bounds pool
+acquisition, and `DB_QUERY_TIMEOUT` (5s) bounds the query. When the reader is configured,
+both acquisition and probe timeouts must fit within the query budget, which must fit
+within `REQUEST_TIMEOUT`. Connection setup must fit within `STARTUP_TIMEOUT` (10s),
+which also bounds gateway startup.

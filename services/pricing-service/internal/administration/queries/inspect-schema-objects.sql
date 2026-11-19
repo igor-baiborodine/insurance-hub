@@ -1,4 +1,4 @@
--- Report whether any Java tariff objects and the Pricing migration history exist.
+-- Report whether tariff objects and the Pricing migration history exist.
 SELECT
     to_regclass('public.tariff') IS NOT NULL
         OR to_regclass('public.base_price_rules') IS NOT NULL

@@ -40,9 +40,6 @@ var insertUnpositionedRuleQuery string
 //go:embed testdata/sql/reset-role.sql
 var resetRoleQuery string
 
-//go:embed testdata/sql/setup-tariff-seed-fixture.sql
-var setupSeedFixtureQuery string
-
 //go:embed testdata/sql/truncate-tariff-tables.sql
 var truncateTariffsQuery string
 
@@ -84,3 +81,12 @@ var dropHistoryTimestampRequiredQuery string
 
 //go:embed testdata/sql/restore-pricing-schema-version-timestamp-required.sql
 var restoreHistoryTimestampRequiredQuery string
+
+//go:embed testdata/sql/read-tariff-codes.sql
+var readTariffCodesQuery string
+
+//go:embed testdata/sql/deny-tariff-update.sql
+var denyTariffUpdateQuery string
+
+//go:embed testdata/sql/deny-tariff-alter.sql
+var denyTariffAlterQuery string

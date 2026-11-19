@@ -46,3 +46,6 @@ var inspectSchemaObjectsQuery string
 
 //go:embed queries/inspect-history-schema.sql
 var inspectHistorySchemaQuery string
+
+//go:embed queries/grant-tariff-access.sql
+var grantTariffAccessQuery string

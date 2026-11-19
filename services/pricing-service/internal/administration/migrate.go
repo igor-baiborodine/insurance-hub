@@ -47,6 +47,9 @@ func Migrate(ctx context.Context, db *sql.DB, target Target) error {
 			); err != nil {
 				return databaseError("record Pricing schema version", err)
 			}
+			if _, err := tx.ExecContext(ctx, grantTariffAccessQuery); err != nil {
+				return databaseError("grant Pricing tariff access", err)
+			}
 			return nil
 		},
 	}, nil)
