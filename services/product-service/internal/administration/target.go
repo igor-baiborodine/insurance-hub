@@ -96,7 +96,7 @@ func (t Target) ValidateSeedConnection(
 		databaseURL,
 		caPath,
 		"go_product_seeder",
-		"seed",
+		"seeder",
 	)
 }
 
@@ -106,7 +106,7 @@ func (t Target) validateCredential(
 	databaseURL,
 	caPath,
 	expectedUser,
-	operation string,
+	credentialKind string,
 ) error {
 	if selectedEnvironment == "" || selectedContext == "" ||
 		t.Environment != selectedEnvironment || t.Context != selectedContext {
@@ -154,10 +154,10 @@ func (t Target) validateCredential(
 		parsed.User == nil ||
 		parsed.User.Username() != expectedUser || parsed.Hostname() != t.Host ||
 		strings.TrimPrefix(parsed.Path, "/") != t.Database || parsed.Fragment != "" {
-		return fmt.Errorf("database URL does not match enrolled %s target", operation)
+		return fmt.Errorf("database URL does not match enrolled %s target", credentialKind)
 	}
 	if password, hasPassword := parsed.User.Password(); !hasPassword || password == "" {
-		return fmt.Errorf("%s credential is missing", operation)
+		return fmt.Errorf("%s credential is missing", credentialKind)
 	}
 	if port := parsed.Port(); port != "" && port != "5432" && !t.Disposable {
 		return errors.New("database port differs from CNPG enrollment")
