@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: pricing-api
+          env:
+            - name: PRICING_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: qa-postgres-pricing-reader-creds
+                  key: database-url
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: qa-postgres-pricing-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt

@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../../apps/svc/pricing/base/administration
+images:
+  - name: insurance-hub-pricing-api
+    newName: insurance-hub-pricing-api
+    newTag: 1.0.0-local.000000000000
+patches:
+  - path: job-patch.yaml
+    target:
+      kind: Job
+      name: pricing-init

@@ -94,7 +94,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
 | `make python-check`         | Ruff format/lint plus fast gateway, deployment render and release fixtures. | Passing `python-toolchain-check`, kubectl/Kustomize and repository overlays. The fixtures do not access a cluster. |
 | `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
-| `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint, exposed ports, liveness, and graceful shutdown. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
+| `make image-check` | Builds the generated non-root image from committed source identity, verifies OCI labels and runtime hardening, and exercises the server, migrator and seeder entry points with bounded safe failures. | Docker Buildx and access to the pinned builder and runtime images unless cached. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
 | `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
 | `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
@@ -292,6 +292,12 @@ It loads the embedded version-1 tariff catalog, checks the target seed policy an
 version, and applies the complete corpus in one transaction. It inserts missing tariffs,
 assigns positions to uniquely matched Java rows, and reports inserted and existing counts.
 Replay preserves IDs and positions. A mismatch in any of the four tariffs aborts the transaction.
+
+Deployment packages all three commands in the same reviewed image. The retained initialization
+Job runs `/pricing-migrate` as its only init container and `/pricing-seed` as its only application
+container, with separate target, migrator and seeder Secret mounts. It has no automatic retry;
+operators inspect a retained failure before preparing an explicit next attempt. The API Deployment
+mounts only the reader Secret and CA, matching Product's common database boundary.
 
 ## Example RPC and HTTP gateway
 

@@ -20,6 +20,10 @@ configMapGenerator:
       - DEPLOYMENT_ENVIRONMENT=local-dev
       - SERVICE_VERSION=git-000000000000
 patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: pricing-api
   - path: network-policy-patch.yaml
     target:
       kind: NetworkPolicy

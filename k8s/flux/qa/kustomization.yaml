@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - ./flux-system
   - ./releases/product/release.yaml
+  - ./releases/pricing/release.yaml

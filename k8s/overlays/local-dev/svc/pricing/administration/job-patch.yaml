@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pricing-init
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: migrate
+          args:
+            - --operation=migrate
+            - --environment=local-dev
+            - --context=kind-local-dev-insurance-hub
+            - --target-file=/etc/pricing-admin/target/target.json
+            - --database-url-file=/etc/pricing-admin/migrator/database-url
+            - --ca-file=/etc/pricing-admin/migrator/ca.crt
+            - --timeout=120s
+      containers:
+        - name: seed
+          args:
+            - --environment=local-dev
+            - --context=kind-local-dev-insurance-hub
+            - --target-file=/etc/pricing-admin/target/target.json
+            - --database-url-file=/etc/pricing-admin/seeder/database-url
+            - --ca-file=/etc/pricing-admin/seeder/ca.crt
+      volumes:
+        - name: target
+          secret:
+            secretName: local-dev-postgres-pricing-admin-target
+        - name: migrator
+          secret:
+            secretName: local-dev-postgres-pricing-migrator-creds
+        - name: seeder
+          secret:
+            secretName: local-dev-postgres-pricing-seeder-creds

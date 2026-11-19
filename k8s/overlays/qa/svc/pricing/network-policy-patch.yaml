@@ -19,6 +19,16 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: qa-data
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: qa-postgres-pricing
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: qa-monitoring
           podSelector:
             matchLabels:

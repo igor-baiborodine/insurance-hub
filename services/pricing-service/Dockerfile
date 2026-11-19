@@ -20,6 +20,14 @@ RUN GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -mod=readonly -trimpath -buildvcs=false \
     -ldflags='-s -w -buildid=' -o /out/pricing-service ./cmd/server
 
+RUN GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -buildvcs=false \
+    -ldflags='-s -w -buildid=' -o /out/pricing-migrate ./cmd/migrate
+
+RUN GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -buildvcs=false \
+    -ldflags='-s -w -buildid=' -o /out/pricing-seed ./cmd/seed
+
 FROM ${RUNTIME_IMAGE}
 
 ARG SOURCE_CREATED
@@ -34,6 +42,8 @@ LABEL org.opencontainers.image.created="${SOURCE_CREATED}" \
       org.opencontainers.image.version="${SOURCE_VERSION}"
 
 COPY --from=build --chmod=0555 /out/pricing-service /pricing-service
+COPY --from=build --chmod=0555 /out/pricing-migrate /pricing-migrate
+COPY --from=build --chmod=0555 /out/pricing-seed /pricing-seed
 
 USER 65532:65532
 EXPOSE 8080 8081 9090

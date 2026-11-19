@@ -14,6 +14,7 @@ import uuid
 from contextlib import ExitStack
 from ipaddress import IPv4Address
 from pathlib import Path
+from typing import Any
 
 import yaml
 from scripts.go.service import deployment as lifecycle
@@ -37,6 +38,14 @@ ALLOY_EGRESS = (
     {"app.kubernetes.io/name": "alloy", "app.kubernetes.io/instance": "qa-alloy"},
     [(4317, "TCP")],
 )
+DATABASE_EGRESS = {
+    "local-dev": (
+        "local-dev-all",
+        {"cnpg.io/cluster": "local-dev-postgres-pricing"},
+        [(5432, "TCP")],
+    ),
+    "qa": ("qa-data", {"cnpg.io/cluster": "qa-postgres-pricing"}, [(5432, "TCP")]),
+}
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -73,7 +82,11 @@ def source_version(revision: str) -> str:
 
 
 def expected_policy(environment: str) -> dict:
-    destinations = (DNS_EGRESS, ALLOY_EGRESS) if environment == "qa" else (DNS_EGRESS,)
+    destinations = (
+        (DNS_EGRESS, DATABASE_EGRESS[environment], ALLOY_EGRESS)
+        if environment == "qa"
+        else (DNS_EGRESS, DATABASE_EGRESS[environment])
+    )
     egress = [
         {
             "to": [
@@ -104,6 +117,18 @@ def render(environment: str) -> str:
     record = service_record(ROOT, "pricing")
     target = target_record(ROOT, record, environment)
     return run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(ROOT / target["overlay"])])
+
+
+def render_administration(environment: str) -> str:
+    record = service_record(ROOT, "pricing")
+    target = target_record(ROOT, record, environment)
+    return run(
+        [
+            os.environ.get("KUBECTL", "kubectl"),
+            "kustomize",
+            str(ROOT / target["initialization"]["overlay"]),
+        ]
+    )
 
 
 def validate_render(environment: str, text: str) -> dict[str, dict]:
@@ -148,6 +173,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "terminationGracePeriodSeconds",
             "securityContext",
             "containers",
+            "volumes",
         }
         and pod["automountServiceAccountToken"] is False
         and pod["enableServiceLinks"] is False
@@ -174,6 +200,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "ports",
             "env",
             "envFrom",
+            "volumeMounts",
             "resources",
             "startupProbe",
             "livenessProbe",
@@ -194,11 +221,32 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         and container["env"]
         == [
             {
+                "name": "PRICING_DATABASE_URL",
+                "valueFrom": {
+                    "secretKeyRef": {
+                        "name": f"{environment}-postgres-pricing-reader-creds",
+                        "key": "database-url",
+                    }
+                },
+            },
+            {
                 "name": "SERVICE_INSTANCE_ID",
                 "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            }
+            },
         ]
         and container["envFrom"] == [{"configMapRef": {"name": f"{environment}-pricing-config"}}]
+        and container["volumeMounts"]
+        == [{"name": "postgres-ca", "mountPath": "/etc/pricing-service/postgres", "readOnly": True}]
+        and pod["volumes"]
+        == [
+            {
+                "name": "postgres-ca",
+                "secret": {
+                    "secretName": f"{environment}-postgres-pricing-reader-creds",
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                },
+            }
+        ]
         and container["resources"]
         == {
             "requests": {"cpu": "50m", "memory": "32Mi"},
@@ -229,6 +277,13 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         "HTTP_ADDR": "127.0.0.1:8080",
         "GRPC_ADDR": "127.0.0.1:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
+        "DB_MAX_CONNS": "8",
+        "DB_CONNECT_TIMEOUT": "3s",
+        "DB_ACQUIRE_TIMEOUT": "2s",
+        "DB_QUERY_TIMEOUT": "5s",
+        "STARTUP_TIMEOUT": "10s",
+        "REQUEST_TIMEOUT": "8s",
+        "PROBE_TIMEOUT": "2s",
         "SERVICE_VERSION": version,
         "OTEL_ENABLED": "true" if environment == "qa" else "false",
     }
@@ -238,7 +293,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         )
     require(
         data == expected_data
-        and bool(re.fullmatch(r"git-[0-9a-f]{12}", version))
+        and bool(re.fullmatch(r"git-[0-9a-f]{12}|\$\{PRICING_SERVICE_VERSION\}", version))
         and all(
             metadata["labels"].get(VERSION_LABEL) == version
             for metadata in (deployment["metadata"], template["metadata"])
@@ -249,10 +304,20 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     if environment == "qa":
         registry = "ghcr.io/igor-baiborodine/insurance-hub/pricing-api"
         require(
-            (version == PLACEHOLDER and image == f"{registry}:0.0.0-unpublished")
+            (
+                version == "${PRICING_SERVICE_VERSION}"
+                and image == f"{registry}:${{PRICING_SERVICE_VERSION}}"
+            )
             or (
-                version != PLACEHOLDER
-                and re.fullmatch(rf"{re.escape(registry)}:1\.[0-9]+\.[0-9]+", image)
+                bool(re.fullmatch(r"git-[0-9a-f]{12}", version))
+                and bool(
+                    re.fullmatch(
+                        rf"{re.escape(registry)}(?:"
+                        rf":(?:1\.[0-9]+\.[0-9]+|{re.escape(version)})"
+                        rf"|@sha256:[0-9a-f]{{64}})",
+                        image,
+                    )
+                )
             ),
             "QA image and release version differ",
         )
@@ -268,27 +333,120 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     return items
 
 
-def qa_activation(resources: list[str], items: dict[str, dict]) -> None:
+def validate_administration(environment: str, text: str) -> dict:
+    target = target_record(ROOT, service_record(ROOT, "pricing"), environment)
+    documents = list(yaml.safe_load_all(text))
+    require(
+        len(documents) == 1 and documents[0].get("kind") == "Job",
+        "Pricing administration render must contain exactly one Job",
+    )
+    job = documents[0]
+    require(
+        job["metadata"]["name"] == f"{environment}-pricing-init"
+        and job["metadata"]["namespace"] == target["namespace"]
+        and job["spec"]["backoffLimit"] == 0
+        and job["spec"]["activeDeadlineSeconds"] == 300,
+        "Pricing administration Job identity or retry budget differs",
+    )
+    pod = job["spec"]["template"]["spec"]
+    require(
+        pod["automountServiceAccountToken"] is False
+        and pod["enableServiceLinks"] is False
+        and pod["restartPolicy"] == "Never"
+        and len(pod["initContainers"]) == 1
+        and len(pod["containers"]) == 1,
+        "Pricing administration Pod isolation or execution order differs",
+    )
+    migrate = pod["initContainers"][0]
+    seed = pod["containers"][0]
+    require(
+        migrate["name"] == "migrate"
+        and migrate["command"] == ["/pricing-migrate"]
+        and seed["name"] == "seed"
+        and seed["command"] == ["/pricing-seed"]
+        and migrate["image"] == seed["image"]
+        and {mount["name"] for mount in migrate["volumeMounts"]} == {"target", "migrator"}
+        and {mount["name"] for mount in seed["volumeMounts"]} == {"target", "seeder"},
+        "Pricing administration must migrate before seed with operation-specific credentials",
+    )
+    expected_timeout = "${MIGRATION_TIMEOUT}" if environment == "qa" else "120s"
+    require(
+        migrate["args"]
+        == [
+            "--operation=migrate",
+            f"--environment={environment}",
+            f"--context={target['context']}",
+            "--target-file=/etc/pricing-admin/target/target.json",
+            "--database-url-file=/etc/pricing-admin/migrator/database-url",
+            "--ca-file=/etc/pricing-admin/migrator/ca.crt",
+            f"--timeout={expected_timeout}",
+        ]
+        and seed["args"]
+        == [
+            f"--environment={environment}",
+            f"--context={target['context']}",
+            "--target-file=/etc/pricing-admin/target/target.json",
+            "--database-url-file=/etc/pricing-admin/seeder/database-url",
+            "--ca-file=/etc/pricing-admin/seeder/ca.crt",
+        ],
+        "Pricing administration target or bounded command arguments differ",
+    )
+    secrets = {volume["name"]: volume["secret"]["secretName"] for volume in pod["volumes"]}
+    require(
+        secrets
+        == {
+            "target": f"{environment}-postgres-pricing-admin-target",
+            "migrator": f"{environment}-postgres-pricing-migrator-creds",
+            "seeder": f"{environment}-postgres-pricing-seeder-creds",
+        }
+        and f"{environment}-postgres-pricing-reader-creds" not in secrets.values(),
+        "Pricing administration Secret binding differs",
+    )
+    return job
+
+
+def qa_release_ownership() -> None:
+    resources = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())[
+        "resources"
+    ]
     require(
         [resource for resource in resources if resource.startswith("./pricing/")]
         == ["./pricing/legacy"],
         "QA legacy Pricing must remain the only nested Pricing resource",
     )
-    version = items["ConfigMap"]["data"]["SERVICE_VERSION"]
+    require("./pricing" not in resources, "shared QA ownership must not activate Pricing Go")
+    flux_resources = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())[
+        "resources"
+    ]
     require(
-        resources.count("./pricing") == int(version != PLACEHOLDER),
-        "QA Pricing activation and published release must agree",
+        flux_resources.count("./releases/pricing/release.yaml") == 1,
+        "QA Pricing release owner must be included exactly once",
+    )
+    bundle = list(
+        yaml.safe_load_all((ROOT / "k8s/flux/qa/releases/pricing/release.yaml").read_text())
+    )
+    api = [item for item in bundle if item.get("metadata", {}).get("name") == "qa-pricing-api"]
+    sources = [item for item in bundle if item.get("kind") == "GitRepository"]
+    initialization = [
+        item
+        for item in bundle
+        if item.get("kind") == "Kustomization"
+        and item.get("spec", {}).get("path", "").endswith("/administration")
+    ]
+    require(
+        len(api) == len(sources) == len(initialization) == 1
+        and initialization[0]["spec"].get("suspend") is True
+        and "dependsOn" not in api[0]["spec"]
+        and api[0]["spec"]["sourceRef"]["name"] == sources[0]["metadata"]["name"],
+        "staged Pricing release must retain the old API without running initialization",
     )
 
 
 def check_render() -> None:
-    resources = yaml.safe_load((ROOT / "k8s/overlays/qa/svc/kustomization.yaml").read_text())[
-        "resources"
-    ]
     for environment in ("local-dev", "qa"):
-        items = validate_render(environment, render(environment))
-        if environment == "qa":
-            qa_activation(resources, items)
+        validate_render(environment, render(environment))
+        validate_administration(environment, render_administration(environment))
+    qa_release_ownership()
 
 
 class Target:
@@ -300,12 +458,16 @@ class Target:
         self.configuration = target_record(ROOT, self.record, self.environment)
         self.context = self.configuration["context"]
         self.namespace = self.configuration["namespace"]
-        require(
-            os.environ.get("DEPLOY_CONTEXT") == self.context
-            and os.environ.get("DEPLOY_SVC_NS") == self.namespace,
-            "deployment coordinates differ from the catalog",
-        )
+        self.data_namespace = self.configuration["dataNamespace"]
+        for key, expected in (
+            ("DEPLOY_CONTEXT", self.context),
+            ("DEPLOY_SVC_NS", self.namespace),
+            ("DEPLOY_DATA_NS", self.data_namespace),
+        ):
+            require(os.environ.get(key) == expected, f"{key} must explicitly equal {expected}")
         self.deployment = f"{self.environment}-pricing-api"
+        self.secret = f"{self.environment}-postgres-pricing-reader-creds"
+        self.administration_overlay = ROOT / self.configuration["initialization"]["overlay"]
         self.kubectl_binary = os.environ.get("KUBECTL", "kubectl")
 
     def kubectl(self, *args: str, input_text: str | None = None, timeout: float = 30) -> str:
@@ -329,15 +491,27 @@ class Target:
             and namespace.get("status", {}).get("phase") == "Active",
             "target namespace is not active",
         )
+        data_namespace = self.json("get", "namespace", self.data_namespace)
+        require(
+            data_namespace.get("metadata", {}).get("name") == self.data_namespace
+            and data_namespace.get("status", {}).get("phase") == "Active",
+            "target data namespace is not active",
+        )
 
     def rendered(self) -> tuple[str, dict[str, dict], str]:
-        items = validate_render(self.environment, render(self.environment))
-        version = source_version(os.environ.get("DEPLOY_IMAGE_SOURCE_REVISION", ""))
+        rendered = render(self.environment)
+        if self.configuration["mode"] == "flux" and "@sha256:" in os.environ.get(
+            "DEPLOY_IMAGE_REF", ""
+        ):
+            for key, value in lifecycle.release_substitutions(self).items():
+                rendered = rendered.replace(f"${{{key}}}", value)
+        items = validate_render(self.environment, rendered)
         deployment = items["Deployment"]
         template = deployment["spec"]["template"]
         container = template["spec"]["containers"][0]
         config = items["ConfigMap"]["data"]
         if self.configuration["mode"] == "direct":
+            version = source_version(os.environ.get("DEPLOY_IMAGE_SOURCE_REVISION", ""))
             image = os.environ.get("DEPLOY_IMAGE_REF", "")
             require(
                 image == f"{self.record['localImage']}:1.0.0-local.{version[4:]}",
@@ -348,9 +522,14 @@ class Target:
             for metadata in (deployment["metadata"], template["metadata"]):
                 metadata["labels"][VERSION_LABEL] = version
         else:
-            require(not os.environ.get("DEPLOY_IMAGE_REF"), "image override is local-dev only")
             require(
-                config["SERVICE_VERSION"] == version, "QA Pricing release is inactive or differs"
+                "@sha256:" in os.environ.get("DEPLOY_IMAGE_REF", ""),
+                "select the immutable reviewed QA image",
+            )
+            container["image"] = lifecycle.release_image(self)
+            require(
+                container["image"] == os.environ["DEPLOY_IMAGE_REF"],
+                "QA image differs from the reviewed release",
             )
         self.template_labels = template["metadata"]["labels"]
         return yaml.safe_dump_all(items.values(), explicit_start=True), items, container["image"]
@@ -397,8 +576,6 @@ class Target:
             )
         if not require_deployment:
             return {}
-        if self.configuration["mode"] == "flux":
-            self.verify_flux_inventory(items)
         desired = items["Deployment"]["spec"]["template"]
         actual = deployment["spec"]["template"]
         version = desired["metadata"]["labels"][VERSION_LABEL]
@@ -438,28 +615,6 @@ class Target:
         )
         return pod
 
-    def verify_flux_inventory(self, items: dict[str, dict]) -> None:
-        flux = self.configuration["flux"]
-        owner = self.json("get", "kustomization", flux["sharedOwner"], "-n", flux["namespace"])
-        status = owner.get("status", {})
-        revision = os.environ.get("DEPLOY_SOURCE_REVISION", "")
-        require(
-            lifecycle.ready(owner)
-            and bool(re.fullmatch(r"[0-9a-f]{40}", revision))
-            and status.get("lastAppliedRevision", "").rsplit(":", 1)[-1] == revision,
-            "shared Flux inventory is not ready at the selected revision",
-        )
-        observed = {
-            (entry["id"], entry["v"]) for entry in status.get("inventory", {}).get("entries", [])
-        }
-        expected = set()
-        for kind, item in items.items():
-            group, _, version = item["apiVersion"].rpartition("/")
-            metadata = item["metadata"]
-            identity = f"{metadata['namespace']}_{metadata['name']}_{group}_{kind}"
-            expected.add((identity, version))
-        require(expected <= observed, "shared Flux inventory does not own all Pricing resources")
-
 
 def image_id(target: Target, image: str) -> str:
     flux = target.configuration["mode"] == "flux"
@@ -489,7 +644,108 @@ def valid_digest(value: str) -> bool:
 
 
 def secret_and_image(target: Target, image: str) -> None:
+    secret = target.json("get", "secret", target.secret)
+    require(
+        secret.get("kind") == "Secret"
+        and set(secret.get("data", {})) == {"database-url", "ca.crt"},
+        "reader Secret is absent or has unexpected keys",
+    )
     image_id(target, image)
+
+
+def resource_environment(target: Target) -> dict[str, str]:
+    values = safe_environment()
+    values.update(
+        {
+            "PRICING_RESOURCE_ENV": target.environment,
+            "PRICING_RESOURCE_CONTEXT": target.context,
+            "PRICING_RESOURCE_DATA_NS": target.data_namespace,
+            "PRICING_RESOURCE_SVC_NS": target.namespace,
+            "PRICING_RESOURCE_CLUSTER": f"{target.environment}-postgres-pricing",
+            "PRICING_RESOURCE_READER_SECRET": target.secret,
+            "PRICING_RESOURCE_DB_HOST": (
+                f"{target.environment}-postgres-pricing-rw."
+                f"{target.data_namespace}.svc.cluster.local"
+            ),
+            "PYTHONPATH": str(ROOT),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
+    return values
+
+
+def resource_action(target: Target, action: str) -> str:
+    require(action in {"inspect", "verify"}, "unsupported read-only resource action")
+    result = run_command(
+        [
+            os.environ.get("MAKE_COMMAND", "make"),
+            "--no-print-directory",
+            "-C",
+            str(ROOT / "services/pricing-service"),
+            f"resource-{action}",
+        ],
+        cwd=ROOT,
+        env=resource_environment(target),
+        timeout_seconds=180,
+        teardown_seconds=10,
+        activity=f"Pricing resource {action}",
+    )
+    return result.stdout.strip()
+
+
+def resource_snapshot(target: Target) -> dict[str, Any]:
+    try:
+        value = json.loads(resource_action(target, "inspect"))
+    except ValueError as error:
+        raise lifecycle.DeploymentError("resource inspection is malformed") from error
+    require(
+        isinstance(value, dict)
+        and set(value)
+        == {
+            "roles",
+            "memberships",
+            "target",
+            "databaseCompatible",
+            "credentials",
+            "markerMatchesEnrollment",
+        }
+        and isinstance(value["roles"], list)
+        and isinstance(value["memberships"], list)
+        and (value["target"] is None or isinstance(value["target"], dict))
+        and isinstance(value["databaseCompatible"], bool)
+        and isinstance(value["credentials"], dict)
+        and set(value["credentials"])
+        == {"go_pricing_reader", "go_pricing_migrator", "go_pricing_seeder"}
+        and set(value["credentials"].values()) <= {"missing", "present", "CA differs"}
+        and isinstance(value["markerMatchesEnrollment"], bool),
+        "resource inspection has unexpected state",
+    )
+    return value
+
+
+def administration_snapshot(target: Target) -> dict[str, Any]:
+    return resource_snapshot(target)
+
+
+def role_snapshot(target: Target) -> dict[str, Any]:
+    return resource_snapshot(target)
+
+
+def record_snapshot(stage: str, value: dict[str, Any]) -> None:
+    print(f"pricing-deployment: {stage} catalog identity " + json.dumps(value, sort_keys=True))
+
+
+def initialization_check(target: Target) -> None:
+    resource_action(target, "verify")
+
+
+def initialization_complete(target: Target) -> None:
+    initialization_check(target)
+    state = resource_snapshot(target)
+    require(
+        state["databaseCompatible"] is True and state["markerMatchesEnrollment"] is True,
+        "Pricing initialization is absent or differs from target enrollment",
+    )
 
 
 def check_requested_route(target: Target) -> None:
@@ -511,6 +767,8 @@ def rollout(target: Target) -> None:
 
 def stop(target: Target, items: dict[str, dict]) -> None:
     target.live(items, require_deployment=False)
+    before = resource_snapshot(target)
+    record_snapshot("before stop", before)
     target.kubectl(
         "scale", f"deployment/{target.deployment}", "--replicas=0", "--timeout=60s", timeout=65
     )
@@ -522,6 +780,9 @@ def stop(target: Target, items: dict[str, dict]) -> None:
             status.get("observedGeneration") == deployment["metadata"]["generation"]
             and status.get("replicas", 0) == 0
         ):
+            after = resource_snapshot(target)
+            record_snapshot("after stop", after)
+            require(after == before, "Pricing protected state changed during local stop")
             return
         time.sleep(max(0, min(1, deadline - time.monotonic())))
     raise lifecycle.DeploymentError("Pricing stop exceeded 90 seconds")
@@ -543,6 +804,9 @@ def verify(target: Target, items: dict[str, dict]) -> None:
     probe = os.environ.get("DEPLOY_DENIAL_PROBE", "0")
     require(probe in {"0", "1"}, "DEPLOY_DENIAL_PROBE must be 0 or 1")
     pod = target.live(items, require_deployment=True)
+    before = resource_snapshot(target)
+    record_snapshot("before verification", before)
+    resource_action(target, "verify")
     with ExitStack() as forwards:
         ports = {
             name: forwards.enter_context(
@@ -604,6 +868,9 @@ def verify(target: Target, items: dict[str, dict]) -> None:
     )
     if probe == "1":
         verify_denial(target, pod)
+    after = resource_snapshot(target)
+    record_snapshot("after verification", after)
+    require(after == before, "Pricing protected state changed during verification")
 
 
 def verify_denial(target: Target, pod: dict) -> None:

@@ -10,9 +10,10 @@ TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/test_tooling.py \
 	scripts/deployment.py scripts/test_deployment.py scripts/administration.py \
-	scripts/resource_administration.py scripts/test_resource_administration.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py \
+	scripts/image_check.py scripts/test_image_check.py scripts/resource_administration.py \
 	scripts/test_resource_administration.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py \
+	scripts/test_image_check.py scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -121,7 +122,9 @@ image-check: image-build
 
 _image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
-		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT):$(CURDIR)/scripts" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
+		"$(PYTHON)" scripts/image_check.py
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
