@@ -32,6 +32,9 @@ flag_management:
     - name: chat-service
       paths:
         - services/chat-service/
+    - name: pricing-service
+      paths:
+        - services/pricing-service/
 
 ignore:
   - "services/product-service/gen/**"
@@ -42,3 +45,4 @@ ignore:
   - "services/dashboard-service/gen/**"
   - "services/dashboard-service/internal/testing/**"
   - "services/document-service/gen/**"
+  - "services/pricing-service/gen/**"

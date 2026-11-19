@@ -81,7 +81,7 @@ gen/openapiv2/pricing/v1/example_service.swagger.json
 
 ### Non-mutating validation targets
 
-These targets preserve the module outside ignored `.tools/`. Targets that invoke pinned tools
+These targets preserve source and write reports and caches to ignored paths. Targets that invoke pinned tools
 require `bootstrap-tools` to have been run explicitly.
 
 | Target                      | Coverage                                                                                                                                                                                                                                                                   | Network or other prerequisite                                                                                                                                                      |
@@ -103,7 +103,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
-| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
+| `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It writes only the coverage profiles and tool-managed output. The real-listener tests use disposable loopback listeners. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
 
 The shared `test-tooling` runner handles SIGINT and SIGTERM, unwinds the active child process group, and
@@ -153,7 +153,7 @@ make test-tooling
 ### Repository onboarding
 
 The [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) describes
-inventory and CI onboarding. Use the module's Make targets for this standalone checkpoint.
+inventory and CI ownership. Pricing is registered as a standalone module and Servicekit consumer.
 The [copy procedure](COPYING.md) records how the foundation was derived from the committed template.
 Use [Dashboard](../dashboard-service/README.md) as the reference for common runtime behavior.
 
