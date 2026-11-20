@@ -89,7 +89,7 @@ coverage to Codecov under the `servicekit` flag.
 ## Release
 
 Servicekit releases through the shared
-[Go library release workflow](../../docs/migration/phase-4/go-module-topology.md#shared-library-validation-and-release)
+[Go library release workflow](../../docs/go-module-topology.md#shared-library-validation-and-release)
 with tags `libs/servicekit/vX.Y.Z`. A release validates the library and every active consumer at
 the exact source, creates the tag, and verifies public resolution through `proxy.golang.org` and
 `sum.golang.org` before creating the GitHub Release. A tag alone does not establish a successful

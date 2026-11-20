@@ -72,7 +72,7 @@ the same flag from `main`.
 ## Release
 
 MVEL releases through the shared
-[Go library release workflow](../../docs/migration/phase-4/go-module-topology.md#shared-library-validation-and-release)
+[Go library release workflow](../../docs/go-module-topology.md#shared-library-validation-and-release)
 with tags `libs/mvel/vX.Y.Z`. The first release is exactly `libs/mvel/v1.0.0`; later releases
 require existing MVEL release history. Public verification resolves the exact version through `proxy.golang.org` and
 `sum.golang.org` from an empty-cache standalone consumer. It then evaluates the FAI C1 expression
