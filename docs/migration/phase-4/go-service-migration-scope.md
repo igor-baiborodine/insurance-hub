@@ -237,7 +237,7 @@ retirement outcomes distinct so implementation progress is not confused with liv
   domain-specific concerns; select those relevant to the capability being migrated.
 - [Scaffold copying procedure](../../../templates/go-service/COPYING.md) and
   [scaffold runtime reference](../../../templates/go-service/README.md): service bootstrap and reuse.
-- [Module onboarding](go-module-topology.md) and
+- [Module onboarding](../../go-module-topology.md) and
   [contributor validation guidance](../../../CONTRIBUTING.md): owning inventory and checks.
 - [Standard dashboards and alerts](go-service-dashboards-and-alerts.md): common monitoring and
   domain-specific additions.

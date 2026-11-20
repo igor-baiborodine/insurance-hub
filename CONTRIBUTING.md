@@ -216,7 +216,7 @@ The current inventory contains `templates/go-service`,
 `GOWORK=off`; no workspace or filesystem replacement is approved. Bootstrap Product's module-owned
 tools with `make -C services/product-service bootstrap-tools` before running the aggregate. The six
 `go-scaffold-*` root delegates remain narrow scaffold conveniences. The
-[Go module topology guide](docs/migration/phase-4/go-module-topology.md) defines exact local and hosted
+[Go module topology guide](docs/go-module-topology.md) defines exact local and hosted
 commands, exclusions, mutation boundaries, consumer validation, and the reviewed onboarding
 process for future modules or workspaces.
 

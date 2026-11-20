@@ -168,7 +168,7 @@ make test-tooling
 The generic Go PR workflow selects qualifying inputs under this immediate `services/*-service`
 module. Root topology, active Servicekit-consumer and service-dispatch registration are completed
 separately so each owner can validate the final Document identity. See the
-[module topology guide](../../docs/migration/phase-4/go-module-topology.md).
+[module topology guide](../../docs/go-module-topology.md).
 
 ## Runtime configuration
 

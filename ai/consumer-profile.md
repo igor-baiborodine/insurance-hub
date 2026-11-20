@@ -66,7 +66,7 @@ not an exemption for arbitrary `SKILL.md` files or all files in a client directo
 All Go operations, including setup, formatting, generation, tests, build and deployment, use the
 corresponding owning Make targets. Missing capabilities block work unless adding them is in scope.
 [go-module-topology.json](../go-module-topology.json) and the
-[topology guide](../docs/migration/phase-4/go-module-topology.md) own module discovery.
+[topology guide](../docs/go-module-topology.md) own module discovery.
 The current owners are Product and the scaffold; no shared contract module or workspace is approved.
 Read their Makefiles/configuration for actual pins and scope. Root `go-modules-check` uses standalone
 module checks; a new module requires explicit inventory/CI onboarding. A topology check does not
