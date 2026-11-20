@@ -174,7 +174,7 @@ def rewrite_readme(content: str) -> str:
         "The scaffold-only `go-scaffold-*` root delegates do not cover this copied module.",
         "When installed as an immediate `services/*-service` directory, the generic Go PR",
         "workflow selects its qualifying inputs. Complete the inventory and ownership onboarding",
-        "documented in ../../docs/migration/phase-4/go-module-topology.md.",
+        "documented in ../../docs/go-module-topology.md.",
         "",
     ]
     return "\n".join([*lines[:start], *replacement, *lines[end:]]) + "\n"
@@ -276,7 +276,7 @@ def validate_copy_surface(copy_root: Path) -> None:
         "copied README lacks onboarding boundary",
     )
     require(
-        "../../docs/migration/phase-4/go-module-topology.md" in readme,
+        "../../docs/go-module-topology.md" in readme,
         "copied README lacks topology guide",
     )
     require(

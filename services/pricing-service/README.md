@@ -155,7 +155,7 @@ make test-tooling
 
 ### Repository onboarding
 
-The [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) describes
+The [Go module topology guide](../../docs/go-module-topology.md) describes
 inventory and CI ownership. Pricing is registered as a standalone module and Servicekit consumer.
 The [copy procedure](COPYING.md) records how the foundation was derived from the committed template.
 Use [Dashboard](../dashboard-service/README.md) as the reference for common runtime behavior.

@@ -15,7 +15,7 @@
 
 This document defines the supported Go module resolution and validation boundary for Insurance
 Hub. The machine-readable source of truth is the root
-[`go-module-topology.json`](../../../go-module-topology.json). A directory that merely contains a
+[`go-module-topology.json`](../go-module-topology.json). A directory that merely contains a
 `go.mod` file, appears in a local workspace, or passes a direct Go command is not covered until its
 inventory, owning Make target, consumers, and CI path agree.
 
@@ -118,7 +118,7 @@ import or Go module dependency points at the scaffold or shared tooling director
 
 Servicekit has a separate library-only Make interface using the same formatter policy and exact
 Go/tool pins. It requires no executable, Protobuf generator, database or service-image release.
-See its [ownership, registration and release contract](../../../libs/servicekit/README.md).
+See its [ownership, registration and release contract](../libs/servicekit/README.md).
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
@@ -170,7 +170,7 @@ security checks.
 Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
 PostgreSQL integration suite. The retired Java access and combined gateway-to-Go scripts remain
 historical evidence only; current Product tooling checks are service-local. The
-[change-based local validation matrix](../../../CONTRIBUTING.md#change-based-local-validation)
+[change-based local validation matrix](../CONTRIBUTING.md#change-based-local-validation)
 records when those and the other auxiliary checks are required and which evidence to retain.
 
 For shared tooling or topology changes, use the applicable local sequence:

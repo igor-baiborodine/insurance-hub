@@ -23,6 +23,9 @@ Java/Micronaut to Go.
 
 See [System Overview and Migration Analysis](/docs/system-overview-and-migration-analysis.md)
 
+See [Go Module Topology and Onboarding](/docs/go-module-topology.md) for the registered Go modules,
+their validation and CI coverage, and how to onboard a new module.
+
 See legacy [README](legacy/README.md)
 
 Read ["Insurance Hub: The Way to Go"](https://www.kiroule.com/series/insurance-hub-the-way-to-go/) 
