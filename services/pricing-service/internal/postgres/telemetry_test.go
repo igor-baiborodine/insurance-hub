@@ -331,7 +331,7 @@ func TestReader_GetTariff_ObservesUnavailableAcquireWithinCallerTrace(t *testing
 	assertNoMarker(t, spans, measurements)
 }
 
-func TestReader_GetTariff_CountsAcquireTimeoutAsUnavailableStorage(t *testing.T) {
+func TestReader_GetTariff_CountsAcquireTimeoutAsDeadlineExceeded(t *testing.T) {
 	// given
 	signals := newObservedSignals(t)
 	pool := lazyPool(t, silentListener(t))
@@ -360,16 +360,20 @@ func TestReader_GetTariff_CountsAcquireTimeoutAsUnavailableStorage(t *testing.T)
 	if got := operationPoints(
 		t,
 		measurements,
-	); got["calculate_price/acquire/storage_unavailable"] != 1 {
+	); got["calculate_price/acquire/deadline_exceeded"] != 1 {
 		t.Errorf("database operations = %v", got)
 	}
 }
 
-func TestDatabaseOutcome_SeparatesUnavailableStorageFromInvalidData(t *testing.T) {
+func TestDatabaseOutcome_ClassifiesContextInvalidDataAndUnavailableStorage(t *testing.T) {
 	// given
 	acquireDeadline := readerFailure{
 		operation: "acquire connection",
 		cause:     context.DeadlineExceeded,
+	}
+	refusedConnection := readerFailure{
+		operation: "acquire connection",
+		cause:     errors.New(privateMarker),
 	}
 	for _, test := range []struct {
 		name string
@@ -379,7 +383,8 @@ func TestDatabaseOutcome_SeparatesUnavailableStorageFromInvalidData(t *testing.T
 		{"success", nil, "success"},
 		{"invalid tariff", application.ErrTariffInvalid, "invalid_data"},
 		{"ambiguous tariff", application.ErrTariffAmbiguous, "invalid_data"},
-		{"unavailable reader", acquireDeadline, "storage_unavailable"},
+		{"refused connection", refusedConnection, "storage_unavailable"},
+		{"acquire timeout", acquireDeadline, "deadline_exceeded"},
 		{"cancelled request", context.Canceled, "cancelled"},
 		{"expired request", context.DeadlineExceeded, "deadline_exceeded"},
 		{"unclassified failure", errors.New(privateMarker), "storage_unavailable"},

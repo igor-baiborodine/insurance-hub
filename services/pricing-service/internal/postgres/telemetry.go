@@ -194,21 +194,17 @@ func (observer *Observer) decode(ctx context.Context, operation string, err erro
 	))
 }
 
-// databaseOutcome checks the reader classification before context errors: an unavailable reader
-// may wrap the acquire or query deadline that caused it while the request itself remained active.
 func databaseOutcome(err error) string {
 	switch {
 	case err == nil:
 		return "success"
-	case errors.Is(err, application.ErrTariffInvalid),
-		errors.Is(err, application.ErrTariffAmbiguous):
-		return "invalid_data"
-	case errors.Is(err, application.ErrReaderUnavailable):
-		return "storage_unavailable"
 	case errors.Is(err, context.Canceled):
 		return "cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "deadline_exceeded"
+	case errors.Is(err, application.ErrTariffInvalid),
+		errors.Is(err, application.ErrTariffAmbiguous):
+		return "invalid_data"
 	default:
 		return "storage_unavailable"
 	}
