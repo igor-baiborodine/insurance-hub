@@ -7,9 +7,9 @@ tests:
   - name: service errors fire above five percent with minimum traffic and recover
     interval: 30s
     input_series:
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="success"}'
         values: '0+9x30'
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="internal_error"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="internal_error"}'
         values: '0+1x16 16+0x14'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
@@ -26,14 +26,22 @@ tests:
   - name: error and latency alerts stay inactive below twenty requests
     interval: 30s
     input_series:
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
-        values: '0+0.4x20'
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="internal_error"}'
-        values: '0+0.1x20'
-      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="0.5"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="success"}'
+        values: '0+0.8x20'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="internal_error"}'
+        values: '0+0.2x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc",le="0.5"}'
         values: '0+0x20'
-      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="+Inf"}'
-        values: '0+0.5x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc",le="+Inf"}'
+        values: '0+1x20'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="http",insurance_hub_pricing_outcome="success"}'
+        values: '0+0.8x20'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="http",insurance_hub_pricing_outcome="internal_error"}'
+        values: '0+0.2x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="http",le="0.5"}'
+        values: '0+0x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="http",le="+Inf"}'
+        values: '0+1x20'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname=~"PricingServiceErrorRate|PricingHighLatency",alertstate="firing"}) or vector(0)'
         eval_time: 9m
@@ -44,9 +52,9 @@ tests:
   - name: deadline-exceeded quotes count as service errors
     interval: 30s
     input_series:
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="success"}'
         values: '0+9x30'
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="deadline_exceeded"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="deadline_exceeded"}'
         values: '0+1x16 16+0x14'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
@@ -63,9 +71,9 @@ tests:
   - name: invalid caller requests do not count as service errors
     interval: 30s
     input_series:
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="success"}'
         values: '0+5x30'
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="invalid_request"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="invalid_request"}'
         values: '0+5x30'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
@@ -77,13 +85,13 @@ tests:
   - name: high request latency fires with traffic and recovers
     interval: 30s
     input_series:
-      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome="success"}'
         values: '0+10x34'
-      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="0.5"}'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc",le="0.5"}'
         values: '0+1x16 16+10x18'
-      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="1"}'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc",le="1"}'
         values: '0+10x34'
-      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="+Inf"}'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc",le="+Inf"}'
         values: '0+10x34'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PricingHighLatency",alertstate="firing"}) or vector(0)'

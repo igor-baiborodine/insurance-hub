@@ -10,9 +10,9 @@ groups:
           logs and traces through the tariff read, and verify PostgreSQL health before
           rollback.
         summary: Pricing service error rate exceeds the pilot threshold
-      expr: sum(rate(insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome=~"internal_error|deadline_exceeded"}[5m]))
-        / sum(rate(insurance_hub_pricing_requests_total{service_name="pricing-service"}[5m]))
-        > 0.05 and sum(increase(insurance_hub_pricing_requests_total{service_name="pricing-service"}[5m]))
+      expr: sum(rate(insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc",insurance_hub_pricing_outcome=~"internal_error|deadline_exceeded"}[5m]))
+        / sum(rate(insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc"}[5m]))
+        > 0.05 and sum(increase(insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc"}[5m]))
         >= 20
       for: 2m
       labels:
@@ -27,8 +27,8 @@ groups:
         summary: Pricing request latency exceeds the pilot threshold
       expr: |-
         histogram_quantile(0.95,
-          sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service"}[5m]))) > 0.5
-        and sum(increase(insurance_hub_pricing_requests_total{service_name="pricing-service"}[5m])) >= 20
+          sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",insurance_hub_pricing_transport="grpc"}[5m]))) > 0.5
+        and sum(increase(insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_transport="grpc"}[5m])) >= 20
       for: 5m
       labels:
         service: pricing-service

@@ -70,7 +70,7 @@
       "id": 2,
       "targets": [
         {
-          "expr": "sum(rate(insurance_hub_pricing_requests_total{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_outcome=~\"internal_error|deadline_exceeded\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_pricing_requests_total{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
+          "expr": "sum(rate(insurance_hub_pricing_requests_total{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_transport=\"grpc\",insurance_hub_pricing_outcome=~\"internal_error|deadline_exceeded\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_pricing_requests_total{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_transport=\"grpc\"}[$__rate_interval])), 0.000001)",
           "legendFormat": "unexpected error ratio",
           "refId": "A"
         }
@@ -98,17 +98,17 @@
       "id": 3,
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_transport=\"grpc\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_transport=\"grpc\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(insurance_hub_pricing_request_duration_seconds_bucket{service_name=\"pricing-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_pricing_transport=\"grpc\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "refId": "C"
         }
