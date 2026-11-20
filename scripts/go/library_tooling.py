@@ -14,29 +14,56 @@ import module.module_tooling as module_tooling
 
 from shared_support import Budget, cli_entry, environment, manifest_digest, require
 
+REPOSITORY_MODULE_PREFIX = "github.com/igor-baiborodine/insurance-hub/"
+PUBLIC_PACKAGES = {
+    REPOSITORY_MODULE_PREFIX + "libs/mvel": {""},
+    REPOSITORY_MODULE_PREFIX + "libs/servicekit": {
+        "config",
+        "health",
+        "identity",
+        "internal",
+        "logger",
+        "telemetry",
+    },
+}
 
-def scope_check(packages: list[dict]) -> None:
-    from shared_support import MODULE
 
-    prefix = MODULE.removesuffix("libs/servicekit")
+def module_path(root: Path) -> str:
+    lines = (root / "go.mod").read_text().splitlines()
+    require(lines and lines[0].startswith("module "), "library module declaration is missing")
+    module = lines[0].removeprefix("module ")
+    require(module in PUBLIC_PACKAGES, "unsupported shared library module")
+    return module
+
+
+def declared_module_path(root: Path) -> str:
+    lines = (root / "go.mod").read_text().splitlines()
+    require(lines and lines[0].startswith("module "), "module declaration is missing")
+    return lines[0].removeprefix("module ")
+
+
+def scope_check(
+    packages: list[dict], module: str = REPOSITORY_MODULE_PREFIX + "libs/servicekit"
+) -> None:
     for package in packages:
-        own = package["ImportPath"].removeprefix(MODULE + "/")
+        own = package["ImportPath"].removeprefix(module).removeprefix("/")
         require(
-            own.split("/")[0]
-            in {"config", "identity", "logger", "telemetry", "health", "internal"},
+            own.split("/")[0] in PUBLIC_PACKAGES[module],
             "unsupported public library package",
         )
         for kind in ("Imports", "TestImports", "XTestImports"):
             require(
                 not any(
-                    p.startswith(prefix) and not p.startswith(MODULE + "/")
+                    p.startswith(REPOSITORY_MODULE_PREFIX)
+                    and p != module
+                    and not p.startswith(module + "/")
                     for p in package.get(kind, [])
                 ),
                 "library imports another repository module",
             )
 
 
-def normal_guard(root: Path, go: str, budget: Budget) -> dict[str, str]:
+def normal_guard(root: Path, go: str, budget: Budget, module: str | None = None) -> dict[str, str]:
     # Inspect effective settings before overriding them. Never repair caller input.
     inherited = dict(os.environ)
     settings = json.loads(
@@ -63,19 +90,23 @@ def normal_guard(root: Path, go: str, budget: Budget) -> dict[str, str]:
             [go, "mod", "edit", "-json"], root, "inspect manifest", environment(GOWORK="off"), 30
         )
     )
-    from shared_support import MODULE
+    declared = declared_module_path(root) if (root / "go.mod").is_file() else ""
+    if module is None:
+        from shared_support import MODULE
+
+        selected = declared if declared in PUBLIC_PACKAGES else MODULE
+    else:
+        selected = module
 
     require(
-        not any(r["Old"]["Path"] == MODULE for r in metadata.get("Replace") or []),
-        "normal resolution rejects servicekit replacement",
+        not any(r["Old"]["Path"] == selected for r in metadata.get("Replace") or []),
+        "normal resolution rejects library replacement",
     )
     return environment(GOWORK="off", GOFLAGS="-mod=readonly")
 
 
-def verify(root: Path, go: str, tools: Path, budget: Budget) -> None:
+def verify(root: Path, go: str, tools: Path, budget: Budget, module: str) -> None:
     import yaml
-
-    from shared_support import MODULE
 
     for name in ("golangci-lint", "govulncheck"):
         require((tools / name).is_file(), "missing library tools; run bootstrap-go-tools")
@@ -110,8 +141,8 @@ def verify(root: Path, go: str, tools: Path, budget: Budget) -> None:
     )
     settings = config["formatters"]["settings"]
     require(
-        settings["gofumpt"]["module-path"] == MODULE
-        and settings["goimports"]["local-prefixes"] == [MODULE]
+        settings["gofumpt"]["module-path"] == module
+        and settings["goimports"]["local-prefixes"] == [module]
         and settings["golines"] == {"max-len": 100, "tab-len": 8},
         "formatter settings drift",
     )
@@ -126,7 +157,8 @@ def verify(root: Path, go: str, tools: Path, budget: Budget) -> None:
 
 def execute(action: str, root: Path, go: str, tools: Path) -> None:
     budget = Budget()
-    env = normal_guard(root, go, budget)
+    module = module_path(root)
+    env = normal_guard(root, go, budget, module)
     if action == "bootstrap":
         tools.mkdir(parents=True, exist_ok=True)
         for package in (
@@ -140,9 +172,9 @@ def execute(action: str, root: Path, go: str, tools: Path) -> None:
                 "install pinned library tool",
                 environment(GOWORK="off", GOBIN=str(tools)),
             )
-        verify(root, go, tools, budget)
+        verify(root, go, tools, budget, module)
         return
-    verify(root, go, tools, budget)
+    verify(root, go, tools, budget, module)
     before = manifest_digest(root)
     if action in {"format", "format-check"}:
         os.environ.update(
@@ -154,7 +186,7 @@ def execute(action: str, root: Path, go: str, tools: Path) -> None:
             argparse.Namespace(mode="format" if action == "format" else "check")
         )
     elif action == "check-deps":
-        with tempfile.TemporaryDirectory(prefix="servicekit-deps-") as temporary:
+        with tempfile.TemporaryDirectory(prefix=root.name + "-deps-") as temporary:
             copy = Path(temporary) / "module"
             shutil.copytree(root, copy, ignore=shutil.ignore_patterns(".tools", ".git"))
             budget.run([go, "mod", "tidy"], copy, "check dependency consistency", env)
@@ -169,7 +201,7 @@ def execute(action: str, root: Path, go: str, tools: Path) -> None:
         output = budget.run(
             [go, "list", "-json", "./..."], root, "inspect runtime package boundaries", env
         )
-        scope_check(topology.decode_json_stream(output))
+        scope_check(topology.decode_json_stream(output), module)
     elif action == "update-deps":
         budget.run([go, "mod", "tidy"], root, "update library dependencies", env)
     elif action != "verify":

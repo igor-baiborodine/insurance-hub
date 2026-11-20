@@ -336,12 +336,10 @@ def roots_at(root: Path, inventory: dict[str, Any]) -> set[str]:
             len(tokens) >= 2 and tokens[:2] == ["module", module["modulePath"]],
             "module ownership disagrees with manifest",
         )
-        if module["modulePath"] == MODULE:
+        if module["role"] == "public-shared":
             require(
-                inventory["schemaVersion"] == 2
-                and module["directory"] == DIRECTORY
-                and module["role"] == "public-shared",
-                "servicekit requires registered shared ownership",
+                inventory["schemaVersion"] == 2 and module["directory"].startswith("libs/"),
+                "shared library requires registered shared ownership",
             )
     return discovered
 
@@ -369,6 +367,9 @@ def plan_trees(
     roots = roots_at(base, old) | roots_at(head, new)
     previous = registration_check(base, old)
     active = registration_check(head, new)
+    shared_directories = {
+        module["directory"] for module in new["modules"] if module["role"] == "public-shared"
+    }
     for record in active:
         old_record = next((r for r in previous if r["module"] == record["module"]), None)
         if old_record:
@@ -382,14 +383,14 @@ def plan_trees(
         if any(
             (
                 select_pr_module.is_validation_relevant_module_path(path)
-                if root == DIRECTORY
+                if root in shared_directories
                 else select_pr_module.is_go_pr_qualifying_module_path(path)
             )
             and (path == root or path.startswith(root + "/"))
             for path in paths
         )
     }
-    changed_services = changed - {DIRECTORY}
+    changed_services = changed - shared_directories
     require(
         len(changed_services) <= 1,
         "multiple Go service modules changed; split the PR",
@@ -418,7 +419,7 @@ def plan_trees(
         )
         if not (directory in changed or candidate or (root_work and profile == "full")):
             continue
-        if profile == "ci" and directory in changed and directory != DIRECTORY:
+        if profile == "ci" and directory in changed and module["role"] != "public-shared":
             # The selected-module workflow owns normal hosted consumer validation. Shared CI owns
             # the library and exact-candidate compatibility; the full local profile retains every
             # normal consumer phase for standalone qualification.
@@ -430,7 +431,7 @@ def plan_trees(
             else record["candidate_phases"]
             if record
             else LIBRARY_PHASES
-            if directory == DIRECTORY
+            if module["role"] == "public-shared"
             else ["gate"]
         )
         for phase in phases:

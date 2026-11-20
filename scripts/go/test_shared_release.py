@@ -11,24 +11,25 @@ import pytest
 import yaml
 
 import shared_release as release
-from shared_support import MODULE, REPOSITORY, WORKFLOW, SharedError
+from shared_support import MODULE, REPOSITORY, WORKFLOW, SharedError, library_config
 
 SHA = "a" * 40
 SUM = "h1:" + "A" * 43 + "="
 
 
 class Provider:
-    def __init__(self, has_history: bool = True):
+    def __init__(self, has_history: bool = True, directory: str = "libs/servicekit"):
         self.sha = None
         self.creates = 0
         self.has_history = has_history
+        self.directory = directory
 
     def tag_sha(self, _tag):
         return self.sha
 
     def api(self, path, method="GET", body=None, absent=False):
-        if path == "git/matching-refs/tags/libs/servicekit/":
-            return [{"ref": "refs/tags/libs/servicekit/v0.2.2"}] if self.has_history else []
+        if path == f"git/matching-refs/tags/{self.directory}/":
+            return [{"ref": f"refs/tags/{self.directory}/v0.2.2"}] if self.has_history else []
         if method == "POST":
             assert path == "git/refs"
             assert self.sha is None
@@ -80,13 +81,36 @@ def test_tag_create_and_same_sha_resume_never_move_tag() -> None:
     assert provider.sha == SHA
 
 
-def test_v1_release_requires_existing_library_history() -> None:
+def test_mvel_first_release_starts_at_v1_0_0_and_later_release_requires_history() -> None:
     # given
-    provider = Provider(has_history=False)
+    mvel = library_config("libs/mvel")
+    provider = Provider(has_history=False, directory=mvel["directory"])
 
     # when / then
+    release.publish_tag(provider, "v1.0.0", SHA, mvel)
+    provider.sha = None
     with pytest.raises(SharedError, match="existing library release history"):
-        release.publish_tag(provider, "v1.0.0", SHA)
+        release.publish_tag(provider, "v1.0.1", SHA, mvel)
+
+
+def test_existing_servicekit_release_history_remains_required() -> None:
+    with pytest.raises(SharedError, match="existing library release history"):
+        release.publish_tag(Provider(has_history=False), "v1.0.0", SHA)
+
+
+def test_mvel_release_identity_and_smoke_are_module_scoped() -> None:
+    # given
+    mvel = library_config("libs/mvel")
+
+    # when
+    identity = release.release_identity("v1.0.0", SHA, mvel)
+    source = release.smoke_source(mvel)
+
+    # then
+    assert identity == "libs/mvel/v1.0.0"
+    assert f'mvel "{mvel["module"]}"' in source
+    assert 'CompileDecimal("10B")' in source
+    assert 'result.String() != "10"' in source
 
 
 @pytest.mark.parametrize(
@@ -171,6 +195,8 @@ def test_library_release_uses_service_release_settings_after_public_verification
     assert steps[-2]["run"] == "make go-library-release-verify"
     assert "--min-version 1.0.0" in calculation
     assert "--max-version 1.999.999" in calculation
+    assert '--path "$RELEASE_MODULE"' in calculation
+    assert '--prefix "$RELEASE_TAG_PREFIX"' in calculation
     assert '[[ "$release_version" =~ ^1\\.' in calculation
     assert action["uses"] == ("ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd")
     for setting in ("allowUpdates", "draft", "makeLatest", "name", "tag", "bodyFile"):

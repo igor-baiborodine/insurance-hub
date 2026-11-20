@@ -230,6 +230,31 @@
       ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-pr-shared.yml"
+    },
+    {
+      "directory": "libs/mvel",
+      "modulePath": "github.com/igor-baiborodine/insurance-hub/libs/mvel",
+      "role": "public-shared",
+      "owner": "insurance-hub repository maintainers",
+      "supportedModes": [
+        "standalone"
+      ],
+      "validationTarget": "check-go-pr",
+      "validationVariables": [
+        "FORMAT_SCOPE",
+        "FORMAT_BASE"
+      ],
+      "packageScope": "restricted MVEL-compatible expression compilation and exact predicate or decimal evaluation; no server, persistence, host execution or Pricing policy",
+      "prerequisites": [
+        "Go 1.27.4",
+        "managed CPython 3.14.8",
+        "pinned library tools via make -C libs/mvel bootstrap-go-tools",
+        "GCC for race tests",
+        "public module and vulnerability services unless cached"
+      ],
+      "consumers": [],
+      "localReplacements": [],
+      "ciWorkflow": ".github/workflows/go-pr-shared.yml"
     }
   ],
   "workspaces": [],

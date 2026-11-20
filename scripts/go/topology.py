@@ -345,7 +345,11 @@ def load_inventory(path: Path) -> dict[str, Any]:
             string_array(
                 module["prerequisites"], f"modules[{index}].prerequisites", allow_empty=True
             )
-            string_array(module["consumers"], f"modules[{index}].consumers", allow_empty=False)
+            string_array(
+                module["consumers"],
+                f"modules[{index}].consumers",
+                allow_empty=module["role"] == "public-shared",
+            )
             require(
                 isinstance(module["localReplacements"], list),
                 f"go-module-topology.json: modules[{index}].localReplacements must be an array",
