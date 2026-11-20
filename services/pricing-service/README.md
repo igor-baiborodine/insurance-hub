@@ -326,7 +326,9 @@ receive fixed JSON error envelopes. The generated Swagger 2.0 document is
 independent contract fixture checked by `make check-gateway-contract`.
 
 Against the seeded TRI tariff, the generated gRPC client receives exact decimal text:
-`total_price = "78.00"`, `C1 = "26.00"`, and `C2 = "52.00"`. The deployment verifier uses
+`total_price = "78"`, `C1 = "26"`, and `C2 = "52"`. Amounts keep Java's caller-visible scale:
+a base formula result carries no trailing fractional zeros, each applied markup rounds to two
+places, and the total keeps the widest cover scale. The deployment verifier uses
 structured `go test -json` events to prove that this named direct-RPC smoke ran and passed once.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,

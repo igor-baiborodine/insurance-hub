@@ -3,6 +3,7 @@ package domain
 
 import (
 	"errors"
+	"math/big"
 
 	shopdecimal "github.com/shopspring/decimal"
 )
@@ -31,6 +32,20 @@ func (value Decimal) Add(other Decimal) Decimal {
 
 func (value Decimal) Multiply(other Decimal) Decimal {
 	return Decimal{value: value.value.Mul(other.value)}
+}
+
+// TrimTrailingZeros removes trailing fractional zeros without introducing a negative scale.
+func (value Decimal) TrimTrailingZeros() Decimal {
+	coefficient, exponent := value.value.Coefficient(), value.value.Exponent()
+	ten := big.NewInt(10)
+	for exponent < 0 {
+		quotient, remainder := new(big.Int).QuoRem(coefficient, ten, new(big.Int))
+		if remainder.Sign() != 0 {
+			break
+		}
+		coefficient, exponent = quotient, exponent+1
+	}
+	return Decimal{value: shopdecimal.NewFromBigInt(coefficient, exponent)}
 }
 
 // RoundHalfUp rounds ties away from zero, matching Java RoundingMode.HALF_UP.

@@ -61,8 +61,8 @@ func TestDeployedDirectRPC_CalculatePrice(t *testing.T) {
 	)
 
 	// then
-	if err != nil || result.GetTotalPrice() != "78.00" ||
-		result.GetCoversPrices()["C1"] != "26.00" || result.GetCoversPrices()["C2"] != "52.00" {
+	if err != nil || result.GetTotalPrice() != "78" ||
+		result.GetCoversPrices()["C1"] != "26" || result.GetCoversPrices()["C2"] != "52" {
 		t.Fatal("direct Pricing quote differs")
 	}
 

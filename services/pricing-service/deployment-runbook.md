@@ -151,7 +151,7 @@ curl --fail --max-time 5 http://127.0.0.1:18081/readyz
 
 The first response must be `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. The invalid-date
 request returns `{"code":3,"message":"invalid request","details":[]}` followed by status `400`.
-The generated direct client must receive exact strings `78.00`, `26.00` and `52.00`; the verifier
+The generated direct client must receive exact strings `78`, `26` and `52`; the verifier
 requires one matching structured test run and pass event.
 
 Local-dev permits only TCP and UDP 53 to kube-dns and PostgreSQL 5432 to the selected local Pricing

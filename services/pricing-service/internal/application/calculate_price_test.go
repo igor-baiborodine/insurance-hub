@@ -66,6 +66,126 @@ func TestCalculatePrice_PreservesBindingPrecedenceAndFirstMatch(t *testing.T) {
 	assertQuote(t, quote, "12", map[string]string{"AREA": "2", "C1": "10"})
 }
 
+func TestCalculatePrice_MatchesJavaCallerVisibleScale(t *testing.T) {
+	// given: seeded formulas and wire values observed from the legacy Java Pricing JAR
+	tri := domain.Tariff{
+		BaseRules: []domain.BaseRule{
+			{
+				CoverCode: "C1",
+				Formula:   "(NUM_OF_ADULTS) * (DESTINATION == 'EUR' ? 26.00B : 34.00B)",
+			},
+			{CoverCode: "C2", Formula: "(NUM_OF_ADULTS + NUM_OF_CHILDREN) * 26.00B"},
+		},
+		MarkupRules: []domain.MarkupRule{
+			{
+				Kind:      percentMarkup,
+				Condition: condition("DESTINATION == 'WORLD'"),
+				Factor:    decimal(t, "1.50"),
+			},
+		},
+	}
+	hsi := domain.Tariff{
+		BaseRules: []domain.BaseRule{
+			{
+				CoverCode: "C1",
+				Condition: condition("TYP == 'APT'"),
+				Formula:   "AREA * 1.25B",
+			},
+			{
+				CoverCode: "C1",
+				Condition: condition("TYP == 'HOUSE'"),
+				Formula:   "AREA * 1.50B",
+			},
+			{
+				CoverCode: "C2",
+				Condition: condition("TYP == 'APT'"),
+				Formula:   "AREA * 0.25B",
+			},
+			{
+				CoverCode: "C2",
+				Condition: condition("TYP == 'HOUSE'"),
+				Formula:   "AREA * 0.45B",
+			},
+		},
+	}
+	tests := []struct {
+		name    string
+		tariff  domain.Tariff
+		answers []domain.Answer
+		total   string
+		covers  map[string]string
+	}{
+		{
+			name:   "TRI whole amounts",
+			tariff: tri,
+			answers: []domain.Answer{
+				numberAnswer(t, "NUM_OF_ADULTS", "1"),
+				numberAnswer(t, "NUM_OF_CHILDREN", "1"),
+				textAnswer("DESTINATION", "EUR"),
+			},
+			total: "78", covers: map[string]string{"C1": "26", "C2": "52"},
+		},
+		{
+			name:   "TRI markup scale",
+			tariff: tri,
+			answers: []domain.Answer{
+				numberAnswer(t, "NUM_OF_ADULTS", "1"),
+				numberAnswer(t, "NUM_OF_CHILDREN", "1"),
+				textAnswer("DESTINATION", "WORLD"),
+			},
+			total: "129.00", covers: map[string]string{"C1": "51.00", "C2": "78.00"},
+		},
+		{
+			name:   "HSI whole products",
+			tariff: hsi,
+			answers: []domain.Answer{
+				textAnswer("TYP", "APT"), numberAnswer(t, "AREA", "100"),
+			},
+			total: "150", covers: map[string]string{"C1": "125", "C2": "25"},
+		},
+		{
+			name:   "HSI trimmed fraction",
+			tariff: hsi,
+			answers: []domain.Answer{
+				textAnswer("TYP", "HOUSE"), numberAnswer(t, "AREA", "10"),
+			},
+			total: "19.5", covers: map[string]string{"C1": "15", "C2": "4.5"},
+		},
+		{
+			name:   "HSI widest total scale",
+			tariff: hsi,
+			answers: []domain.Answer{
+				textAnswer("TYP", "APT"), numberAnswer(t, "AREA", "95.5"),
+			},
+			total:  "143.250",
+			covers: map[string]string{"C1": "119.375", "C2": "23.875"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			useCase, err := NewCalculatePrice(
+				&tariffReaderFake{found: true, tariff: test.tariff},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := CalculatePriceRequest{
+				ProductCode: "TEST", SelectedCovers: []string{"C1", "C2"},
+				Answers: test.answers,
+			}
+
+			// when
+			quote, err := useCase.Execute(context.Background(), request)
+			// then
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertQuote(t, quote, test.total, test.covers)
+		})
+	}
+}
+
 func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 	// given
 	tests := []struct {

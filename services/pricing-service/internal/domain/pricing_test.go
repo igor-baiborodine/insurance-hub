@@ -31,3 +31,28 @@ func TestDecimal_PreservesScaleAndRoundsHalfUp(t *testing.T) {
 		t.Errorf("invalid decimal error=%v", err)
 	}
 }
+
+func TestDecimal_TrimTrailingZerosKeepsNonNegativeScale(t *testing.T) {
+	// given
+	tests := map[string]string{
+		"26.00": "26", "4.50": "4.5", "119.375": "119.375", "0.00": "0", "100": "100",
+		"-0.0150": "-0.015",
+	}
+
+	for text, expected := range tests {
+		t.Run(text, func(t *testing.T) {
+			value, err := NewDecimal(text)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// when
+			trimmed := value.TrimTrailingZeros()
+
+			// then
+			if trimmed.String() != expected {
+				t.Errorf("trimmed %s=%s, want %s", text, trimmed.String(), expected)
+			}
+		})
+	}
+}
