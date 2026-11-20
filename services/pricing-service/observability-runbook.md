@@ -212,8 +212,52 @@ Also stop for:
 - missing Pricing signals or an unexplained firing alert;
 - a mutable Grafana provider;
 - an unbounded or sensitive query;
-- any operation that would alter shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo,
-  PostgreSQL or another service's resources.
+- any operation that would alter shared monitoring releases, PVCs, Prometheus, Loki, Tempo,
+  PostgreSQL or another service's resources;
+- an Alloy change that has not passed the separate shared-collector handoff below.
+
+The Pricing log registration is part of the shared Alloy release, not either service monitoring
+object. Check the effective shared configuration before provisioning the dashboard or rules:
+
+```sh
+helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-helm-status.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get deployment/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-deployment.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json"
+jq -er '.data["config.alloy"]' \
+  "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json" \
+  > "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
+cmp k8s/overlays/qa/infra/alloy/config.alloy \
+  "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
+```
+
+If `cmp` succeeds, the reviewed shared configuration, including the Pricing registration, is
+already effective and no Alloy rollout is needed. If it differs, stop this asset workflow. Retain
+a sanitized diff, review the entire shared-collector delta, and obtain separate authorization for
+the Alloy release. Only that separate handoff may run:
+
+```sh
+make -C k8s alloy-install
+kubectl --context qa-insurance-hub -n qa-monitoring rollout status \
+  deployment/qa-alloy --timeout=10m
+make -C k8s alloy-status
+helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/applied-alloy-helm-status.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json"
+jq -er '.data["config.alloy"]' \
+  "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json" \
+  > "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
+cmp k8s/overlays/qa/infra/alloy/config.alloy \
+  "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
+```
+
+After an authorized Alloy rollout, require the Deployment to be ready and recheck the Dashboard
+and Product service signal paths before continuing. Stop and use their runbooks if an existing
+route, delivery counter or backend signal regresses. The dashboard/rule apply authorization does
+not authorize this shared rollout.
 
 For a first installation, when both `.absent` markers exist, run the read-only pre-provision
 verifier. It takes the Pricing release revision that Flux applies:
@@ -562,6 +606,8 @@ Retain the following without credentials, payloads or business values:
 - the monitoring revision and the Pricing release revision, recorded separately;
 - the release image reference, registry digest, Pod image ID, OCI revision and runtime version;
 - Flux release source and applied state, and resource UIDs;
+- the effective Alloy configuration hash and, when the shared handoff ran, its before/after Helm
+  revisions, rollout state and regression checks;
 - rendered object hashes, plus server dry-run, apply and read-back results;
 - dashboard and rule inventories and Grafana immutability;
 - verifier output, bounded query results, and alert firing and recovery times;
