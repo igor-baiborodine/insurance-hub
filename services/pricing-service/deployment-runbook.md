@@ -42,7 +42,8 @@ requires an explicit, source-matched image to perform operations. For disposable
 build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=pricing` with the selected image and source revision exported.
 The smoke copies only the existing two-key reader Secret into one labeled Kind namespace, scopes
-all writes to that namespace, and removes the namespace afterward.
+all writes to that namespace, and removes the namespace afterward. A mode-`0600` temporary
+minimized kubeconfig selects the guarded Kind context without changing the user's current context.
 
 ## Direct local-dev
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -576,29 +577,57 @@ def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 
-    try:
-        # when
-        target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
-        target.kubectl("create", "-f", "-", input_text=json.dumps(reader_secret))
-        pricing.run(
-            ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
-            timeout=120,
+    with tempfile.TemporaryDirectory(prefix="pricing-smoke-kubeconfig-") as directory:
+        kubeconfig = Path(directory) / "config"
+        document = pricing.run(
+            [
+                target.kubectl_binary,
+                "config",
+                "view",
+                "--raw",
+                "--flatten",
+                "--minify",
+                "--context",
+                target.context,
+            ]
         )
-        apply(target, yaml.safe_dump_all(items.values()), "insurance-hub-pricing-smoke")
-        pricing.rollout(target)
+        descriptor = os.open(kubeconfig, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(document)
+        monkeypatch.setenv("KUBECONFIG", str(kubeconfig))
 
-        # then
-        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
-        pricing.verify(target, items)
-        pricing.stop(target, items)
-        assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0
-    finally:
-        actual = target.json("get", "namespace", target.namespace, "--ignore-not-found")
-        if actual:
-            require(
-                actual["metadata"]["labels"].get(SMOKE_LABEL) == token,
-                "disposable namespace ownership differs",
+        try:
+            # when
+            target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
+            target.kubectl("create", "-f", "-", input_text=json.dumps(reader_secret))
+            pricing.run(
+                [
+                    "kind",
+                    "load",
+                    "docker-image",
+                    image,
+                    "--name",
+                    target.configuration["kindCluster"],
+                ],
+                timeout=120,
             )
-            target.kubectl("delete", "namespace", target.namespace, "--timeout=100s", timeout=110)
-            assert not target.json("get", "namespace", target.namespace, "--ignore-not-found")
-            print(f"Removed disposable namespace {target.namespace}")
+            apply(target, yaml.safe_dump_all(items.values()), "insurance-hub-pricing-smoke")
+            pricing.rollout(target)
+
+            # then
+            monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
+            pricing.verify(target, items)
+            pricing.stop(target, items)
+            assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0
+        finally:
+            actual = target.json("get", "namespace", target.namespace, "--ignore-not-found")
+            if actual:
+                require(
+                    actual["metadata"]["labels"].get(SMOKE_LABEL) == token,
+                    "disposable namespace ownership differs",
+                )
+                target.kubectl(
+                    "delete", "namespace", target.namespace, "--timeout=100s", timeout=110
+                )
+                assert not target.json("get", "namespace", target.namespace, "--ignore-not-found")
+                print(f"Removed disposable namespace {target.namespace}")
