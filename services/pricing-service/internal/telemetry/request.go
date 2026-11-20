@@ -30,16 +30,16 @@ func NewRequestObserver(
 			"create request observer: logger and meter provider are required",
 		)
 	}
-	meter := provider.Meter("insurance-hub/service")
+	meter := provider.Meter("insurance-hub/pricing")
 	requests, err := meter.Int64Counter(
-		"insurance_hub.service.requests",
+		"insurance_hub.pricing.requests",
 		metric.WithUnit("{request}"),
 	)
 	if err != nil {
 		return nil, errors.New("create request counter")
 	}
 	duration, err := meter.Float64Histogram(
-		"insurance_hub.service.request.duration",
+		"insurance_hub.pricing.request.duration",
 		metric.WithUnit("s"),
 	)
 	if err != nil {
@@ -63,6 +63,9 @@ func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
 		transport: "grpc", operation: "calculate_price",
 	}
 }
+
+// httpRoutes maps observed transport routes to their semantic path template.
+var httpRoutes = map[string]string{"POST /pricing/calculate": "/pricing/calculate"}
 
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
@@ -98,9 +101,9 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.pricing.operation", request.operation),
+		attribute.String("insurance_hub.pricing.transport", request.transport),
+		attribute.String("insurance_hub.pricing.outcome", outcome),
 		attribute.String("rpc.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
@@ -140,13 +143,16 @@ func (request *Request) FinishHTTP(ctx context.Context, status int) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.route", request.route),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.pricing.operation", request.operation),
+		attribute.String("insurance_hub.pricing.transport", request.transport),
+		attribute.String("insurance_hub.pricing.outcome", outcome),
 		attribute.Int("http.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
+	// The route matches the operation one to one, so only the span carries it.
+	if route, ok := httpRoutes[request.route]; ok {
+		request.span.SetAttributes(attribute.String("http.route", route))
+	}
 	if outcome != "success" {
 		request.span.SetAttributes(attribute.String("error.type", outcome))
 		request.span.SetStatus(codes.Error, "")

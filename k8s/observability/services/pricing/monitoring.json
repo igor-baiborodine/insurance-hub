@@ -1,0 +1,194 @@
+{
+  "alerts": {
+    "expression_markers": {
+      "PricingDatabasePoolPressure": [
+        "db_client_connection_state=\"used\"",
+        "> 0.8"
+      ],
+      "PricingDatabasePoolTimeouts": [
+        "db_client_connection_timeouts_total",
+        "[5m]"
+      ],
+      "PricingHighLatency": [
+        "histogram_quantile(0.95",
+        "> 0.5",
+        ">= 20"
+      ],
+      "PricingResourcePressure": [
+        "> 107374182.4",
+        "> 0.16"
+      ],
+      "PricingServiceErrorRate": [
+        "internal_error|deadline_exceeded",
+        "> 0.05",
+        ">= 20",
+        "[5m]"
+      ],
+      "PricingTelemetryBacklog": [
+        "prometheus_remote_storage_samples_pending",
+        "highest_sent_timestamp_seconds",
+        "otelcol_exporter_queue_size",
+        "> 0.8"
+      ],
+      "PricingTelemetryDeliveryFailure": [
+        "loki_write_dropped_entries_total",
+        "prometheus_remote_storage_samples_failed_total",
+        "prometheus_remote_storage_samples_dropped_total",
+        "otelcol_exporter_send_failed_spans_total"
+      ],
+      "PricingTelemetryMissing": [
+        "absent_over_time",
+        "go_goroutine_count",
+        "[2m]"
+      ],
+      "PricingUnavailable": [
+        "kube_deployment_spec_replicas",
+        "kube_deployment_status_replicas_available"
+      ],
+      "PricingUnexpectedRestart": [
+        "kube_pod_container_status_restarts_total",
+        "[15m]"
+      ]
+    },
+    "for": {
+      "PricingDatabasePoolPressure": "5m",
+      "PricingDatabasePoolTimeouts": null,
+      "PricingHighLatency": "5m",
+      "PricingResourcePressure": "5m",
+      "PricingServiceErrorRate": "2m",
+      "PricingTelemetryBacklog": "2m",
+      "PricingTelemetryDeliveryFailure": null,
+      "PricingTelemetryMissing": "1m",
+      "PricingUnavailable": "2m",
+      "PricingUnexpectedRestart": null
+    },
+    "group_name": "insurance-hub-pricing-service",
+    "interval": "30s",
+    "common_labels": {
+      "service": "pricing-service",
+      "severity": "warning"
+    },
+    "inventory": {
+      "common": [
+        "PricingServiceErrorRate",
+        "PricingHighLatency",
+        "PricingResourcePressure",
+        "PricingUnavailable",
+        "PricingTelemetryMissing",
+        "PricingTelemetryDeliveryFailure",
+        "PricingTelemetryBacklog",
+        "PricingUnexpectedRestart"
+      ],
+      "dependencies": {
+        "postgresql": [
+          "PricingDatabasePoolPressure",
+          "PricingDatabasePoolTimeouts"
+        ]
+      },
+      "workers": {}
+    },
+    "path": "alerts.yaml",
+    "prometheus_rule_name": "pricing-service",
+    "required_annotations": [
+      "summary",
+      "description",
+      "runbook_action"
+    ],
+    "test_path": "alerts.test.yaml"
+  },
+  "acceptance": {
+    "path": "acceptance.json"
+  },
+  "capabilities": {
+    "dependencies": [
+      "postgresql"
+    ],
+    "workers": []
+  },
+  "dashboard": {
+    "application_selector": "service_name=\"pricing-service\"",
+    "editable": false,
+    "minimum_prometheus_targets": 28,
+    "path": "dashboard.json",
+    "refresh": "30s",
+    "required_markers": [
+      "\"type\": \"loki\"",
+      "\"type\": \"tempo\"",
+      "trace_id",
+      "SELECT tariff",
+      "insurance_hub_pricing_transport=\\\"grpc\\\"",
+      "storage_unavailable",
+      "Legitimate idle time",
+      "missing telemetry",
+      "pod!~\\\"qa-pricing-api-legacy-.*\\\""
+    ],
+    "outcomes": {
+      "common": {
+        "availability": [
+          "Readiness and restarts"
+        ],
+        "investigation": [
+          "Failed and slow-request investigation logs",
+          "Pricing traces",
+          "Investigation workflow"
+        ],
+        "pod_resources": [
+          "Pod CPU and memory"
+        ],
+        "requests": [
+          "Request rate",
+          "Service error rate",
+          "Request latency percentiles"
+        ],
+        "runtime": [
+          "Go runtime"
+        ],
+        "telemetry_delivery": [
+          "Telemetry delivery health"
+        ]
+      },
+      "dependencies": {
+        "postgresql": [
+          "Database outcomes",
+          "Database and pool latency",
+          "Database pool pressure"
+        ]
+      },
+      "workers": {}
+    },
+    "required_query_filters": [
+      "deployment_environment_name=~\"$environment\"",
+      "service_implementation=~\"$implementation\""
+    ],
+    "uid": "insurance-hub-pricing-service",
+    "variables": {
+      "environment": "deployment_environment_name",
+      "implementation": "service_implementation"
+    }
+  },
+  "fixture": {
+    "minimum_scrapes_per_series": 4,
+    "path": "fixture.json"
+  },
+  "schema_version": 2,
+  "service": "pricing",
+  "service_name": "pricing-service",
+  "supported_environments": [
+    "qa"
+  ],
+  "verification": {
+    "expected_signals": {
+      "logs": [
+        "trace_id"
+      ],
+      "metrics": [
+        "insurance_hub_pricing_requests_total",
+        "insurance_hub_pricing_database_operations_total"
+      ],
+      "traces": [
+        "pricing-service"
+      ]
+    },
+    "probe": "pricing"
+  }
+}

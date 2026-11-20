@@ -225,7 +225,7 @@ func assertMetric(
 	count := int64(0)
 	for _, scope := range result.ScopeMetrics {
 		for _, measurement := range scope.Metrics {
-			if measurement.Name != "insurance_hub.service.requests" {
+			if measurement.Name != "insurance_hub.pricing.requests" {
 				continue
 			}
 			for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
@@ -235,8 +235,8 @@ func assertMetric(
 					attrs[string(attr.Key)] = attr.Value.AsString()
 				}
 				if len(attrs) != 4 ||
-					attrs["insurance_hub.service.operation"] != "calculate_price" ||
-					attrs["insurance_hub.service.outcome"] != outcome ||
+					attrs["insurance_hub.pricing.operation"] != "calculate_price" ||
+					attrs["insurance_hub.pricing.outcome"] != outcome ||
 					attrs["rpc.response.status_code"] != rpcStatus {
 					t.Errorf("unsafe or incorrect labels: %v", attrs)
 				}

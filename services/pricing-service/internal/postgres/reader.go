@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/domain"
@@ -17,71 +19,139 @@ type Reader struct {
 	pool           *pgxpool.Pool
 	acquireTimeout time.Duration
 	queryTimeout   time.Duration
+	observer       *Observer
 }
 
 var _ application.TariffReader = (*Reader)(nil)
+
+type storedTariff struct {
+	code               string
+	rawBase, rawMarkup []byte
+}
 
 // GetTariff reads one complete tariff in a single PostgreSQL statement snapshot.
 func (reader *Reader) GetTariff(
 	ctx context.Context,
 	code string,
 ) (domain.Tariff, bool, error) {
-	connection, err := reader.acquire(ctx)
+	connection, err := reader.acquire(ctx, "calculate_price")
 	if err != nil {
 		return domain.Tariff{}, false, err
 	}
 	defer connection.Release()
 
+	readerContext := ctx
 	queryCtx, cancel := context.WithTimeout(ctx, reader.queryTimeout)
 	defer cancel()
-	rows, err := connection.Query(queryCtx, readTariffQuery, code)
+	var stored []storedTariff
+	err = reader.observer.stage(
+		queryCtx,
+		"calculate_price",
+		"query",
+		"SELECT tariff",
+		trace.SpanKindClient,
+		func(ctx context.Context) error {
+			rows, queryErr := connection.Query(ctx, readTariffQuery, code)
+			if queryErr != nil {
+				return classifyReaderFailure(
+					readerContext,
+					"query tariff",
+					queryErr,
+				)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var row storedTariff
+				if scanErr := rows.Scan(
+					&row.code,
+					&row.rawBase,
+					&row.rawMarkup,
+				); scanErr != nil {
+					return classifyReaderFailure(
+						readerContext,
+						"scan tariff",
+						scanErr,
+					)
+				}
+				stored = append(stored, row)
+			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				return classifyReaderFailure(readerContext, "read tariff", rowsErr)
+			}
+			return nil
+		},
+	)
 	if err != nil {
-		return domain.Tariff{}, false, classifyReaderFailure(ctx, "query tariff", err)
+		return domain.Tariff{}, false, err
 	}
-	defer rows.Close()
+	if len(stored) == 0 {
+		return domain.Tariff{}, false, nil
+	}
+	tariff, err := selectTariff(code, stored)
+	reader.observer.decode(queryCtx, "calculate_price", err)
+	if err != nil {
+		return domain.Tariff{}, false, err
+	}
+	return tariff, true, nil
+}
 
-	var tariffs []domain.Tariff
-	for rows.Next() {
-		var storedCode string
-		var rawBase, rawMarkup []byte
-		if err := rows.Scan(&storedCode, &rawBase, &rawMarkup); err != nil {
-			return domain.Tariff{}, false, classifyReaderFailure(
-				ctx,
-				"scan tariff",
-				err,
-			)
-		}
-		tariff, err := decodeTariff(storedCode, rawBase, rawMarkup)
+// selectTariff decodes every stored row before rejecting duplicates or a mismatched code.
+func selectTariff(code string, stored []storedTariff) (domain.Tariff, error) {
+	tariffs := make([]domain.Tariff, 0, len(stored))
+	for _, row := range stored {
+		tariff, err := decodeTariff(row.code, row.rawBase, row.rawMarkup)
 		if err != nil {
-			return domain.Tariff{}, false, err
+			return domain.Tariff{}, err
 		}
 		tariffs = append(tariffs, tariff)
 	}
-	if err := rows.Err(); err != nil {
-		return domain.Tariff{}, false, classifyReaderFailure(ctx, "read tariff", err)
+	if len(tariffs) > 1 {
+		return domain.Tariff{}, application.ErrTariffAmbiguous
 	}
-
-	switch len(tariffs) {
-	case 0:
-		return domain.Tariff{}, false, nil
-	case 1:
-		if tariffs[0].Code != code {
-			return domain.Tariff{}, false, application.ErrTariffInvalid
-		}
-		return tariffs[0], true, nil
-	default:
-		return domain.Tariff{}, false, application.ErrTariffAmbiguous
+	if tariffs[0].Code != code {
+		return domain.Tariff{}, application.ErrTariffInvalid
 	}
+	return tariffs[0], nil
 }
 
-func (reader *Reader) acquire(ctx context.Context) (*pgxpool.Conn, error) {
+func (reader *Reader) acquire(ctx context.Context, operation string) (*pgxpool.Conn, error) {
+	readerContext := ctx
 	acquireCtx, cancel := context.WithTimeout(ctx, reader.acquireTimeout)
 	defer cancel()
-	connection, err := reader.pool.Acquire(acquireCtx)
-	if err != nil {
-		return nil, classifyReaderFailure(ctx, "acquire connection", err)
-	}
-	return connection, nil
+	var connection *pgxpool.Conn
+	err := reader.observer.stage(
+		acquireCtx,
+		operation,
+		"acquire",
+		"pricing.db.acquire",
+		trace.SpanKindInternal,
+		func(ctx context.Context) error {
+			started := time.Now()
+			var acquireErr error
+			connection, acquireErr = reader.pool.Acquire(ctx)
+			if reader.observer != nil {
+				reader.observer.waitTime.Record(
+					ctx,
+					time.Since(started).Seconds(),
+					poolAttributes,
+				)
+				if acquireErr != nil &&
+					errors.Is(ctx.Err(), context.DeadlineExceeded) &&
+					readerContext.Err() == nil {
+					reader.observer.timeouts.Add(ctx, 1, poolAttributes)
+				}
+			}
+			if acquireErr != nil {
+				return classifyReaderFailure(
+					readerContext,
+					"acquire connection",
+					acquireErr,
+				)
+			}
+			return nil
+		},
+	)
+	return connection, err
 }
 
 type storedBaseRule struct {

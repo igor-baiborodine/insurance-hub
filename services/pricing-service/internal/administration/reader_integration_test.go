@@ -15,6 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/config"
@@ -220,6 +223,83 @@ func verifyTariffReader(
 			assertNoReaderConnections(t, pool)
 		},
 	)
+
+	t.Run("observed tariff reader separates decoded and invalid tariffs", func(t *testing.T) {
+		// given
+		metricReader := sdkmetric.NewManualReader()
+		meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricReader))
+		defer func() { _ = meterProvider.Shutdown(context.Background()) }()
+		observer, observerErr := pricingpostgres.NewObserver(
+			pool,
+			tracenoop.NewTracerProvider(),
+			meterProvider,
+		)
+		if observerErr != nil {
+			t.Fatal(observerErr)
+		}
+		defer func() { _ = observer.Close() }()
+		observed, readerErr := pricingpostgres.NewReader(
+			pool,
+			settings.Database.AcquireTimeout,
+			settings.Database.QueryTimeout,
+			observer,
+		)
+		if readerErr != nil {
+			t.Fatal(readerErr)
+		}
+
+		// when
+		_, found, readErr := observed.GetTariff(ctx, "FAI")
+		_, _, unusableErr := observed.GetTariff(ctx, "UNUSABLE")
+		var collected metricdata.ResourceMetrics
+		collectErr := metricReader.Collect(context.Background(), &collected)
+
+		// then
+		if readErr != nil || !found ||
+			!errors.Is(unusableErr, application.ErrTariffInvalid) {
+			t.Fatalf("observed reads = (%t, %v), %v", found, readErr, unusableErr)
+		}
+		if collectErr != nil {
+			t.Fatal(collectErr)
+		}
+		got := map[string]int64{}
+		for _, scope := range collected.ScopeMetrics {
+			for _, measurement := range scope.Metrics {
+				if measurement.Name != "insurance_hub.pricing.database.operations" {
+					continue
+				}
+				for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
+					stage, _ := point.Attributes.Value(
+						"insurance_hub.pricing.database.stage",
+					)
+					outcome, _ := point.Attributes.Value(
+						"insurance_hub.pricing.database.outcome",
+					)
+					got[stage.AsString()+"/"+outcome.AsString()] += point.Value
+				}
+			}
+		}
+		want := map[string]int64{
+			"acquire/success":     2,
+			"query/success":       2,
+			"decode/success":      1,
+			"decode/invalid_data": 1,
+		}
+		if len(got) != len(want) {
+			t.Errorf("database operations = %v, want %v", got, want)
+		}
+		for key, count := range want {
+			if got[key] != count {
+				t.Errorf(
+					"database operation %s = %d, want %d",
+					key,
+					got[key],
+					count,
+				)
+			}
+		}
+		assertNoReaderConnections(t, pool)
+	})
 
 	t.Run("production tariff reader never mixes a committed rule pair", func(t *testing.T) {
 		// given

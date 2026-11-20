@@ -41,6 +41,18 @@
       "service_namespace": "qa-svc",
       "tempo_service": "qa-tempo"
     },
+    "pricing": {
+      "business_service": "qa-pricing-api",
+      "deployment": "qa-pricing-api",
+      "flux_kustomization": "qa-pricing-api",
+      "flux_namespace": "flux-system",
+      "flux_source": "insurance-hub",
+      "loki_service": "qa-loki",
+      "management_service": null,
+      "prometheus_service": "qa-prometheus-kube-prometh-prometheus",
+      "service_namespace": "qa-svc",
+      "tempo_service": "qa-tempo"
+    },
     "product": {
       "business_service": "qa-product-api",
       "deployment": "qa-product-api",

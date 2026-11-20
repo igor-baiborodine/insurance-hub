@@ -19,6 +19,61 @@ from monitoring_assets import VerificationContract
 ASSETS_ROOT = Path(__file__).parents[2] / "observability"
 
 
+def pricing_completion(transport: str, trace_id: str = "a" * 32) -> str:
+    record = {
+        "trace_id": trace_id,
+        "operation": "calculate_price",
+        "transport": transport,
+        "outcome": "success",
+    }
+    if transport == "http":
+        record["http_status_code"] = 200
+    else:
+        record["rpc_status_code"] = "OK"
+    return json.dumps(record)
+
+
+def pricing_trace() -> dict[str, object]:
+    method = [{"key": "rpc.method", "value": {"stringValue": "CalculatePrice"}}]
+    return {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "name": "POST /pricing/calculate",
+                                "kind": "SPAN_KIND_SERVER",
+                                "spanId": "1111111111111111",
+                            },
+                            {
+                                "name": "pricing.v1.PricingService/CalculatePrice",
+                                "kind": "SPAN_KIND_CLIENT",
+                                "spanId": "2222222222222222",
+                                "parentSpanId": "1111111111111111",
+                                "attributes": method,
+                            },
+                            {
+                                "name": "pricing.v1.PricingService/CalculatePrice",
+                                "kind": "SPAN_KIND_SERVER",
+                                "spanId": "3333333333333333",
+                                "parentSpanId": "2222222222222222",
+                                "attributes": method,
+                            },
+                            {
+                                "name": "SELECT tariff",
+                                "kind": "SPAN_KIND_CLIENT",
+                                "spanId": "4444444444444444",
+                                "parentSpanId": "3333333333333333",
+                            },
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+
 class TestProductObservabilityVerification:
     def setup_method(self) -> None:
         self.assets = verifier.load_assets(ASSETS_ROOT, "qa", "product")
@@ -828,3 +883,135 @@ class TestProductObservabilityVerification:
             "worker": 1,
             "runtime": 1,
         }
+
+    def test_pricing_probe_forwards_workload_ports_and_checks_the_tri_quote(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "pricing")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        responses = ["live\n", "ready\n", '{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}']
+
+        # when
+        probe = verifier.select_probe(assets)
+        services = probe.services(target)
+        with mock.patch.object(verifier, "request_text", side_effect=responses) as request:
+            quotes = probe.workload({"health": 1001, "pricing": 1002}, "c" * 32, {})
+
+        # then
+        assert services == [
+            ("pricing", "qa-svc", "deployment/qa-pricing-api", 8080),
+            ("health", "qa-svc", "deployment/qa-pricing-api", 8081),
+        ]
+        assert quotes == 1
+        quote_call = request.call_args_list[-1]
+        assert quote_call.args[0] == "http://127.0.0.1:1002/pricing/calculate"
+        assert quote_call.args[1] == {"traceparent": "00-" + "c" * 32 + "-0123456789abcdef-01"}
+        assert quote_call.args[2]["productCode"] == "TRI"
+
+    def test_pricing_probe_rejects_a_quote_that_differs_from_the_fixture(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "pricing")
+        responses = ["live\n", "ready\n", '{"totalPrice":79,"coversPrices":{"C1":27,"C2":52}}']
+
+        # when / then
+        with (
+            mock.patch.object(verifier, "request_text", side_effect=responses),
+            pytest.raises(verifier.VerificationError, match="differs from the accepted fixture"),
+        ):
+            verifier.select_probe(assets).workload({"health": 1001, "pricing": 1002}, "c" * 32, {})
+
+    def test_forwards_use_an_explicit_workload_reference_unchanged(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "pricing")
+        target = verifier.KubernetesTarget(assets, "a" * 40)
+        child = mock.Mock()
+        child.poll.return_value = None
+
+        # when
+        with (
+            mock.patch.object(verifier.subprocess, "Popen", return_value=child) as popen,
+            mock.patch.object(verifier.socket, "create_connection", return_value=nullcontext()),
+            mock.patch.object(verifier.monitoring_runtime, "terminate_process_group"),
+        ):
+            with verifier.forwards(target, verifier.pricing_services(target)):
+                pass
+
+        # then
+        forwarded = [call.args[0][-2] for call in popen.call_args_list]
+        assert forwarded == ["deployment/qa-pricing-api", "deployment/qa-pricing-api"]
+
+    def test_pricing_enabled_signals_require_both_transports_and_the_tariff_read(self) -> None:
+        # given
+        assets = verifier.load_assets(ASSETS_ROOT, "qa", "pricing")
+        observations: list[str] = []
+        queries: list[str] = []
+
+        def observed_signal(description: str, probe: object) -> object:
+            observations.append(description)
+            return probe()
+
+        def backend(url: str) -> object:
+            if "/api/traces/" in url:
+                return pricing_trace()
+            if "/loki/" in url:
+                return {
+                    "data": {
+                        "result": [
+                            {
+                                "values": [
+                                    ["1", pricing_completion("http")],
+                                    ["2", pricing_completion("grpc")],
+                                ]
+                            }
+                        ]
+                    }
+                }
+            queries.append(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0])
+            return {"data": {"result": [{"value": [0, "0" if "ALERTS" in url else "1"]}]}}
+
+        # when
+        with (
+            mock.patch.object(verifier, "wait_for", side_effect=observed_signal),
+            mock.patch.object(verifier, "request_json", side_effect=backend),
+        ):
+            result = verifier.verify_pricing_enabled_signals(
+                assets,
+                {"prometheus": 1001, "loki": 1002, "tempo": 1003},
+                "a" * 32,
+                "pod-uid",
+                {},
+            )
+
+        # then
+        assert result["metric_series"] == {
+            "request_http": 1,
+            "request_grpc": 1,
+            "database_query": 1,
+        }
+        assert observations[-2:] == [
+            "correlated Pricing HTTP and gRPC completion logs",
+            "correlated Pricing trace through the tariff read",
+        ]
+        assert all('service_instance_id="pod-uid"' in query for query in queries[:3])
+
+    def test_pricing_completion_logs_reject_duplicate_http_records(self) -> None:
+        # given
+        streams = [
+            {
+                "values": [
+                    ["1", pricing_completion("http")],
+                    ["2", pricing_completion("http")],
+                ]
+            }
+        ]
+
+        # when / then
+        assert verifier.pricing_completion_streams(streams, "a" * 32) == []
+
+    def test_pricing_trace_requires_the_connected_rpc_server_hop(self) -> None:
+        # given
+        trace = pricing_trace()
+        spans = trace["batches"][0]["scopeSpans"][0]["spans"]
+        del spans[2]
+
+        # when / then
+        assert verifier.pricing_trace_batches(trace) == []
