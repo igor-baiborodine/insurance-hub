@@ -213,7 +213,7 @@ a successful GitHub Actions run on a pushed branch or pull request is hosted-CI 
 
 ### Repository topology
 
-The root [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) defines
+The root [Go module topology guide](../../docs/go-module-topology.md) defines
 repository-wide discovery, resolution, import boundaries, CI coverage, and onboarding. Policy
 Search is supported only when its inventory, owning target, Servicekit consumer record and
 controlled fixtures agree. The service runs standalone with `GOWORK=off`, has no filesystem

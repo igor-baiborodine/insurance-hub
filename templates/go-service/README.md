@@ -208,7 +208,7 @@ a successful GitHub Actions run on a pushed branch or pull request is hosted-CI 
 
 ### Repository topology
 
-The root [Go module topology guide](../../docs/migration/phase-4/go-module-topology.md) defines
+The root [Go module topology guide](../../docs/go-module-topology.md) defines
 repository-wide discovery, resolution, import boundaries, CI coverage, and onboarding. This
 scaffold and Product service are the current inventory modules. Generic workflow selection also
 covers newly added immediate `services/*-service` modules while their inventory and ownership are

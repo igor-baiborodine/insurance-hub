@@ -19,7 +19,7 @@
 
 This document defines the supported Go module resolution and validation boundary for Insurance
 Hub. The machine-readable source of truth is the root
-[`go-module-topology.json`](../../../go-module-topology.json). A directory that merely contains a
+[`go-module-topology.json`](../go-module-topology.json). A directory that merely contains a
 `go.mod` file, appears in a local workspace, or passes a direct Go command is not covered until its
 inventory, owning Make target, consumers, and CI path agree.
 
@@ -120,8 +120,8 @@ through their Makefiles. The copy proof transfers no environment, lock, or helpe
 verifies those repository references and bounds every child phase and cleanup. No runtime package
 import or Go module dependency points at the scaffold or shared tooling directory.
 
-Public shared libraries ([Servicekit](../../../libs/servicekit/README.md) and
-[MVEL](../../../libs/mvel/README.md)) have separate library-only Make interfaces using the same
+Public shared libraries ([Servicekit](../libs/servicekit/README.md) and
+[MVEL](../libs/mvel/README.md)) have separate library-only Make interfaces using the same
 formatter policy and exact Go/tool pins. They require no executable, Protobuf generator, database
 or service-image release. Their shared registration, validation and release mechanics are
 described in [Shared library validation and release](#shared-library-validation-and-release).
@@ -176,7 +176,7 @@ security checks.
 Product's selected-module validation owns the direct HTTP/gRPC access matrix and disposable
 PostgreSQL integration suite. The retired Java access and combined gateway-to-Go scripts remain
 historical evidence only; current Product tooling checks are service-local. The
-[change-based local validation matrix](../../../CONTRIBUTING.md#change-based-local-validation)
+[change-based local validation matrix](../CONTRIBUTING.md#change-based-local-validation)
 records when those and the other auxiliary checks are required and which evidence to retain.
 
 For shared tooling or topology changes, use the applicable local sequence:

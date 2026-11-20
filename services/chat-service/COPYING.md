@@ -156,7 +156,7 @@ awk '
     print "The scaffold-only `go-scaffold-*` root delegates do not cover this copied module."
     print "When installed as an immediate `services/*-service` directory, the generic Go PR"
     print "workflow selects its qualifying inputs. Complete the inventory and ownership onboarding"
-    print "documented in ../../docs/migration/phase-4/go-module-topology.md."
+    print "documented in ../../docs/go-module-topology.md."
     skipping = 1
     next
   }
@@ -294,6 +294,6 @@ make go-scaffold-check-copy
 
 The Go PR workflow automatically covers qualifying inputs when the copy is installed as an
 immediate `services/<name>-service` directory with the standard Make targets. Follow the
-[Go module topology onboarding guide](../../docs/migration/phase-4/go-module-topology.md): record
+[Go module topology onboarding guide](../../docs/go-module-topology.md): record
 ownership and resolution mode, add its owning validation target and consumers, add positive and
 negative boundary fixtures, and run both root topology targets before claiming repository support.
