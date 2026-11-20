@@ -334,7 +334,7 @@ kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=client \
   > "$MONITORING_EVIDENCE_DIR/candidate-rule-source.json"
 kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=client \
   -f "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" -o json \
-  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, data}' \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, dashboard: (.data["pricing-dashboard.json"] | fromjson)}' \
   > "$MONITORING_EVIDENCE_DIR/candidate-dashboard-source.json"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
   prometheusrule/qa-pricing-service -o json \
@@ -342,7 +342,7 @@ kubectl --context qa-insurance-hub -n qa-monitoring get \
   > "$MONITORING_EVIDENCE_DIR/applied-rule-source.json"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
   configmap/qa-pricing-dashboard -o json \
-  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, data}' \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, dashboard: (.data["pricing-dashboard.json"] | fromjson)}' \
   > "$MONITORING_EVIDENCE_DIR/applied-dashboard-source.json"
 cmp "$MONITORING_EVIDENCE_DIR/candidate-rule-source.json" \
   "$MONITORING_EVIDENCE_DIR/applied-rule-source.json"
