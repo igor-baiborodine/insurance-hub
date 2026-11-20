@@ -41,10 +41,12 @@ func OpenPool(ctx context.Context, settings config.Database) (*pgxpool.Pool, err
 	return pool, nil
 }
 
-// NewReader constructs the tariff reader over the process-owned pool.
+// NewReader constructs the tariff reader over the process-owned pool. An omitted or nil observer
+// leaves reads unobserved.
 func NewReader(
 	pool *pgxpool.Pool,
 	acquireTimeout, queryTimeout time.Duration,
+	observers ...*Observer,
 ) (*Reader, error) {
 	if acquireTimeout <= 0 {
 		return nil, errors.New(
@@ -59,9 +61,18 @@ func NewReader(
 	if pool == nil {
 		return nil, errors.New("create Pricing PostgreSQL reader: pool is required")
 	}
-	return &Reader{
+	if len(observers) > 1 {
+		return nil, errors.New(
+			"create Pricing PostgreSQL reader: at most one observer is allowed",
+		)
+	}
+	reader := &Reader{
 		pool: pool, acquireTimeout: acquireTimeout, queryTimeout: queryTimeout,
-	}, nil
+	}
+	if len(observers) == 1 {
+		reader.observer = observers[0]
+	}
+	return reader, nil
 }
 
 // CheckReadAccess verifies the effective role and access to every tariff relation without writing.

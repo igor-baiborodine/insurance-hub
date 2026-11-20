@@ -28,6 +28,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/domain"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/postgres"
 )
 
 const triHTTPBody = `{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15","selectedCovers":["C1","C2"],"answers":[{"questionCode":"NUM_OF_ADULTS","answer":1},{"questionCode":"NUM_OF_CHILDREN","answer":1},{"questionCode":"DESTINATION","answer":"EUR"}]}`
@@ -56,7 +57,7 @@ func TestRun_ProductionCompositionServesCompatibleQuotesAndSafeFailures(t *testi
 	settings := testConfig(t)
 	reader := newFixtureReader(t)
 	deps := productionDependencies()
-	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration) (application.TariffReader, error) {
+	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration, _ *postgres.Observer) (application.TariffReader, error) {
 		return reader, nil
 	}
 	addresses := make(chan string, 3)
@@ -252,7 +253,7 @@ func TestRun_UnavailableRPCDependencyNeverBecomesReady(t *testing.T) {
 	unavailable := closed.Addr().String()
 	_ = closed.Close()
 	deps := productionDependencies()
-	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration) (application.TariffReader, error) {
+	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration, _ *postgres.Observer) (application.TariffReader, error) {
 		return newFixtureReader(t), nil
 	}
 	deps.newConnection = func(_ string, provider telemetryProvider, settings config.Config) (gatewayConnection, error) {
@@ -272,7 +273,7 @@ func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	deps := productionDependencies()
-	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration) (application.TariffReader, error) {
+	deps.newReader = func(_ *pgxpool.Pool, _, _ time.Duration, _ *postgres.Observer) (application.TariffReader, error) {
 		return newFixtureReader(t), nil
 	}
 	bindFailure := errors.New("management bind failed")

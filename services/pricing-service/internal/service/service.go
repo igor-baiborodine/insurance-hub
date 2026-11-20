@@ -69,7 +69,8 @@ type gatewayConnection interface {
 type dependencies struct {
 	openPool       func(context.Context, config.Database) (*pgxpool.Pool, error)
 	checkDatabase  func(context.Context, *pgxpool.Pool, time.Duration, time.Duration) error
-	newReader      func(*pgxpool.Pool, time.Duration, time.Duration) (application.TariffReader, error)
+	newObserver    func(*pgxpool.Pool, trace.TracerProvider, metric.MeterProvider) (*postgres.Observer, error)
+	newReader      func(*pgxpool.Pool, time.Duration, time.Duration, *postgres.Observer) (application.TariffReader, error)
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.CalculatePrice) (grpcServer, error)
@@ -84,8 +85,9 @@ func productionDependencies() dependencies {
 	return dependencies{
 		openPool:      postgres.OpenPool,
 		checkDatabase: postgres.CheckReadAccess,
-		newReader: func(pool *pgxpool.Pool, acquireTimeout, queryTimeout time.Duration) (application.TariffReader, error) {
-			return postgres.NewReader(pool, acquireTimeout, queryTimeout)
+		newObserver:   postgres.NewObserver,
+		newReader: func(pool *pgxpool.Pool, acquireTimeout, queryTimeout time.Duration, observer *postgres.Observer) (application.TariffReader, error) {
+			return postgres.NewReader(pool, acquireTimeout, queryTimeout, observer)
 		},
 		listen: net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
@@ -145,6 +147,7 @@ func newGatewayConnection(
 
 type runningService struct {
 	pool               *pgxpool.Pool
+	databaseObserver   *postgres.Observer
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -214,11 +217,23 @@ func run(
 		if err := checkDatabase(startupCtx); err != nil {
 			return fail(fmt.Errorf("run service: verify Pricing database: %w", err))
 		}
+		runtime.databaseObserver, err = deps.newObserver(
+			runtime.pool, provider.TracerProvider(), provider.MeterProvider(),
+		)
+		if err != nil {
+			return fail(
+				fmt.Errorf(
+					"run service: create Pricing database observer: %w",
+					err,
+				),
+			)
+		}
 	}
 	reader, err := deps.newReader(
 		runtime.pool,
 		settings.Database.AcquireTimeout,
 		settings.Database.QueryTimeout,
+		runtime.databaseObserver,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize Pricing reader: %w", err))
@@ -486,6 +501,14 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 			runtime.managementListener,
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
+		}
+	}
+	if runtime.databaseObserver != nil {
+		if err := runtime.databaseObserver.Close(); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("close database observer: %w", err),
+			)
 		}
 	}
 	if runtime.pool != nil {

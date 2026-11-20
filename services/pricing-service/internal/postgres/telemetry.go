@@ -1,0 +1,222 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
+)
+
+const (
+	operationGetTariff = "get_tariff"
+	poolName           = "pricing-reader"
+)
+
+var poolAttributes = metric.WithAttributes(
+	attribute.String("db.client.connection.pool.name", poolName),
+)
+
+// Observer measures only tariff reads. The service owns its callback registration.
+type Observer struct {
+	tracer       trace.Tracer
+	operations   metric.Int64Counter
+	queryTime    metric.Float64Histogram
+	waitTime     metric.Float64Histogram
+	timeouts     metric.Int64Counter
+	registration metric.Registration
+}
+
+func NewObserver(
+	pool *pgxpool.Pool,
+	tracerProvider trace.TracerProvider,
+	meterProvider metric.MeterProvider,
+) (*Observer, error) {
+	if pool == nil || tracerProvider == nil || meterProvider == nil {
+		return nil, errors.New(
+			"create Pricing PostgreSQL observer: dependencies are required",
+		)
+	}
+	meter := meterProvider.Meter("insurance-hub/pricing/postgres")
+	operations, err := meter.Int64Counter(
+		"insurance_hub.pricing.database.operations",
+		metric.WithUnit("{operation}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	queryTime, err := meter.Float64Histogram(
+		"db.client.operation.duration",
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	waitTime, err := meter.Float64Histogram(
+		"db.client.connection.wait_time",
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	timeouts, err := meter.Int64Counter(
+		"db.client.connection.timeouts",
+		metric.WithUnit("{timeout}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	count, err := meter.Int64ObservableUpDownCounter(
+		"db.client.connection.count",
+		metric.WithUnit("{connection}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	maxCount, err := meter.Int64ObservableUpDownCounter(
+		"db.client.connection.max",
+		metric.WithUnit("{connection}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	registration, err := meter.RegisterCallback(
+		func(_ context.Context, observer metric.Observer) error {
+			stats := pool.Stat()
+			observer.ObserveInt64(
+				count,
+				int64(stats.IdleConns()),
+				metric.WithAttributes(
+					attribute.String(
+						"db.client.connection.pool.name",
+						poolName,
+					),
+					attribute.String("db.client.connection.state", "idle"),
+				),
+			)
+			observer.ObserveInt64(
+				count,
+				int64(stats.AcquiredConns()),
+				metric.WithAttributes(
+					attribute.String(
+						"db.client.connection.pool.name",
+						poolName,
+					),
+					attribute.String("db.client.connection.state", "used"),
+				),
+			)
+			observer.ObserveInt64(maxCount, int64(stats.MaxConns()), poolAttributes)
+			return nil
+		},
+		count,
+		maxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &Observer{
+		tracer:     tracerProvider.Tracer("insurance-hub/pricing/postgres"),
+		operations: operations, queryTime: queryTime, waitTime: waitTime,
+		timeouts: timeouts, registration: registration,
+	}, nil
+}
+
+func (observer *Observer) Close() error {
+	if observer == nil {
+		return nil
+	}
+	return observer.registration.Unregister()
+}
+
+func (observer *Observer) stage(
+	ctx context.Context,
+	stage, name string,
+	kind trace.SpanKind,
+	work func(context.Context) error,
+) error {
+	if observer == nil {
+		return work(ctx)
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("insurance_hub.pricing.operation", operationGetTariff),
+		attribute.String("db.system.name", "postgresql"),
+		attribute.String("db.namespace", "pricing"),
+		attribute.String("db.collection.name", "public.tariff"),
+		attribute.String("db.operation.name", "SELECT"),
+		attribute.String("insurance_hub.pricing.database.stage", stage),
+	}
+	if stage == "query" {
+		attrs = append(attrs, attribute.String("db.query.summary", "get tariff"))
+	}
+	ctx, span := observer.tracer.Start(
+		ctx,
+		name,
+		trace.WithSpanKind(kind),
+		trace.WithAttributes(attrs...),
+	)
+	started := time.Now()
+	err := work(ctx)
+	outcome := databaseOutcome(err)
+	observer.record(ctx, stage, outcome)
+	if stage == "query" {
+		histogramAttrs := append([]attribute.KeyValue{}, attrs[:5]...)
+		if err != nil {
+			histogramAttrs = append(
+				histogramAttrs,
+				attribute.String("error.type", outcome),
+			)
+		}
+		observer.queryTime.Record(
+			ctx,
+			time.Since(started).Seconds(),
+			metric.WithAttributes(histogramAttrs...),
+		)
+	}
+	if err != nil {
+		span.SetAttributes(attribute.String("error.type", outcome))
+		span.SetStatus(codes.Error, "")
+	}
+	span.End()
+	return err
+}
+
+func (observer *Observer) decode(ctx context.Context, err error) {
+	if observer == nil {
+		return
+	}
+	observer.record(ctx, "decode", databaseOutcome(err))
+}
+
+func (observer *Observer) record(ctx context.Context, stage, outcome string) {
+	observer.operations.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("insurance_hub.pricing.operation", operationGetTariff),
+		attribute.String("insurance_hub.pricing.database.stage", stage),
+		attribute.String("insurance_hub.pricing.database.outcome", outcome),
+	))
+}
+
+// databaseOutcome checks reader classifications first: an unavailable reader may wrap the
+// acquire or query deadline that caused it while the request itself remained active.
+func databaseOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "success"
+	case errors.Is(err, application.ErrTariffInvalid),
+		errors.Is(err, application.ErrTariffAmbiguous):
+		return "invalid_data"
+	case errors.Is(err, application.ErrReaderUnavailable):
+		return "storage_unavailable"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	default:
+		return "storage_unavailable"
+	}
+}
