@@ -384,7 +384,9 @@ func newFixtureReader(t *testing.T) *fixtureReader {
 		tariff := domain.Tariff{Code: seed.Code}
 		for _, rule := range seed.Base {
 			tariff.BaseRules = append(tariff.BaseRules, domain.BaseRule{
-				CoverCode: rule.Cover, Condition: rule.Condition, Formula: rule.Formula,
+				CoverCode: rule.Cover,
+				Condition: rule.Condition,
+				Formula:   rule.Formula,
 			})
 		}
 		for _, rule := range seed.Markup {
