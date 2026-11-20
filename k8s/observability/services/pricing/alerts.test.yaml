@@ -1,0 +1,282 @@
+rule_files:
+  - /fixture/alerts.yaml
+
+evaluation_interval: 30s
+
+tests:
+  - name: service errors fire above five percent with minimum traffic and recover
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+        values: '0+9x30'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="internal_error"}'
+        values: '0+1x16 16+0x14'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 14m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: error and latency alerts stay inactive below twenty requests
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+        values: '0+0.4x20'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="internal_error"}'
+        values: '0+0.1x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="0.5"}'
+        values: '0+0x20'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="+Inf"}'
+        values: '0+0.5x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"PricingServiceErrorRate|PricingHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: deadline-exceeded quotes count as service errors
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+        values: '0+9x30'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="deadline_exceeded"}'
+        values: '0+1x16 16+0x14'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 14m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: invalid caller requests do not count as service errors
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+        values: '0+5x30'
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="invalid_request"}'
+        values: '0+5x30'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingServiceErrorRate",alertstate="firing"}) or vector(0)'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: high request latency fires with traffic and recovers
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_pricing_requests_total{service_name="pricing-service",insurance_hub_pricing_outcome="success"}'
+        values: '0+10x34'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="0.5"}'
+        values: '0+1x16 16+10x18'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="1"}'
+        values: '0+10x34'
+      - series: 'insurance_hub_pricing_request_duration_seconds_bucket{service_name="pricing-service",le="+Inf"}'
+        values: '0+10x34'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingHighLatency",alertstate="firing"}) or vector(0)'
+        eval_time: 16m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: database pool pressure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'db_client_connection_count{service_name="pricing-service",db_client_connection_state="used"}'
+        values: '7x14 2x10'
+      - series: 'db_client_connection_max{service_name="pricing-service"}'
+        values: '8x24'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingDatabasePoolPressure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingDatabasePoolPressure",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: database pool timeout increase fires and ages out
+    interval: 30s
+    input_series:
+      - series: 'db_client_connection_timeouts_total{service_name="pricing-service"}'
+        values: '0+1x12 12+0x26'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingDatabasePoolTimeouts",alertstate="firing"}) or vector(0)'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingDatabasePoolTimeouts",alertstate="firing"}) or vector(0)'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: memory pressure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="qa-svc",pod="qa-pricing-api-fixture",container="pricing-api"}'
+        values: '110000000x14 50000000x10'
+      - series: 'container_cpu_usage_seconds_total{namespace="qa-svc",pod="qa-pricing-api-fixture",container="pricing-api"}'
+        values: '0+0.01x24'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingResourcePressure",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unavailable deployment fires independently of telemetry absence and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-pricing-api"}'
+        values: '1x14 1x10'
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-pricing-api"}'
+        values: '0x14 1x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'count(ALERTS{alertname="PricingUnavailable",alertstate="firing"}) or vector(0)'
+        eval_time: 8m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: available deployment with missing runtime data fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-pricing-api"}'
+        values: '1x20'
+      - series: 'go_goroutine_count{service_name="pricing-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '_x10 12x10'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: genuine idle traffic with runtime data is healthy
+    interval: 30s
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-pricing-api"}'
+        values: '1x20'
+      - series: 'go_goroutine_count{service_name="pricing-service",deployment_environment_name="qa",service_implementation="go"}'
+        values: '12x20'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"PricingServiceErrorRate|PricingHighLatency|PricingTelemetryMissing",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry delivery failure fires and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_failed_total{job="qa-alloy"}'
+        values: '0+1x10 10+0x24'
+      - series: 'loki_write_dropped_entries_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'prometheus_remote_storage_samples_dropped_total{job="qa-alloy"}'
+        values: '0+0x34'
+      - series: 'otelcol_exporter_send_failed_spans_total{job="qa-alloy"}'
+        values: '0+0x34'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingTelemetryDeliveryFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 10m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: absent exporter series do not fabricate delivery failure or backlog
+    interval: 30s
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname=~"PricingTelemetryDeliveryFailure|PricingTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 9m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: telemetry backlog fires on lag and recovers
+    interval: 30s
+    input_series:
+      - series: 'prometheus_remote_storage_samples_pending{job="qa-alloy"}'
+        values: '1x10 0x12'
+      - series: 'prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_size{job="qa-alloy"}'
+        values: '0x22'
+      - series: 'otelcol_exporter_queue_capacity{job="qa-alloy"}'
+        values: '2048x22'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 3m30s
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingTelemetryBacklog",alertstate="firing"}) or vector(0)'
+        eval_time: 7m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
+  - name: unexpected restart fires and ages out
+    interval: 30s
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="qa-svc",pod="qa-pricing-api-fixture",container="pricing-api"}'
+        values: '0+1x4 4+0x42'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PricingUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PricingUnexpectedRestart",alertstate="firing"}) or vector(0)'
+        eval_time: 20m
+        exp_samples:
+          - labels: '{}'
+            value: 0

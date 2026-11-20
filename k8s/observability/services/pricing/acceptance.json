@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "decision": "pricing-observability",
+  "status": "specified",
+  "evidence": {
+    "basis": "Pricing transport, tariff-reader and QA deployment contracts",
+    "limitation": "These warning thresholds support source and disposable validation. They are not production SLOs, load capacity evidence or shared-environment acceptance."
+  },
+  "resource_budget": {
+    "cpu_limit_cores": 0.2,
+    "memory_limit_bytes": 134217728,
+    "cpu_alert_cores": 0.16,
+    "memory_alert_bytes": 107374182.4
+  },
+  "rules": {
+    "error_outcomes": [
+      "internal_error",
+      "deadline_exceeded"
+    ],
+    "error_ratio": 0.05,
+    "latency_p95_seconds": 0.5,
+    "minimum_requests": 20,
+    "failure_window": "5m",
+    "pool_used_ratio": 0.8,
+    "telemetry_absence_window": "2m",
+    "telemetry_recovery_for": "1m",
+    "remote_write_lag_seconds": 60,
+    "exporter_queue_ratio": 0.8,
+    "restart_window": "15m"
+  },
+  "delivery": {
+    "metric_export_interval_seconds": 10,
+    "rule_evaluation_interval_seconds": 30,
+    "expected_signal_seconds": 30,
+    "expected_recovery_seconds": 120
+  }
+}

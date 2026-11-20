@@ -323,7 +323,8 @@ def forwards(
                     "port-forward",
                     "--address",
                     "127.0.0.1",
-                    f"service/{service}",
+                    # An explicit kind/name reference forwards workload-local ports.
+                    service if "/" in service else f"service/{service}",
                     f"{local_port}:{remote_port}",
                 ],
                 stdout=subprocess.DEVNULL,
@@ -585,6 +586,55 @@ def wait_for(description: str, probe: Any, timeout: float = QUERY_TIMEOUT) -> An
     raise VerificationError(f"timed out waiting for {description}")
 
 
+PRICING_TRI_REQUEST = {
+    "productCode": "TRI",
+    "policyFrom": "2017-04-16",
+    "policyTo": "2018-04-15",
+    "selectedCovers": ["C1", "C2"],
+    "answers": [
+        {"questionCode": "NUM_OF_ADULTS", "answer": 1},
+        {"questionCode": "NUM_OF_CHILDREN", "answer": 1},
+        {"questionCode": "DESTINATION", "answer": "EUR"},
+    ],
+}
+# Independent oracle from the accepted TRI fixture, not from the Pricing response mapper.
+PRICING_TRI_QUOTE = {"totalPrice": 78, "coversPrices": {"C1": 26, "C2": 52}}
+
+
+def pricing_reads(
+    ports: Mapping[str, int], trace_id: str, _deployment_settings: Mapping[str, str]
+) -> int:
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/livez").strip() == "live",
+        "Pricing liveness failed",
+    )
+    require(
+        request_text(f"http://127.0.0.1:{ports['health']}/readyz").strip() == "ready",
+        "Pricing readiness failed",
+    )
+    body = request_text(
+        f"http://127.0.0.1:{ports['pricing']}/pricing/calculate",
+        {"traceparent": f"00-{trace_id}-0123456789abcdef-01"},
+        PRICING_TRI_REQUEST,
+    )
+    try:
+        quote = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise VerificationError("Pricing quote response is malformed") from error
+    require(quote == PRICING_TRI_QUOTE, "Pricing TRI quote differs from the accepted fixture")
+    return 1
+
+
+def pricing_services(target: KubernetesTarget) -> list[tuple[str, str, str, int]]:
+    # Pricing has no Kubernetes Service: business HTTP is Pod-loopback only, so forward the
+    # selected Deployment's ports instead of a Service.
+    workload = f"deployment/{target.config.deployment}"
+    return [
+        ("pricing", target.service_namespace, workload, 8080),
+        ("health", target.service_namespace, workload, 8081),
+    ]
+
+
 def verify_product_enabled_signals(
     assets: MonitoringAssets,
     ports: Mapping[str, int],
@@ -651,6 +701,94 @@ def verify_product_enabled_signals(
     )
     return {
         "metric_series": len(metric),
+        "log_streams": len(logs),
+        "trace_batches": len(trace),
+        "firing_alerts": 0,
+    }
+
+
+def verify_pricing_enabled_signals(
+    assets: MonitoringAssets,
+    ports: Mapping[str, int],
+    trace_id: str,
+    pod_uid: str,
+    _deployment_settings: Mapping[str, str],
+) -> dict[str, Any]:
+    expected = assets.contract.verification.expected_signals
+    require(
+        len(expected.metrics) == 2
+        and len(expected.logs) == 1
+        and expected.traces == (assets.contract.service_name,),
+        "Pricing expected signal inventory differs from its registered probe",
+    )
+    common = (
+        f'service_name="{assets.contract.service_name}",'
+        'deployment_environment_name="qa",service_implementation="go",'
+        f'service_instance_id="{pod_uid}",insurance_hub_pricing_operation="calculate_price"'
+    )
+    queries = {
+        "request_http": f'{expected.metrics[0]}{{{common},insurance_hub_pricing_transport="http"}}',
+        "request_grpc": f'{expected.metrics[0]}{{{common},insurance_hub_pricing_transport="grpc"}}',
+        "database_query": (
+            f"{expected.metrics[1]}{{{common},"
+            'insurance_hub_pricing_database_stage="query",'
+            'insurance_hub_pricing_database_outcome="success"}'
+        ),
+    }
+    metric_counts: dict[str, int] = {}
+    for label, expression in queries.items():
+        url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+            {"query": expression}
+        )
+        metric_counts[label] = len(
+            wait_for(
+                f"Pricing {label} metric",
+                lambda url=url: query_results(request_json(url)),
+            )
+        )
+    now = time.time_ns()
+    loki_query = (
+        f'{{service_name="{assets.contract.service_name}",deployment_environment_name="qa",'
+        f'service_implementation="go"}} | json | {expected.logs[0]}=' + json.dumps(trace_id)
+    )
+    loki_url = (
+        f"http://127.0.0.1:{ports['loki']}/loki/api/v1/query_range?"
+        + urllib.parse.urlencode(
+            {
+                "query": loki_query,
+                "start": now - 300_000_000_000,
+                "end": now + 30_000_000_000,
+                "limit": 20,
+            }
+        )
+    )
+
+    def completion_streams() -> list[dict[str, Any]]:
+        # A gateway quote logs one HTTP and one gRPC completion with the same trace ID.
+        streams = query_results(request_json(loki_url))
+        return streams if sum(len(stream.get("values", [])) for stream in streams) >= 2 else []
+
+    def tariff_read_batches() -> Any:
+        batches = request_json(trace_url).get("batches")
+        return batches if "SELECT tariff" in json.dumps(batches) else None
+
+    trace_url = f"http://127.0.0.1:{ports['tempo']}/api/traces/{trace_id}"
+    logs = wait_for("correlated Pricing HTTP and gRPC completion logs", completion_streams)
+    trace = wait_for("correlated Pricing trace through the tariff read", tariff_read_batches)
+    alert_query = (
+        f'count(ALERTS{{service="{assets.contract.service_name}",alertstate="firing"}}) '
+        "or vector(0)"
+    )
+    alert_url = f"http://127.0.0.1:{ports['prometheus']}/api/v1/query?" + urllib.parse.urlencode(
+        {"query": alert_query}
+    )
+    alerts = query_results(request_json(alert_url))
+    require(
+        len(alerts) == 1 and float(alerts[0]["value"][1]) == 0,
+        "a selected-service Pricing alert is firing",
+    )
+    return {
+        "metric_series": metric_counts,
         "log_streams": len(logs),
         "trace_batches": len(trace),
         "firing_alerts": 0,
@@ -1144,6 +1282,13 @@ SERVICE_PROBES = {
         workload=policy_search_reads,
         enabled_signals=verify_policy_search_enabled_signals,
         result_key="policy_rows",
+    ),
+    "pricing": ServiceProbe(
+        service="pricing",
+        services=pricing_services,
+        workload=pricing_reads,
+        enabled_signals=verify_pricing_enabled_signals,
+        result_key="pricing_quotes",
     ),
     "product": ServiceProbe(
         service="product",
