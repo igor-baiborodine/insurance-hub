@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 
+PRICING_SERVICE_MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 GO ?= go
 DOCKER ?= docker
 KUBECTL ?= kubectl
@@ -59,6 +60,7 @@ PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
 BUILD_EXECUTABLES := server migrate seed
+PRICING_OBSERVABILITY_BIN_DIR ?=
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
@@ -99,6 +101,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
 	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image \
+	observability-probe-build \
 	deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop \
 	deploy-test-tooling deploy-smoke _deploy-smoke-rpc
 
@@ -295,7 +298,18 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make check            Validate the module without source mutation' \
 		'  make run              Start the service with environment configuration' \
 		'  make build            Compile the server, migrator and seeder' \
+		'  make observability-probe-build PRICING_OBSERVABILITY_BIN_DIR=/absolute/path' \
 		'  make test-integration Run service composition and disposable PostgreSQL smoke tests'
+
+observability-probe-build: ## Build probe binaries into caller-owned PRICING_OBSERVABILITY_BIN_DIR
+	@test "$(origin PRICING_OBSERVABILITY_BIN_DIR)" = "command line" || { \
+		echo 'PRICING_OBSERVABILITY_BIN_DIR must be supplied on the command line' >&2; exit 1; }
+	@case "$(PRICING_OBSERVABILITY_BIN_DIR)" in /*) ;; \
+		*) echo 'PRICING_OBSERVABILITY_BIN_DIR must be an absolute path' >&2; exit 1;; esac
+	@test -d "$(PRICING_OBSERVABILITY_BIN_DIR)" || { \
+		echo 'PRICING_OBSERVABILITY_BIN_DIR must identify an existing directory' >&2; exit 1; }
+	cd "$(PRICING_SERVICE_MAKEFILE_DIR)" && GOWORK=off $(GO) build -mod=readonly \
+		-o "$(PRICING_OBSERVABILITY_BIN_DIR)/" $(addprefix ./cmd/,$(BUILD_EXECUTABLES))
 
 .PHONY: resource-inspect resource-ensure resource-verify resource-test-fast
 

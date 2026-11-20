@@ -440,6 +440,63 @@ def test_pricing_probe_keeps_harness_values_out_of_the_service_environment() -> 
     assert values["DEPLOYMENT_ENVIRONMENT"] == "qa"
 
 
+def test_pricing_probe_delegates_build_to_the_service_make_interface(tmp_path: Path) -> None:
+    # given
+    service_root = tmp_path / "pricing-service"
+    binaries = tmp_path / "bin"
+
+    # when
+    with (
+        mock.patch.dict(os.environ, {"MAKE_COMMAND": "custom-make --jobserver-style=fifo"}),
+        mock.patch.object(probe_pricing, "run") as command,
+    ):
+        probe_pricing.build_binaries(service_root, binaries)
+
+    # then
+    command.assert_called_once_with(
+        [
+            "custom-make",
+            "--jobserver-style=fifo",
+            "--no-print-directory",
+            "-C",
+            str(service_root),
+            "observability-probe-build",
+            f"PRICING_OBSERVABILITY_BIN_DIR={binaries}",
+        ],
+        timeout=240,
+    )
+
+
+def test_pricing_probe_make_target_honors_the_go_override(tmp_path: Path) -> None:
+    # given
+    repository_root = Path(__file__).parents[3]
+    service_root = repository_root / "services" / "pricing-service"
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+
+    # when
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "-n",
+            "-C",
+            str(service_root),
+            "observability-probe-build",
+            f"PRICING_OBSERVABILITY_BIN_DIR={binaries}",
+            "GO=custom-go",
+        ],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # then
+    assert result.returncode == 0, result.stderr
+    assert "GOWORK=off custom-go build -mod=readonly" in result.stdout
+
+
 def test_pricing_probe_restarts_the_stopped_database_after_a_failed_request() -> None:
     # given
     docker: list[list[str]] = []

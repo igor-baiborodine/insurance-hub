@@ -17,6 +17,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import socket
 import subprocess
 import sys
@@ -368,6 +369,23 @@ def calculate(url: str, trace_id: str, body: Mapping[str, Any]) -> tuple[int, An
             return error.code, json.load(error)
 
 
+def build_binaries(service_root: Path, binaries: Path) -> None:
+    make_command = shlex.split(os.environ.get("MAKE_COMMAND", "make"))
+    if not make_command:
+        raise ProbeError("MAKE_COMMAND must identify the Make executable")
+    run(
+        [
+            *make_command,
+            "--no-print-directory",
+            "-C",
+            str(service_root),
+            "observability-probe-build",
+            f"PRICING_OBSERVABILITY_BIN_DIR={binaries}",
+        ],
+        timeout=240,
+    )
+
+
 def expect_quote(url: str, trace_id: str, description: str) -> None:
     status, body = calculate(url, trace_id, TRI_REQUEST)
     if status != 200 or body != TRI_QUOTE:
@@ -463,20 +481,7 @@ def execute_in_root(args: argparse.Namespace, root: Path) -> None:
         )
         binaries = root / "bin"
         binaries.mkdir()
-        run(
-            [
-                "go",
-                "build",
-                "-mod=readonly",
-                "-o",
-                f"{binaries}{os.sep}",
-                "./cmd/server",
-                "./cmd/migrate",
-                "./cmd/seed",
-            ],
-            cwd=args.service_root,
-            timeout=240,
-        )
+        build_binaries(args.service_root, binaries)
         reader_url = prepare_database(
             args, root, binaries, container_id, postgres_port, certificate
         )
