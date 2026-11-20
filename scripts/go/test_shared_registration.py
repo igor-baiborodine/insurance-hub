@@ -18,6 +18,7 @@ import topology
 from shared_support import DIRECTORY, MODULE, SharedError, write_json
 
 ROOT = Path(__file__).resolve().parents[2]
+MVEL_DIRECTORY = "libs/mvel"
 
 
 def fixture_tree(root: Path, active_count: int = 0) -> dict:
@@ -110,6 +111,53 @@ def test_ci_shared_code_change_selects_fast_candidate_phases(tmp_path: Path, cou
         set(registration.CI_CANDIDATE_PHASES) if count else set()
     )
     assert len(result["obligations"]) == len(registration.LIBRARY_PHASES) + len(candidates)
+
+
+def test_ci_mvel_change_selects_only_the_mvel_library_gate(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 2)
+    fixture_tree(tmp_path / "head", 2)
+
+    # when
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        [MVEL_DIRECTORY + "/program.go"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+
+    # then
+    assert result["changed"] == [MVEL_DIRECTORY]
+    assert {item["module"] for item in result["obligations"]} == {MVEL_DIRECTORY}
+    assert {item["mode"] for item in result["obligations"]} == {"normal"}
+    assert {item["phase"] for item in result["obligations"]} == set(registration.LIBRARY_PHASES)
+
+
+def test_ci_dual_library_change_preserves_servicekit_and_mvel_gates(tmp_path: Path) -> None:
+    # given
+    fixture_tree(tmp_path / "base", 1)
+    fixture_tree(tmp_path / "head", 1)
+
+    # when
+    result = registration.plan_trees(
+        tmp_path / "base",
+        tmp_path / "head",
+        [DIRECTORY + "/health/health.go", MVEL_DIRECTORY + "/program.go"],
+        "a" * 40,
+        "b" * 40,
+        "a" * 40,
+        "ci",
+    )
+
+    # then
+    assert result["changed"] == [MVEL_DIRECTORY, DIRECTORY]
+    normal = [item for item in result["obligations"] if item["mode"] == "normal"]
+    candidate = [item for item in result["obligations"] if item["mode"] == "candidate"]
+    assert {item["module"] for item in normal} == {MVEL_DIRECTORY, DIRECTORY}
+    assert {item["module"] for item in candidate} == {"templates/go-service"}
 
 
 @pytest.mark.parametrize("path", [DIRECTORY + "/README.md", "scripts/go/shared_candidate.py"])
@@ -259,6 +307,31 @@ def test_release_plan_splits_full_obligations_by_module(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("paths", "expected"),
+    [
+        (["libs/mvel/program.go"], ["libs/mvel"]),
+        (["libs/servicekit/health/health.go"], ["libs/servicekit"]),
+        (
+            ["libs/servicekit/health/health.go", "libs/mvel/program.go"],
+            ["libs/mvel", "libs/servicekit"],
+        ),
+    ],
+)
+def test_release_selection_keeps_each_library_identity(
+    monkeypatch: pytest.MonkeyPatch, paths: list[str], expected: list[str]
+) -> None:
+    # given
+    monkeypatch.setattr(
+        shared_cli.select_pr_module,
+        "changed_paths",
+        lambda _root, _base, _head: ("a" * 40, paths),
+    )
+
+    # when / then
+    assert shared_cli.release_libraries("a" * 40, "b" * 40) == expected
+
+
+@pytest.mark.parametrize(
     "defect",
     ["missing", "downgrade", "duplicate", "phase", "target", "fast-target", "workflow", "unknown"],
 )
@@ -334,6 +407,7 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
     # then
     assert {r["module"] for r in result["obligations"]} == {
         DIRECTORY,
+        MVEL_DIRECTORY,
         "templates/go-service",
         "services/product-service",
         "services/policy-search-service",
@@ -426,8 +500,9 @@ def test_installed_workflow_contracts() -> None:
     triggers = workflow.get("on", workflow.get(True))
     assert set(triggers) == {"push"}
     assert triggers["push"]["branches"] == ["main"]
-    assert triggers["push"]["paths"] == ["libs/servicekit/**"]
+    assert triggers["push"]["paths"] == ["libs/mvel/**", "libs/servicekit/**", "!libs/**/*.md"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
+    assert workflow["env"]["RELEASE_BASE"] == "${{ github.event.before }}"
     assert workflow["env"]["RELEASE_SHA"] == "${{ github.sha }}"
     assert workflow["permissions"] == {"contents": "read"}
     assert list(workflow["jobs"]) == ["plan", "validate", "publish"]
@@ -435,17 +510,25 @@ def test_installed_workflow_contracts() -> None:
     validate = workflow["jobs"]["validate"]
     publish = workflow["jobs"]["publish"]
     assert plan["timeout-minutes"] == 15
-    assert plan["outputs"]["matrix"] == "${{ steps.plan.outputs.matrix }}"
+    assert plan["outputs"] == {
+        "publish_matrix": "${{ steps.plan.outputs.publish_matrix }}",
+        "validation_matrix": "${{ steps.plan.outputs.validation_matrix }}",
+    }
     assert validate["needs"] == "plan"
     assert validate["timeout-minutes"] == 60
     assert validate["strategy"] == {
         "fail-fast": False,
         "max-parallel": 4,
-        "matrix": "${{ fromJSON(needs.plan.outputs.matrix) }}",
+        "matrix": "${{ fromJSON(needs.plan.outputs.validation_matrix) }}",
     }
     assert publish["needs"] == ["plan", "validate"]
     assert publish["timeout-minutes"] == 30
     assert publish["permissions"] == {"contents": "write"}
+    assert publish["strategy"] == {
+        "fail-fast": False,
+        "max-parallel": 1,
+        "matrix": "${{ fromJSON(needs.plan.outputs.publish_matrix) }}",
+    }
     assert [
         step.get("run")
         for job in workflow["jobs"].values()
@@ -462,6 +545,10 @@ def test_installed_workflow_contracts() -> None:
         step for step in validate["steps"] if "actions/setup-go@" in step.get("uses", "")
     )
     assert setup_go["with"]["go-version-file"] == "${{ matrix.module }}/go.mod"
+    publish_setup_go = next(
+        step for step in publish["steps"] if "actions/setup-go@" in step.get("uses", "")
+    )
+    assert publish_setup_go["with"]["go-version-file"] == "${{ matrix.library }}/go.mod"
     for name, job in workflow["jobs"].items():
         permissions = job.get("permissions", workflow["permissions"])
         assert "packages" not in permissions
@@ -483,7 +570,7 @@ def test_installed_workflow_contracts() -> None:
 
 @pytest.mark.parametrize(
     "step_name",
-    ["Generate servicekit coverage", "Upload servicekit coverage to Codecov"],
+    ["Generate shared library coverage", "Upload shared library coverage to Codecov"],
 )
 def test_shared_workflow_rejects_missing_library_coverage(tmp_path: Path, step_name: str) -> None:
     # given
@@ -497,7 +584,7 @@ def test_shared_workflow_rejects_missing_library_coverage(tmp_path: Path, step_n
     path.write_text(yaml.safe_dump(workflow))
 
     # when / then
-    with pytest.raises(SharedError, match="missing or misordered servicekit coverage"):
+    with pytest.raises(SharedError, match="missing or misordered shared library coverage"):
         registration.shared_ci_contract(tmp_path, ".github/workflows/go-pr-shared.yml")
 
 

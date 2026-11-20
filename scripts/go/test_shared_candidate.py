@@ -15,7 +15,7 @@ import pytest
 import library_tooling
 import shared_candidate as candidate
 import topology
-from shared_support import DIRECTORY, MODULE, Budget, SharedError
+from shared_support import DIRECTORY, MODULE, Budget, SharedError, library_config
 
 ROOT = Path(__file__).resolve().parents[2]
 OFFLINE_GO_DIRECTIVE = "1.23"
@@ -161,6 +161,16 @@ def test_candidate_context_cannot_be_enabled_by_a_flag(monkeypatch) -> None:
 def test_runtime_scope_rejects_business_package_and_private_import(package: dict) -> None:
     with pytest.raises(SharedError):
         library_tooling.scope_check([package])
+
+
+def test_runtime_scope_accepts_only_the_mvel_root_package() -> None:
+    # given
+    module = library_config("libs/mvel")["module"]
+
+    # when / then
+    library_tooling.scope_check([{"ImportPath": module, "TestImports": [module]}], module)
+    with pytest.raises(SharedError, match="unsupported public library package"):
+        library_tooling.scope_check([{"ImportPath": module + "/internal"}], module)
 
 
 @pytest.mark.parametrize("defect", ["stale", "directory", "alternate"])

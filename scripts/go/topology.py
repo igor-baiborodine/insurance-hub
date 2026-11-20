@@ -25,6 +25,7 @@ MODULE_TOOLING_VARIABLES = ("PYTHON",)
 MAIN_COVERAGE_WORKFLOW = ".github/workflows/go-main-coverage.yml"
 MAIN_COVERAGE_MODULES = (
     ("libs/servicekit", "public-shared", "servicekit"),
+    ("libs/mvel", "public-shared", "mvel"),
     ("services/product-service", "business-service", "product-service"),
     ("services/policy-search-service", "business-service", "policy-search-service"),
     ("services/dashboard-service", "business-service", "dashboard-service"),
@@ -33,6 +34,7 @@ MAIN_COVERAGE_MODULES = (
     ("services/pricing-service", "business-service", "pricing-service"),
 )
 MAIN_COVERAGE_PATHS = (
+    "libs/mvel/**",
     "libs/servicekit/**",
     "services/*-service/**/*.go",
     "services/*-service/go.mod",
@@ -345,7 +347,11 @@ def load_inventory(path: Path) -> dict[str, Any]:
             string_array(
                 module["prerequisites"], f"modules[{index}].prerequisites", allow_empty=True
             )
-            string_array(module["consumers"], f"modules[{index}].consumers", allow_empty=False)
+            string_array(
+                module["consumers"],
+                f"modules[{index}].consumers",
+                allow_empty=module["role"] == "public-shared",
+            )
             require(
                 isinstance(module["localReplacements"], list),
                 f"go-module-topology.json: modules[{index}].localReplacements must be an array",

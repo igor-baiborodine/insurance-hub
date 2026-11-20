@@ -1,4 +1,4 @@
-"""Servicekit release identity, tag publication and public module verification."""
+"""Shared-library release identity, tag publication and public module verification."""
 
 from __future__ import annotations
 
@@ -15,13 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from shared_support import (
-    MODULE,
+    DIRECTORY,
     REPOSITORY,
     SHA,
     Budget,
     SharedError,
     digest,
     environment,
+    library_config,
     manifest_digest,
     require,
 )
@@ -31,10 +32,15 @@ VERSION = re.compile(r"v1\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 API_VERSION = "2026-03-10"
 
 
-def release_identity(version: str, sha: str) -> str:
+def selected_library(directory: str | None = None) -> dict[str, str]:
+    return library_config(directory or os.environ.get("RELEASE_MODULE", DIRECTORY))
+
+
+def release_identity(version: str, sha: str, library: dict[str, str] | None = None) -> str:
     require(VERSION.fullmatch(version), "expected canonical stable v1 version")
     require(SHA.fullmatch(sha), "expected full source SHA")
-    return f"libs/servicekit/{version}"
+    selected = library or selected_library()
+    return f"{selected['directory']}/{version}"
 
 
 class GitHub:
@@ -92,12 +98,21 @@ class GitHub:
         raise SharedError("tag nesting exceeds limit")
 
 
-def publish_tag(provider: GitHub, version: str, sha: str) -> None:
-    tag = release_identity(version, sha)
+def publish_tag(
+    provider: GitHub,
+    version: str,
+    sha: str,
+    library: dict[str, str] | None = None,
+) -> None:
+    selected = library or selected_library()
+    tag = release_identity(version, sha, selected)
     existing = provider.tag_sha(tag)
     if existing is None:
-        tags = provider.api("git/matching-refs/tags/libs/servicekit/")
-        require(tags, "v1 release requires existing library release history")
+        tags = provider.api("git/matching-refs/tags/" + selected["directory"] + "/")
+        require(
+            tags or (selected["key"] == "mvel" and version == "v1.0.0"),
+            "later v1 release requires existing library release history",
+        )
     require(existing in {None, sha}, "tag collision")
     if existing is None:
         try:
@@ -121,10 +136,41 @@ def release_source() -> str:
     return sha
 
 
-def public_verify(root: Path, version: str, sha: str, source_digest: str) -> None:
-    release_identity(version, sha)
+def smoke_source(library: dict[str, str]) -> str:
+    module = library["module"]
+    if library["key"] == "mvel":
+        return (
+            'package main\nimport (\n"fmt"\n'
+            f'mvel "{module}"\n'
+            ")\nfunc main() {\n"
+            'expression, err := mvel.CompileDecimal("10B")\n'
+            "if err != nil { panic(err) }\n"
+            "result, err := expression.Evaluate(nil)\n"
+            'if err != nil || result.String() != "10" { panic("unexpected MVEL result") }\n'
+            "fmt.Print(result.String())\n}\n"
+        )
+    return (
+        "package main\nimport (\n"
+        + "".join(
+            f'_ "{module}/{package}"\n'
+            for package in ("config", "identity", "logger", "telemetry", "health")
+        )
+        + ")\nfunc main() {}\n"
+    )
+
+
+def public_verify(
+    root: Path,
+    version: str,
+    sha: str,
+    source_digest: str,
+    library: dict[str, str] | None = None,
+) -> None:
+    selected_library_config = library or selected_library()
+    release_identity(version, sha, selected_library_config)
+    module = selected_library_config["module"]
     budget = Budget(900)
-    url = f"https://proxy.golang.org/{MODULE}/@v/{version}.info"
+    url = f"https://proxy.golang.org/{module}/@v/{version}.info"
     while True:
         require(time.monotonic() < budget.deadline, "public resolution exceeded 15-minute deadline")
         try:
@@ -142,21 +188,17 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
             pass
         print("waiting for public module propagation", flush=True)
         time.sleep(min(10, max(0, budget.deadline - time.monotonic())))
-    with tempfile.TemporaryDirectory(prefix="servicekit-public-") as temporary:
+    with tempfile.TemporaryDirectory(
+        prefix=selected_library_config["key"] + "-public-"
+    ) as temporary:
         scratch = Path(temporary)
         consumer = scratch / "consumer"
         consumer.mkdir()
         (consumer / "go.mod").write_text(
-            f"module example.com/servicekit-release-check\n\ngo 1.27.4\n\nrequire {MODULE} {version}\n"
+            f"module example.com/{selected_library_config['key']}-release-check\n\n"
+            f"go 1.27.4\n\nrequire {module} {version}\n"
         )
-        (consumer / "main.go").write_text(
-            "package main\nimport (\n"
-            + "".join(
-                f'_ "{MODULE}/{p}"\n'
-                for p in ("config", "identity", "logger", "telemetry", "health")
-            )
-            + ")\nfunc main() {}\n"
-        )
+        (consumer / "main.go").write_text(smoke_source(selected_library_config))
         env = environment(
             GOWORK="off",
             GOENV="off",
@@ -171,7 +213,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
         )
         download = json.loads(
             budget.run(
-                ["go", "mod", "download", "-json", MODULE + "@" + version],
+                ["go", "mod", "download", "-json", module + "@" + version],
                 consumer,
                 "public checksum verification",
                 env,
@@ -179,7 +221,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
             )
         )
         require(
-            download.get("Path") == MODULE
+            download.get("Path") == module
             and download.get("Version") == version
             and not download.get("Error"),
             "public module resolution failed",
@@ -191,7 +233,7 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
         budget.run(["go", "mod", "tidy"], consumer, "resolve smoke consumer", env)
         selected = json.loads(
             budget.run(
-                ["go", "list", "-m", "-json", MODULE], consumer, "verify exact public version", env
+                ["go", "list", "-m", "-json", module], consumer, "verify exact public version", env
             )
         )
         require(
@@ -199,11 +241,23 @@ def public_verify(root: Path, version: str, sha: str, source_digest: str) -> Non
             "wrong public selection",
         )
         budget.run(["go", "run", "-mod=readonly", "."], consumer, "standalone smoke", env)
-        image = "servicekit-release-" + digest(temporary.encode())[:16]
+        print(
+            json.dumps(
+                {
+                    "module": module,
+                    "version": version,
+                    "sum": download.get("Sum"),
+                    "go_mod_sum": download.get("GoModSum"),
+                    "smoke": "passed",
+                },
+                sort_keys=True,
+            )
+        )
+        image = selected_library_config["key"] + "-release-" + digest(temporary.encode())[:16]
         (consumer / "Dockerfile").write_text(
             f"FROM {BUILDER}\nWORKDIR /src\nCOPY . .\n"
             "ENV GOWORK=off GOENV=off GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org\n"
-            f"RUN go mod download && test \"$(go list -m -f '{{{{.Version}}}}' {MODULE})\" = '{version}' && go run -mod=readonly .\n"
+            f"RUN go mod download && test \"$(go list -m -f '{{{{.Version}}}}' {module})\" = '{version}' && go run -mod=readonly .\n"
         )
         try:
             budget.run(

@@ -5,16 +5,19 @@ on:
     branches:
       - main
     paths:
+      - 'libs/mvel/**'
       - 'libs/servicekit/**'
+      - '!libs/**/*.md'
 
 permissions:
   contents: read
 
 concurrency:
-  group: go-library-release-servicekit
+  group: go-library-release
   cancel-in-progress: false
 
 env:
+  RELEASE_BASE: ${{ github.event.before }}
   RELEASE_SHA: ${{ github.sha }}
 
 jobs:
@@ -24,7 +27,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
+      publish_matrix: ${{ steps.plan.outputs.publish_matrix }}
+      validation_matrix: ${{ steps.plan.outputs.validation_matrix }}
     steps:
       - name: Checkout triggering source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,14 +50,14 @@ jobs:
         run: make go-library-release-plan
 
   validate:
-    name: Validate release module (${{ matrix.module }})
+    name: Validate ${{ matrix.library }} release module (${{ matrix.module }})
     needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 4
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.validation_matrix) }}
     steps:
       - name: Checkout triggering source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,15 +83,23 @@ jobs:
       - name: Validate exact-source module obligations
         env:
           MODULE_DIR: ${{ matrix.module }}
+          RELEASE_MODULE: ${{ matrix.library }}
         run: make go-library-release-validate
 
   publish:
-    name: Publish Go library release
+    name: Publish ${{ matrix.library }} release
     needs: [plan, validate]
     permissions:
       contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.plan.outputs.publish_matrix) }}
+    env:
+      RELEASE_MODULE: ${{ matrix.library }}
+      RELEASE_TAG_PREFIX: ${{ matrix.tag_prefix }}
     steps:
       - name: Checkout triggering source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -106,12 +118,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          metadata_dir="$RUNNER_TEMP/servicekit-release"
+          metadata_dir="$RUNNER_TEMP/${{ matrix.key }}-release"
           mkdir -p "$metadata_dir"
           npx -y monotag@1.26.0 tag \
             --repo-dir . \
-            --path libs/servicekit \
-            --prefix libs/servicekit/v \
+            --path "$RELEASE_MODULE" \
+            --prefix "$RELEASE_TAG_PREFIX" \
             --tag-file "$metadata_dir/tag.txt" \
             --version-file "$metadata_dir/version.txt" \
             --notes-file "$metadata_dir/notes.md" \
@@ -120,7 +132,7 @@ jobs:
           release_tag="$(cat "$metadata_dir/tag.txt")"
           release_version="$(cat "$metadata_dir/version.txt")"
           [[ "$release_version" =~ ^1\.[0-9]+\.[0-9]+$ ]]
-          [[ "$release_tag" == "libs/servicekit/v$release_version" ]]
+          [[ "$release_tag" == "$RELEASE_TAG_PREFIX$release_version" ]]
           echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
           echo "version=v$release_version" >> "$GITHUB_OUTPUT"
           echo "notes=$metadata_dir/notes.md" >> "$GITHUB_OUTPUT"
@@ -136,7 +148,7 @@ jobs:
       - name: Set up selected Go version
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: libs/servicekit/go.mod
+          go-version-file: ${{ matrix.library }}/go.mod
           cache: false
 
       - name: Prepare validated release identity

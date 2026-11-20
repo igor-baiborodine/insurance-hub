@@ -21,6 +21,20 @@ MODULE = "github.com/igor-baiborodine/insurance-hub/libs/servicekit"
 DIRECTORY = "libs/servicekit"
 REPOSITORY = "igor-baiborodine/insurance-hub"
 WORKFLOW = ".github/workflows/go-release-lib.yml"
+LIBRARIES = {
+    "libs/mvel": {
+        "directory": "libs/mvel",
+        "key": "mvel",
+        "module": "github.com/igor-baiborodine/insurance-hub/libs/mvel",
+        "tag_prefix": "libs/mvel/v",
+    },
+    DIRECTORY: {
+        "directory": DIRECTORY,
+        "key": "servicekit",
+        "module": MODULE,
+        "tag_prefix": "libs/servicekit/v",
+    },
+}
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 
@@ -32,6 +46,11 @@ class SharedError(topology.TopologyError):
 def require(condition: object, message: str) -> None:
     if not condition:
         raise SharedError(message)
+
+
+def library_config(directory: str) -> dict[str, str]:
+    require(directory in LIBRARIES, "unknown release library")
+    return LIBRARIES[directory]
 
 
 def exact(value: Any, keys: set[str], label: str) -> None:
