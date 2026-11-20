@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -21,481 +22,367 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	pricingv1 "github.com/igor-baiborodine/insurance-hub/services/pricing-service/gen/pricing/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/domain"
 	transport "github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/grpc"
 )
 
-func TestExampleService_GeneratedIdentity(t *testing.T) {
+func TestPricingService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
-		wantFile       = "pricing/v1/example_service.proto"
+		wantFile       = "pricing/v1/pricing_service.proto"
 		wantPackage    = "pricing.v1"
 		wantModule     = "github.com/igor-baiborodine/insurance-hub/services/pricing-service"
-		wantService    = "pricing.v1.ExampleService"
-		wantFullMethod = "/pricing.v1.ExampleService/Echo"
+		wantService    = "pricing.v1.PricingService"
+		wantFullMethod = "/pricing.v1.PricingService/CalculatePrice"
 	)
-	wantGoPackage := wantModule + "/gen/pricing/v1;pricingv1"
 
 	// when
-	descriptor := (&pricingv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+	descriptor := (&pricingv1.CalculatePriceRequest{}).ProtoReflect().Descriptor().ParentFile()
 
 	// then
 	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
-		t.Errorf(
-			"descriptor identity = (%q, %q), want (%q, %q)",
-			descriptor.Path(),
-			descriptor.Package(),
-			wantFile,
-			wantPackage,
-		)
+		t.Errorf("descriptor identity = (%q, %q)", descriptor.Path(), descriptor.Package())
 	}
 	options, ok := descriptor.Options().(*descriptorpb.FileOptions)
 	if !ok {
-		t.Fatalf(
-			"descriptor options type = %T, want *descriptorpb.FileOptions",
-			descriptor.Options(),
-		)
+		t.Fatalf("descriptor options type = %T", descriptor.Options())
 	}
-	if options.GetGoPackage() != wantGoPackage {
-		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
+	if options.GetGoPackage() != wantModule+"/gen/pricing/v1;pricingv1" {
+		t.Errorf("go_package = %q", options.GetGoPackage())
 	}
-	service := descriptor.Services().ByName("ExampleService")
+	service := descriptor.Services().ByName("PricingService")
 	if service == nil || string(service.FullName()) != wantService {
-		t.Errorf("service descriptor = %v, want %q", service, wantService)
+		t.Errorf("service descriptor = %v", service)
 	}
-	if pricingv1.ExampleService_Echo_FullMethodName != wantFullMethod {
-		t.Errorf(
-			"full method = %q, want %q",
-			pricingv1.ExampleService_Echo_FullMethodName,
-			wantFullMethod,
-		)
+	if pricingv1.PricingService_CalculatePrice_FullMethodName != wantFullMethod {
+		t.Errorf("full method = %q", pricingv1.PricingService_CalculatePrice_FullMethodName)
 	}
 }
 
-func TestExampleService_Echo_Boundaries(t *testing.T) {
+func TestPricingService_CalculatePrice_MapsRequestAndExactQuote(t *testing.T) {
 	// given
 	var calls atomic.Int64
-	echo := func(ctx context.Context, message string) (string, error) {
+	calculate := func(
+		ctx context.Context,
+		request application.CalculatePriceRequest,
+	) (domain.Quote, error) {
 		calls.Add(1)
-		return transport.IdentityEcho(ctx, message)
+		if err := ctx.Err(); err != nil {
+			return domain.Quote{}, err
+		}
+		if request.ProductCode != "TRI" ||
+			request.PolicyFrom.Format(time.DateOnly) != "2017-04-16" ||
+			request.PolicyTo.Format(time.DateOnly) != "2018-04-15" ||
+			len(request.SelectedCovers) != 2 ||
+			len(request.Answers) != 2 {
+			t.Fatalf("mapped request = %+v", request)
+		}
+		if request.Answers[0].Kind != domain.NumericAnswer ||
+			request.Answers[0].Number.String() != "1.00" ||
+			request.Answers[1].Kind != domain.TextAnswer || request.Answers[1].Text != "1.00" {
+			t.Fatalf("typed answers = %+v", request.Answers)
+		}
+		return quote(t, "78", map[string]string{"C1": "26", "C2": "52"}), nil
 	}
-	client := newExampleClient(
+	client := newPricingClient(
 		t,
-		echo,
+		calculate,
+		noop.NewTracerProvider(),
+		propagation.TraceContext{},
+		new(bytes.Buffer),
+	)
+
+	// when
+	response, err := client.CalculatePrice(context.Background(), validRequest())
+	// then
+	if err != nil {
+		t.Fatalf("CalculatePrice: %v", err)
+	}
+	if calls.Load() != 1 || response.GetTotalPrice() != "78" ||
+		response.GetCoversPrices()["C1"] != "26" || response.GetCoversPrices()["C2"] != "52" {
+		t.Errorf("response = %v, calls = %d", response, calls.Load())
+	}
+}
+
+func TestPricingService_CalculatePrice_RejectsInvalidRequestsBeforeCalculation(t *testing.T) {
+	// given
+	var calls atomic.Int64
+	calculate := func(context.Context, application.CalculatePriceRequest) (domain.Quote, error) {
+		calls.Add(1)
+		return quote(t, "1", map[string]string{"C1": "1"}), nil
+	}
+	client := newPricingClient(
+		t,
+		calculate,
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		new(bytes.Buffer),
 	)
 	tests := []struct {
-		name     string
-		message  string
-		wantCode codes.Code
-		wantCall bool
+		name    string
+		request *pricingv1.CalculatePriceRequest
 	}{
-		{name: "empty", message: "", wantCode: codes.InvalidArgument},
-		{name: "one ASCII byte", message: "a", wantCode: codes.OK, wantCall: true},
-		{name: "two-byte UTF-8", message: "é", wantCode: codes.OK, wantCall: true},
-		{
-			name:     "128 ASCII bytes",
-			message:  strings.Repeat("a", 128),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "128 multibyte UTF-8 bytes",
-			message:  strings.Repeat("é", 64),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "129 ASCII bytes",
-			message:  strings.Repeat("a", 129),
-			wantCode: codes.InvalidArgument,
-		},
-		{
-			name:     "129 bytes ending in ASCII after multibyte UTF-8",
-			message:  strings.Repeat("é", 64) + "a",
-			wantCode: codes.InvalidArgument,
-		},
+		{name: "missing fields", request: &pricingv1.CalculatePriceRequest{}},
+		{name: "invalid calendar date", request: func() *pricingv1.CalculatePriceRequest {
+			request := validRequest()
+			request.PolicyFrom = "2025-02-30"
+			return request
+		}()},
+		{name: "missing answer choice", request: func() *pricingv1.CalculatePriceRequest {
+			request := validRequest()
+			request.Answers[0].Value = nil
+			return request
+		}()},
+		{name: "invalid decimal", request: func() *pricingv1.CalculatePriceRequest {
+			request := validRequest()
+			request.Answers[0].Value = &pricingv1.Answer_Number{Number: "NaN"}
+			return request
+		}()},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// given
-			callsBefore := calls.Load()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-
 			// when
-			response, err := client.Echo(
-				ctx,
-				&pricingv1.EchoRequest{Message: test.message},
-			)
+			response, err := client.CalculatePrice(context.Background(), test.request)
 
 			// then
-			if status.Code(err) != test.wantCode {
-				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
-				)
-			}
-			wantCalls := callsBefore
-			if test.wantCall {
-				wantCalls++
-			}
-			if calls.Load() != wantCalls {
-				t.Errorf("handler calls = %d, want %d", calls.Load(), wantCalls)
-			}
-			if test.wantCode != codes.OK {
-				if response != nil {
-					t.Errorf("response = %v, want nil", response)
-				}
-				if status.Convert(err).Message() != "invalid request" {
-					t.Errorf(
-						"message = %q, want invalid request",
-						status.Convert(err).Message(),
-					)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Echo: %v", err)
-			}
-			want := &pricingv1.EchoResponse{Message: test.message}
-			if !proto.Equal(response, want) {
-				t.Errorf("response = %v, want byte-identical message", response)
-			}
-		})
-	}
-}
-
-func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	result := make(chan error, 1)
-
-	// when
-	go func() {
-		_, err := client.Echo(ctx, &pricingv1.EchoRequest{Message: "cancel"})
-		result <- err
-	}()
-
-	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
-	}
-
-	// when
-	cancel()
-
-	// then
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.Canceled {
-			t.Fatalf("status = %v, want Canceled: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("canceled RPC did not return")
-	}
-}
-
-func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	result := make(chan error, 1)
-
-	// when
-	go func() {
-		_, err := client.Echo(ctx, &pricingv1.EchoRequest{Message: "deadline"})
-		result <- err
-	}()
-
-	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
-	}
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.DeadlineExceeded {
-			t.Fatalf("status = %v, want DeadlineExceeded: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("deadline RPC did not return")
-	}
-}
-
-func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
-	// given
-	tests := []struct {
-		name       string
-		handlerErr error
-		wantCode   codes.Code
-	}{
-		{name: "canceled", handlerErr: context.Canceled, wantCode: codes.Canceled},
-		{
-			name:       "deadline exceeded",
-			handlerErr: context.DeadlineExceeded,
-			wantCode:   codes.DeadlineExceeded,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// given
-			handlerContextErr := make(chan error, 1)
-			echo := func(ctx context.Context, _ string) (string, error) {
-				handlerContextErr <- ctx.Err()
-				return "", test.handlerErr
-			}
-			client := newExampleClient(
-				t,
-				echo,
-				noop.NewTracerProvider(),
-				propagation.TraceContext{},
-				new(bytes.Buffer),
-			)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// when
-			response, err := client.Echo(
-				ctx,
-				&pricingv1.EchoRequest{Message: "handler context error"},
-			)
-
-			// then
-			if handlerErr := <-handlerContextErr; handlerErr != nil {
-				t.Errorf(
-					"handler context error before return = %v, want nil",
-					handlerErr,
-				)
-			}
-			if ctx.Err() != nil {
-				t.Errorf(
-					"client context error after response = %v, want nil",
-					ctx.Err(),
-				)
+			if status.Code(err) != codes.InvalidArgument ||
+				status.Convert(err).Message() != "invalid request" {
+				t.Fatalf("result = (%v, %v)", response, err)
 			}
 			if response != nil {
 				t.Errorf("response = %v, want nil", response)
 			}
-			if status.Code(err) != test.wantCode {
-				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
-				)
-			}
 		})
 	}
-}
-
-func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
-	// given
-	const (
-		payloadMarker = "payload-marker"
-		privateMarker = "private-adapter-marker"
-	)
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := tracerProvider.Shutdown(ctx); err != nil {
-			t.Errorf("shutdown tracer provider: %v", err)
-		}
-	})
-	handlerContext := make(chan trace.SpanContext, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
-		handlerContext <- trace.SpanContextFromContext(ctx)
-		return "", status.Error(codes.Unknown, privateMarker)
-	}
-	var logs bytes.Buffer
-	propagator := propagation.TraceContext{}
-	client := newExampleClient(t, echo, tracerProvider, propagator, &logs)
-	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
-	parentSpanContext := parentSpan.SpanContext()
-
-	// when
-	response, err := client.Echo(parentCtx, &pricingv1.EchoRequest{Message: payloadMarker})
-	parentSpan.End()
-
-	// then
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("status = %v, want Internal: %v", status.Code(err), err)
-	}
-	if status.Convert(err).Message() != "internal error" {
-		t.Errorf("message = %q, want internal error", status.Convert(err).Message())
-	}
-	if response != nil {
-		t.Errorf("response = %v, want nil", response)
-	}
-	var serverSpanContext trace.SpanContext
-	select {
-	case serverSpanContext = <-handlerContext:
-	case <-time.After(time.Second):
-		t.Fatal("handler context was not captured")
-	}
-	if !serverSpanContext.IsValid() ||
-		serverSpanContext.TraceID() != parentSpanContext.TraceID() {
-		t.Errorf(
-			"server trace context = %v, parent = %v",
-			serverSpanContext,
-			parentSpanContext,
-		)
-	}
-	if strings.Contains(logs.String(), payloadMarker) ||
-		strings.Contains(logs.String(), privateMarker) {
-		t.Fatalf("logs expose request or error marker: %s", logs.String())
-	}
-	if !strings.Contains(logs.String(), `"service":"pricing-service"`) ||
-		!strings.Contains(
-			logs.String(),
-			`"trace_id":"`+serverSpanContext.TraceID().String()+`"`,
-		) {
-		t.Errorf("logs lack service or trace identity: %s", logs.String())
-	}
-	var clientSpanFound, serverSpanFound bool
-	for _, span := range spanRecorder.Ended() {
-		if span.SpanContext().TraceID() != parentSpanContext.TraceID() {
-			continue
-		}
-		switch span.SpanKind() {
-		case trace.SpanKindClient:
-			clientSpanFound = true
-		case trace.SpanKindServer:
-			serverSpanFound = true
-		}
-	}
-	if !clientSpanFound || !serverSpanFound {
-		t.Errorf(
-			"request spans found: client=%t server=%t",
-			clientSpanFound,
-			serverSpanFound,
-		)
+	if calls.Load() != 0 {
+		t.Errorf("calculation calls = %d, want 0", calls.Load())
 	}
 }
 
-func TestNewServer_RejectsMissingDependencies(t *testing.T) {
+func TestPricingService_CalculatePrice_MapsSafeFailures(t *testing.T) {
 	// given
-	log := logger.New(new(bytes.Buffer), "pricing-service", 0)
-	tracerProvider := noop.NewTracerProvider()
-	propagator := propagation.TraceContext{}
 	tests := []struct {
-		name              string
-		loggerMissing     bool
-		tracerMissing     bool
-		propagatorMissing bool
-		echoMissing       bool
+		name, message string
+		failure       error
+		code          codes.Code
 	}{
-		{name: "logger", loggerMissing: true},
-		{name: "tracer provider", tracerMissing: true},
-		{name: "propagator", propagatorMissing: true},
-		{name: "echo handler", echoMissing: true},
+		{
+			name:    "canceled",
+			failure: context.Canceled,
+			code:    codes.Canceled,
+			message: context.Canceled.Error(),
+		},
+		{
+			name:    "deadline",
+			failure: context.DeadlineExceeded,
+			code:    codes.DeadlineExceeded,
+			message: context.DeadlineExceeded.Error(),
+		},
+		{
+			name:    "storage unavailable",
+			failure: application.ErrReaderUnavailable,
+			code:    codes.Unavailable,
+			message: "service unavailable",
+		},
+		{
+			name:    "calculation",
+			failure: application.ErrCalculation,
+			code:    codes.Internal,
+			message: "internal error",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// given
-			selectedLogger := log
-			selectedTracer := trace.TracerProvider(tracerProvider)
-			selectedPropagator := propagation.TextMapPropagator(propagator)
-			selectedEcho := transport.Echo(transport.IdentityEcho)
-			if test.loggerMissing {
-				selectedLogger = nil
-			}
-			if test.tracerMissing {
-				selectedTracer = nil
-			}
-			if test.propagatorMissing {
-				selectedPropagator = nil
-			}
-			if test.echoMissing {
-				selectedEcho = nil
-			}
-
-			// when
-			server, err := transport.NewServer(
-				selectedLogger,
-				selectedTracer,
-				selectedPropagator,
-				defaultSettings(),
-				selectedEcho,
+			client := newPricingClient(
+				t,
+				func(context.Context, application.CalculatePriceRequest) (domain.Quote, error) {
+					return domain.Quote{}, test.failure
+				},
+				noop.NewTracerProvider(),
+				propagation.TraceContext{},
+				new(bytes.Buffer),
 			)
 
+			// when
+			response, err := client.CalculatePrice(context.Background(), validRequest())
+
 			// then
-			if err == nil || server != nil {
-				t.Fatalf("NewServer() = (%v, %v), want (nil, error)", server, err)
+			if response != nil || status.Code(err) != test.code ||
+				status.Convert(err).Message() != test.message {
+				t.Fatalf("result = (%v, %v)", response, err)
 			}
 		})
 	}
 }
 
-func newExampleClient(
+func TestPricingService_CalculatePrice_SanitizesInternalFailureAndPropagatesTrace(t *testing.T) {
+	// given
+	const privateMarker = "private-adapter-marker"
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
+	t.Cleanup(func() { _ = tracerProvider.Shutdown(context.Background()) })
+	handlerContext := make(chan trace.SpanContext, 1)
+	calculate := func(ctx context.Context, _ application.CalculatePriceRequest) (domain.Quote, error) {
+		handlerContext <- trace.SpanContextFromContext(ctx)
+		return domain.Quote{}, errors.New(privateMarker)
+	}
+	var logs bytes.Buffer
+	client := newPricingClient(t, calculate, tracerProvider, propagation.TraceContext{}, &logs)
+	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
+	parent := parentSpan.SpanContext()
+
+	// when
+	response, err := client.CalculatePrice(parentCtx, validRequest())
+	parentSpan.End()
+
+	// then
+	if response != nil || status.Code(err) != codes.Internal ||
+		status.Convert(err).Message() != "internal error" {
+		t.Fatalf("result = (%v, %v)", response, err)
+	}
+	serverContext := <-handlerContext
+	if serverContext.TraceID() != parent.TraceID() {
+		t.Errorf("trace = %v, want %v", serverContext.TraceID(), parent.TraceID())
+	}
+	if strings.Contains(logs.String(), privateMarker) {
+		t.Fatalf("logs expose private failure: %s", logs.String())
+	}
+}
+
+func TestNewServer_RejectsMissingDependenciesAndLimits(t *testing.T) {
+	// given
+	log := logger.New(new(bytes.Buffer), "pricing-service", 0)
+	tracerProvider := noop.NewTracerProvider()
+	propagator := propagation.TraceContext{}
+	calculate := transport.CalculatePrice(
+		func(context.Context, application.CalculatePriceRequest) (domain.Quote, error) {
+			return quote(t, "1", map[string]string{"C1": "1"}), nil
+		},
+	)
+	tests := []struct {
+		name       string
+		log        *slog.Logger
+		tracer     trace.TracerProvider
+		propagator propagation.TextMapPropagator
+		settings   transport.Settings
+		calculate  transport.CalculatePrice
+	}{
+		{
+			name:       "logger",
+			tracer:     tracerProvider,
+			propagator: propagator,
+			settings:   defaultSettings(),
+			calculate:  calculate,
+		},
+		{
+			name:       "tracer",
+			log:        log,
+			propagator: propagator,
+			settings:   defaultSettings(),
+			calculate:  calculate,
+		},
+		{
+			name:      "propagator",
+			log:       log,
+			tracer:    tracerProvider,
+			settings:  defaultSettings(),
+			calculate: calculate,
+		},
+		{
+			name:       "handler",
+			log:        log,
+			tracer:     tracerProvider,
+			propagator: propagator,
+			settings:   defaultSettings(),
+		},
+		{
+			name:       "limits",
+			log:        log,
+			tracer:     tracerProvider,
+			propagator: propagator,
+			calculate:  calculate,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			server, err := transport.NewServer(
+				test.log,
+				test.tracer,
+				test.propagator,
+				test.settings,
+				test.calculate,
+			)
+
+			// then
+			if err == nil || server != nil {
+				t.Fatalf("NewServer() = (%v, %v)", server, err)
+			}
+		})
+	}
+}
+
+func validRequest() *pricingv1.CalculatePriceRequest {
+	return &pricingv1.CalculatePriceRequest{
+		ProductCode: "TRI", PolicyFrom: "2017-04-16", PolicyTo: "2018-04-15",
+		SelectedCovers: []string{"C1", "C2"},
+		Answers: []*pricingv1.Answer{
+			{
+				QuestionCode: "NUM_OF_ADULTS",
+				Value:        &pricingv1.Answer_Number{Number: "1.00"},
+			},
+			{QuestionCode: "DESTINATION", Value: &pricingv1.Answer_Text{Text: "1.00"}},
+		},
+	}
+}
+
+func quote(t *testing.T, total string, covers map[string]string) domain.Quote {
+	t.Helper()
+	mapped := make(map[string]domain.Decimal, len(covers))
+	for code, value := range covers {
+		decimal, err := domain.NewDecimal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mapped[code] = decimal
+	}
+	decimal, err := domain.NewDecimal(total)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.Quote{Total: decimal, Covers: mapped}
+}
+
+func newPricingClient(
 	t *testing.T,
-	echo transport.Echo,
+	calculate transport.CalculatePrice,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	logs *bytes.Buffer,
-) pricingv1.ExampleServiceClient {
+) pricingv1.PricingServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatal(err)
 	}
 	server, err := transport.NewServer(
-		logger.New(logs, "pricing-service", 0),
-		tracerProvider,
-		propagator,
-		defaultSettings(),
-		echo,
+		logger.New(logs, "pricing-service", 0), tracerProvider, propagator,
+		defaultSettings(), calculate,
 	)
 	if err != nil {
 		_ = listener.Close()
-		t.Fatalf("new server: %v", err)
+		t.Fatal(err)
 	}
 	serveResult := make(chan error, 1)
-	go func() {
-		serveResult <- server.Serve(listener)
-	}()
+	go func() { serveResult <- server.Serve(listener) }()
 	connection, err := grpcgo.NewClient(
 		listener.Addr().String(),
 		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
@@ -507,17 +394,12 @@ func newExampleClient(
 	)
 	if err != nil {
 		server.Stop()
-		_ = listener.Close()
-		t.Fatalf("new client: %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := connection.Close(); err != nil {
-			t.Errorf("close client: %v", err)
-		}
+		_ = connection.Close()
 		server.Stop()
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Errorf("close listener: %v", err)
-		}
+		_ = listener.Close()
 		select {
 		case err := <-serveResult:
 			if err != nil && !errors.Is(err, grpcgo.ErrServerStopped) {
@@ -527,7 +409,7 @@ func newExampleClient(
 			t.Error("server did not stop")
 		}
 	})
-	return pricingv1.NewExampleServiceClient(connection)
+	return pricingv1.NewPricingServiceClient(connection)
 }
 
 func defaultSettings() transport.Settings {

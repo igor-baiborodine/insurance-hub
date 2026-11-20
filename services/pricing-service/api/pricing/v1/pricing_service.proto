@@ -8,10 +8,12 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/igor-baiborodine/insurance-hub/services/pricing-service/gen/pricing/v1;pricingv1";
 
-service ExampleService {
-  rpc Echo(EchoRequest) returns (EchoResponse) {
+// PricingService exposes the private quote calculation boundary.
+service PricingService {
+  // CalculatePrice returns one complete quote for the selected covers.
+  rpc CalculatePrice(CalculatePriceRequest) returns (CalculatePriceResponse) {
     option (google.api.http) = {
-      post: "/v1/example/echo"
+      post: "/pricing/calculate"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
@@ -20,13 +22,13 @@ service ExampleService {
       responses: {
         key: "200"
         value: {
-          description: "The unchanged Echo message."
+          description: "The Java-compatible numeric quote envelope."
           schema: {
-            json_schema: {ref: ".pricing.v1.EchoResponse"}
+            json_schema: {ref: ".pricing.v1.CalculatePriceHTTPResponse"}
           }
           examples: {
             key: "application/json"
-            value: "{\"message\":\"hello\"}"
+            value: "{\"totalPrice\":78,\"coversPrices\":{\"C1\":26,\"C2\":52}}"
           }
         }
       }
@@ -111,7 +113,7 @@ service ExampleService {
       responses: {
         key: "503"
         value: {
-          description: "The RPC service is unavailable."
+          description: "The tariff store is unavailable."
           schema: {
             json_schema: {ref: ".google.rpc.Status"}
           }
@@ -124,7 +126,7 @@ service ExampleService {
       responses: {
         key: "504"
         value: {
-          description: "The RPC deadline was exceeded."
+          description: "The request deadline was exceeded."
           schema: {
             json_schema: {ref: ".google.rpc.Status"}
           }
@@ -138,13 +140,44 @@ service ExampleService {
   }
 }
 
-message EchoRequest {
-  string message = 1 [(buf.validate.field).string = {
+message CalculatePriceRequest {
+  string product_code = 1 [(buf.validate.field).string = {
     min_bytes: 1
-    max_bytes: 128
+    max_bytes: 64
   }];
+  string policy_from = 2 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+  string policy_to = 3 [(buf.validate.field).string = {pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}];
+  repeated string selected_covers = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      string: {
+        min_bytes: 1
+        max_bytes: 64
+      }
+    }
+  }];
+  repeated Answer answers = 5;
 }
 
-message EchoResponse {
-  string message = 1;
+message Answer {
+  string question_code = 1 [(buf.validate.field).string = {
+    min_bytes: 1
+    max_bytes: 64
+  }];
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string text = 2;
+    string number = 3 [(buf.validate.field).string = {pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"}];
+  }
+}
+
+message CalculatePriceResponse {
+  string total_price = 1;
+  map<string, string> covers_prices = 2;
+}
+
+// CalculatePriceHTTPResponse is documentation-only; RPC amounts remain exact decimal strings.
+message CalculatePriceHTTPResponse {
+  double total_price = 1;
+  map<string, double> covers_prices = 2;
 }

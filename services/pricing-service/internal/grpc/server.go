@@ -19,21 +19,19 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pricingv1 "github.com/igor-baiborodine/insurance-hub/services/pricing-service/gen/pricing/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/telemetry"
 )
 
-const internalMessage = "internal error"
+const (
+	internalMessage    = "internal error"
+	unavailableMessage = "service unavailable"
+	invalidMessage     = "invalid request"
+)
 
-// Echo handles the example's single responsibility independently of transport details.
-type Echo func(context.Context, string) (string, error)
-
-// IdentityEcho returns the supplied message while preserving a canceled request context.
-func IdentityEcho(ctx context.Context, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return message, nil
-}
+// CalculatePrice invokes the application calculation independently of transport details.
+type CalculatePrice func(context.Context, application.CalculatePriceRequest) (domain.Quote, error)
 
 type Settings struct {
 	RequestTimeout  time.Duration
@@ -43,13 +41,13 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated ExampleService.
+// NewServer constructs the instrumented server and registers the generated PricingService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	echo Echo,
+	calculatePrice CalculatePrice,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -60,8 +58,8 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil {
-		return nil, errors.New("create gRPC server: echo handler is required")
+	if calculatePrice == nil {
+		return nil, errors.New("create gRPC server: calculate-price handler is required")
 	}
 
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
@@ -72,7 +70,10 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&pricingv1.EchoRequest{}),
+		protovalidate.WithMessages(
+			&pricingv1.CalculatePriceRequest{},
+			&pricingv1.Answer{},
+		),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -94,54 +95,109 @@ func NewServer(
 					otelgrpc.WithPropagators(propagator),
 					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == pricingv1.ExampleService_Echo_FullMethodName
+						return info.FullMethodName == pricingv1.PricingService_CalculatePrice_FullMethodName
 					}),
 				),
 			},
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	pricingv1.RegisterExampleServiceServer(server, &exampleServer{
+	pricingv1.RegisterPricingServiceServer(server, &pricingServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
-		echo:           echo,
+		calculatePrice: calculatePrice,
 	})
 	return server, nil
 }
 
-type exampleServer struct {
-	pricingv1.UnimplementedExampleServiceServer
+type pricingServer struct {
+	pricingv1.UnimplementedPricingServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
-	echo           Echo
+	calculatePrice CalculatePrice
 }
 
-func (server *exampleServer) Echo(
+func (server *pricingServer) CalculatePrice(
 	ctx context.Context,
-	request *pricingv1.EchoRequest,
-) (*pricingv1.EchoResponse, error) {
+	request *pricingv1.CalculatePriceRequest,
+) (*pricingv1.CalculatePriceResponse, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
 	defer cancel()
-	message, err := server.echo(requestCtx, request.GetMessage())
-	if err == nil {
-		err = requestCtx.Err()
-	}
+	mapped, err := mapRequest(request)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, context.Canceled.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(
-				codes.DeadlineExceeded,
-				context.DeadlineExceeded.Error(),
-			)
-		}
-		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", pricingv1.ExampleService_Echo_FullMethodName),
-		)
-		return nil, status.Error(codes.Internal, internalMessage)
+		return nil, status.Error(codes.InvalidArgument, invalidMessage)
 	}
-	return &pricingv1.EchoResponse{Message: message}, nil
+	quote, err := server.calculatePrice(requestCtx, mapped)
+	if err != nil {
+		return nil, server.transportError(ctx, err)
+	}
+	if err := requestCtx.Err(); err != nil {
+		return nil, server.transportError(ctx, err)
+	}
+	response := &pricingv1.CalculatePriceResponse{
+		TotalPrice:   quote.Total.String(),
+		CoversPrices: make(map[string]string, len(quote.Covers)),
+	}
+	for code, price := range quote.Covers {
+		response.CoversPrices[code] = price.String()
+	}
+	return response, nil
+}
+
+func mapRequest(
+	request *pricingv1.CalculatePriceRequest,
+) (application.CalculatePriceRequest, error) {
+	policyFrom, err := time.Parse(time.DateOnly, request.GetPolicyFrom())
+	if err != nil || policyFrom.Format(time.DateOnly) != request.GetPolicyFrom() {
+		return application.CalculatePriceRequest{}, application.ErrInvalidRequest
+	}
+	policyTo, err := time.Parse(time.DateOnly, request.GetPolicyTo())
+	if err != nil || policyTo.Format(time.DateOnly) != request.GetPolicyTo() {
+		return application.CalculatePriceRequest{}, application.ErrInvalidRequest
+	}
+	answers := make([]domain.Answer, 0, len(request.GetAnswers()))
+	for _, answer := range request.GetAnswers() {
+		if answer == nil {
+			return application.CalculatePriceRequest{}, application.ErrInvalidRequest
+		}
+		mapped := domain.Answer{QuestionCode: answer.GetQuestionCode()}
+		switch value := answer.GetValue().(type) {
+		case *pricingv1.Answer_Text:
+			mapped.Kind, mapped.Text = domain.TextAnswer, value.Text
+		case *pricingv1.Answer_Number:
+			number, parseErr := domain.NewDecimal(value.Number)
+			if parseErr != nil {
+				return application.CalculatePriceRequest{}, application.ErrInvalidRequest
+			}
+			mapped.Kind, mapped.Number = domain.NumericAnswer, number
+		default:
+			return application.CalculatePriceRequest{}, application.ErrInvalidRequest
+		}
+		answers = append(answers, mapped)
+	}
+	return application.CalculatePriceRequest{
+		ProductCode:    request.GetProductCode(),
+		PolicyFrom:     policyFrom,
+		PolicyTo:       policyTo,
+		SelectedCovers: append([]string(nil), request.GetSelectedCovers()...),
+		Answers:        answers,
+	}, nil
+}
+
+func (server *pricingServer) transportError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+	case errors.Is(err, application.ErrReaderUnavailable):
+		return status.Error(codes.Unavailable, unavailableMessage)
+	default:
+		server.logger.ErrorContext(ctx, "calculate-price request failed",
+			slog.String("rpc", pricingv1.PricingService_CalculatePrice_FullMethodName),
+		)
+		return status.Error(codes.Internal, internalMessage)
+	}
 }
 
 func validationInterceptor(
@@ -187,7 +243,7 @@ func (handler *requestStatsHandler) TagRPC(
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
 	if handler.observer != nil &&
-		info.FullMethodName == pricingv1.ExampleService_Echo_FullMethodName {
+		info.FullMethodName == pricingv1.PricingService_CalculatePrice_FullMethodName {
 		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
 	}
 	return ctx

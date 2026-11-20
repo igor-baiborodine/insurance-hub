@@ -1,12 +1,13 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "pricing/v1/example_service.proto",
+    "title": "pricing/v1/pricing_service.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "ExampleService"
+      "name": "PricingService",
+      "description": "PricingService exposes the private quote calculation boundary."
     }
   ],
   "consumes": [
@@ -16,18 +17,23 @@
     "application/json"
   ],
   "paths": {
-    "/v1/example/echo": {
+    "/pricing/calculate": {
       "post": {
-        "operationId": "ExampleService_Echo",
+        "summary": "CalculatePrice returns one complete quote for the selected covers.",
+        "operationId": "PricingService_CalculatePrice",
         "responses": {
           "200": {
-            "description": "The unchanged Echo message.",
+            "description": "The Java-compatible numeric quote envelope.",
             "schema": {
-              "$ref": "#/definitions/v1EchoResponse"
+              "$ref": "#/definitions/v1CalculatePriceHTTPResponse"
             },
             "examples": {
               "application/json": {
-                "message": "hello"
+                "totalPrice": 78,
+                "coversPrices": {
+                  "C1": 26,
+                  "C2": 52
+                }
               }
             }
           },
@@ -110,7 +116,7 @@
             }
           },
           "503": {
-            "description": "The RPC service is unavailable.",
+            "description": "The tariff store is unavailable.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -123,7 +129,7 @@
             }
           },
           "504": {
-            "description": "The RPC deadline was exceeded.",
+            "description": "The request deadline was exceeded.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -142,12 +148,12 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/v1EchoRequest"
+              "$ref": "#/definitions/v1CalculatePriceRequest"
             }
           }
         ],
         "tags": [
-          "ExampleService"
+          "PricingService"
         ],
         "consumes": [
           "application/json"
@@ -187,19 +193,75 @@
         }
       }
     },
-    "v1EchoRequest": {
+    "v1Answer": {
       "type": "object",
       "properties": {
-        "message": {
+        "questionCode": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "number": {
           "type": "string"
         }
       }
     },
-    "v1EchoResponse": {
+    "v1CalculatePriceHTTPResponse": {
       "type": "object",
       "properties": {
-        "message": {
+        "totalPrice": {
+          "type": "number",
+          "format": "double"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "description": "CalculatePriceHTTPResponse is documentation-only; RPC amounts remain exact decimal strings."
+    },
+    "v1CalculatePriceRequest": {
+      "type": "object",
+      "properties": {
+        "productCode": {
           "type": "string"
+        },
+        "policyFrom": {
+          "type": "string"
+        },
+        "policyTo": {
+          "type": "string"
+        },
+        "selectedCovers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Answer"
+          }
+        }
+      }
+    },
+    "v1CalculatePriceResponse": {
+      "type": "object",
+      "properties": {
+        "totalPrice": {
+          "type": "string"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     }

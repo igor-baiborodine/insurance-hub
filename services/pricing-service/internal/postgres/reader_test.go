@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 )
 
@@ -118,6 +120,23 @@ func TestNewReader_RejectsInvalidSettings(t *testing.T) {
 	}
 }
 
+func TestNewReader_AcceptsCompleteSettings(t *testing.T) {
+	// given
+	pool := &pgxpool.Pool{}
+
+	// when
+	reader, err := NewReader(pool, time.Second, 2*time.Second)
+
+	// then
+	if err != nil || reader == nil {
+		t.Fatalf("NewReader() = (%v, %v)", reader, err)
+	}
+	if reader.pool != pool || reader.acquireTimeout != time.Second ||
+		reader.queryTimeout != 2*time.Second {
+		t.Errorf("reader settings = %+v", reader)
+	}
+}
+
 func TestClassifyReaderFailure_DistinguishesCancellationAndUnavailableStorage(t *testing.T) {
 	// given
 	storageFailure := errors.New("private database detail")
@@ -139,5 +158,53 @@ func TestClassifyReaderFailure_DistinguishesCancellationAndUnavailableStorage(t 
 	if !errors.Is(canceled, context.Canceled) ||
 		errors.Is(canceled, application.ErrReaderUnavailable) {
 		t.Fatalf("canceled classification = %v", canceled)
+	}
+}
+
+func TestDecodeTariff_RejectsMalformedAndIncompleteRuleFields(t *testing.T) {
+	// given
+	validBase := `[{"position":1,"coverCode":"C1","condition":null,"formula":"10"}]`
+	validMarkup := `[{"position":1,"kind":"perc_markup","condition":null,"factor":"1.00"}]`
+	tests := []struct {
+		name, base, markup string
+	}{
+		{name: "malformed base", base: `{`, markup: validMarkup},
+		{
+			name:   "empty cover",
+			base:   strings.Replace(validBase, `"C1"`, `""`, 1),
+			markup: validMarkup,
+		},
+		{
+			name:   "missing formula",
+			base:   strings.Replace(validBase, `"10"`, `null`, 1),
+			markup: validMarkup,
+		},
+		{name: "malformed markup", base: validBase, markup: `{`},
+		{
+			name:   "markup position gap",
+			base:   validBase,
+			markup: strings.Replace(validMarkup, `"position":1`, `"position":2`, 1),
+		},
+		{
+			name:   "missing kind",
+			base:   validBase,
+			markup: strings.Replace(validMarkup, `"perc_markup"`, `null`, 1),
+		},
+		{
+			name:   "missing factor",
+			base:   validBase,
+			markup: strings.Replace(validMarkup, `"1.00"`, `null`, 1),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			tariff, err := decodeTariff("TEST", []byte(test.base), []byte(test.markup))
+
+			// then
+			if tariff.Code != "" || !errors.Is(err, application.ErrTariffInvalid) {
+				t.Fatalf("tariff=%+v error=%v", tariff, err)
+			}
+		})
 	}
 }
