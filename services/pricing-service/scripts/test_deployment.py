@@ -534,6 +534,14 @@ def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
     )
     _, items, selected = target.rendered()
     require(selected == image, "disposable image differs")
+    source_secret = target.json("get", "secret", target.secret)
+    secret_data = source_secret.get("data")
+    require(
+        source_secret.get("type") == "Opaque"
+        and isinstance(secret_data, dict)
+        and set(secret_data) == {"database-url", "ca.crt"},
+        "disposable smoke requires the exact Pricing reader Secret",
+    )
     token = uuid.uuid4().hex[:12]
     target.namespace = f"pricing-smoke-{token}"
     namespace = {
@@ -541,12 +549,20 @@ def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
+    reader_secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": target.secret, "namespace": target.namespace},
+        "type": "Opaque",
+        "data": secret_data,
+    }
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 
     try:
         # when
         target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
+        target.kubectl("create", "-f", "-", input_text=json.dumps(reader_secret))
         pricing.run(
             ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
             timeout=120,

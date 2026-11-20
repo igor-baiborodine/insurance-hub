@@ -41,7 +41,8 @@ migration-before-seed prerequisite, and the stable API owner in one reviewed bun
 requires an explicit, source-matched image to perform operations. For disposable qualification,
 build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=pricing` with the selected image and source revision exported.
-The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
+The smoke copies only the existing two-key reader Secret into one labeled Kind namespace, scopes
+all writes to that namespace, and removes the namespace afterward.
 
 ## Direct local-dev
 
