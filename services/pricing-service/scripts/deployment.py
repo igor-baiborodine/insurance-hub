@@ -870,22 +870,52 @@ def verify_business_http(port: int) -> None:
     )
 
 
-def verify_direct_rpc(module_path: str, port: int) -> None:
-    output = run(
-        [
-            os.environ.get("MAKE_COMMAND", "make"),
-            "-C",
-            str(ROOT / module_path),
-            "_deploy-smoke-rpc",
-            f"GO={os.environ.get('GO', 'go')}",
-            f"PRICING_SMOKE_GRPC_ADDR=127.0.0.1:{port}",
-        ],
-        timeout=120,
-    )
+def validate_direct_rpc_output(output: str) -> None:
+    selected_runs = 0
+    selected_passes = 0
+    selected_failed = False
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("Test") != DIRECT_RPC_SMOKE:
+            continue
+        if event.get("Action") == "run":
+            selected_runs += 1
+        elif event.get("Action") == "pass":
+            selected_passes += 1
+        elif event.get("Action") == "fail":
+            selected_failed = True
     require(
-        f"=== RUN   {DIRECT_RPC_SMOKE}" in output and f"--- PASS: {DIRECT_RPC_SMOKE}" in output,
-        "Pricing direct RPC smoke was not selected",
+        selected_runs == 1 and selected_passes == 1 and not selected_failed,
+        "Pricing direct RPC smoke did not execute and pass exactly once",
     )
+
+
+def verify_direct_rpc(module_path: str, port: int) -> None:
+    try:
+        output = run(
+            [
+                os.environ.get("MAKE_COMMAND", "make"),
+                "--no-print-directory",
+                "-C",
+                str(ROOT / module_path),
+                "_deploy-smoke-rpc",
+                f"GO={os.environ.get('GO', 'go')}",
+                f"PRICING_SMOKE_GRPC_ADDR=127.0.0.1:{port}",
+            ],
+            timeout=120,
+        )
+    except CommandError as error:
+        if "direct Pricing quote differs" in error.stdout:
+            message = "Pricing direct RPC TRI quote differs"
+        elif "direct Pricing rejection differs" in error.stdout:
+            message = "Pricing direct RPC invalid-date rejection differs"
+        else:
+            message = "Pricing direct RPC smoke failed"
+        raise lifecycle.DeploymentError(message) from error
+    validate_direct_rpc_output(output)
 
 
 def verify(target: Target, items: dict[str, dict]) -> None:

@@ -494,9 +494,11 @@ def test_direct_rpc_smoke_requires_named_test_selection(monkeypatch: pytest.Monk
 
     def execute(argv: list[str], *, timeout: float) -> str:
         commands.append((argv, timeout))
-        return (
-            f"=== RUN   {pricing.DIRECT_RPC_SMOKE}\n"
-            f"--- PASS: {pricing.DIRECT_RPC_SMOKE} (0.01s)\nPASS\n"
+        return "\n".join(
+            (
+                json.dumps({"Action": "run", "Test": pricing.DIRECT_RPC_SMOKE}),
+                json.dumps({"Action": "pass", "Test": pricing.DIRECT_RPC_SMOKE}),
+            )
         )
 
     monkeypatch.setattr(pricing, "run", execute)
@@ -509,6 +511,7 @@ def test_direct_rpc_smoke_requires_named_test_selection(monkeypatch: pytest.Monk
         (
             [
                 os.environ.get("MAKE_COMMAND", "make"),
+                "--no-print-directory",
                 "-C",
                 str(pricing.ROOT / "services/pricing-service"),
                 "_deploy-smoke-rpc",
@@ -525,8 +528,65 @@ def test_direct_rpc_smoke_rejects_missing_named_test(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(pricing, "run", lambda *_args, **_kwargs: "PASS\n")
 
     # when / then
-    with pytest.raises(DeploymentError, match="direct RPC smoke was not selected"):
+    with pytest.raises(DeploymentError, match="did not execute and pass exactly once"):
         pricing.verify_direct_rpc("services/pricing-service", 19090)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        json.dumps({"Action": "pass", "Test": pricing.DIRECT_RPC_SMOKE}),
+        "\n".join(
+            (
+                json.dumps({"Action": "run", "Test": pricing.DIRECT_RPC_SMOKE}),
+                json.dumps({"Action": "fail", "Test": pricing.DIRECT_RPC_SMOKE}),
+            )
+        ),
+        "\n".join(
+            (
+                json.dumps({"Action": "run", "Test": pricing.DIRECT_RPC_SMOKE}),
+                json.dumps({"Action": "pass", "Test": pricing.DIRECT_RPC_SMOKE}),
+                json.dumps({"Action": "pass", "Test": pricing.DIRECT_RPC_SMOKE}),
+            )
+        ),
+        "\n".join(
+            (
+                json.dumps({"Action": "run", "Test": "TestRenamedDirectRPC"}),
+                json.dumps({"Action": "pass", "Test": "TestRenamedDirectRPC"}),
+            )
+        ),
+    ],
+    ids=["empty", "missing-run", "failed", "duplicate-pass", "renamed"],
+)
+def test_direct_rpc_output_rejects_missing_renamed_failed_or_duplicate_results(
+    output: str,
+) -> None:
+    with pytest.raises(DeploymentError, match="did not execute and pass exactly once"):
+        pricing.validate_direct_rpc_output(output)
+
+
+@pytest.mark.parametrize(
+    ("output", "message"),
+    [
+        ("direct Pricing quote differs", "direct RPC TRI quote differs"),
+        ("direct Pricing rejection differs", "direct RPC invalid-date rejection differs"),
+        ("unclassified safe output", "direct RPC smoke failed"),
+    ],
+)
+def test_direct_rpc_smoke_classifies_failure_without_exposing_output(
+    monkeypatch: pytest.MonkeyPatch, output: str, message: str
+) -> None:
+    # given
+    def fail(*_args, **_kwargs) -> str:
+        raise pricing.CommandError("controlled failure", stdout=output)
+
+    monkeypatch.setattr(pricing, "run", fail)
+
+    # when / then
+    with pytest.raises(DeploymentError, match=message) as caught:
+        pricing.verify_direct_rpc("services/pricing-service", 19090)
+    assert output not in str(caught.value)
 
 
 @pytest.mark.integration

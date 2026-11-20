@@ -61,9 +61,9 @@ func TestDeployedDirectRPC_CalculatePrice(t *testing.T) {
 	)
 
 	// then
-	if err != nil || result.GetTotalPrice() != "78" ||
-		result.GetCoversPrices()["C1"] != "26" || result.GetCoversPrices()["C2"] != "52" {
-		t.Fatalf("direct Pricing quote = (%v, %v)", result, err)
+	if err != nil || result.GetTotalPrice() != "78.00" ||
+		result.GetCoversPrices()["C1"] != "26.00" || result.GetCoversPrices()["C2"] != "52.00" {
+		t.Fatal("direct Pricing quote differs")
 	}
 
 	// when
@@ -73,6 +73,6 @@ func TestDeployedDirectRPC_CalculatePrice(t *testing.T) {
 	// then
 	if rejected != nil || status.Code(err) != codes.InvalidArgument ||
 		status.Convert(err).Message() != "invalid request" {
-		t.Fatalf("direct Pricing rejection = (%v, %v)", rejected, err)
+		t.Fatal("direct Pricing rejection differs")
 	}
 }

@@ -271,7 +271,7 @@ deploy-smoke: python-toolchain-check
 
 _deploy-smoke-rpc:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run '^TestDeployedDirectRPC_CalculatePrice$$' -v ./internal/service
+		-run '^TestDeployedDirectRPC_CalculatePrice$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
