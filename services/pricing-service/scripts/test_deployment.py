@@ -414,6 +414,103 @@ def test_stop_uses_remaining_poll_budget(monkeypatch: pytest.MonkeyPatch) -> Non
     assert poll_timeouts == [5]
 
 
+def test_business_http_smoke_uses_tri_and_representative_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    requests: list[tuple[int, str, bytes | None]] = []
+    responses = iter(
+        (
+            (200, "application/json", b'{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}'),
+            (
+                400,
+                "application/json; charset=utf-8",
+                b'{"code":3,"message":"invalid request","details":[]}',
+            ),
+        )
+    )
+
+    def respond(port: int, path: str, payload: bytes | None = None) -> tuple[int, str, bytes]:
+        requests.append((port, path, payload))
+        return next(responses)
+
+    monkeypatch.setattr(pricing, "response", respond)
+
+    # when
+    pricing.verify_business_http(18080)
+
+    # then
+    assert requests == [
+        (18080, "/pricing/calculate", pricing.TRI_HTTP_REQUEST),
+        (18080, "/pricing/calculate", pricing.INVALID_DATE_HTTP_REQUEST),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "content_type", "body"),
+    [
+        (200, "application/json", b'{"message":"hello"}'),
+        (200, "application/json", b'{"totalPrice":79,"coversPrices":{"C1":26,"C2":52}}'),
+        (200, "application/json", b'{"totalPrice":"78","coversPrices":{"C1":26,"C2":52}}'),
+    ],
+    ids=["stale-echo", "wrong-total", "quoted-total"],
+)
+def test_business_http_smoke_rejects_incompatible_quote(
+    monkeypatch: pytest.MonkeyPatch, status: int, content_type: str, body: bytes
+) -> None:
+    # given
+    monkeypatch.setattr(
+        pricing,
+        "response",
+        lambda *_args, **_kwargs: (status, content_type, body),
+    )
+
+    # when / then
+    with pytest.raises(DeploymentError, match="Pricing HTTP TRI quote differs"):
+        pricing.verify_business_http(18080)
+
+
+def test_direct_rpc_smoke_requires_named_test_selection(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    commands: list[tuple[list[str], float]] = []
+
+    def execute(argv: list[str], *, timeout: float) -> str:
+        commands.append((argv, timeout))
+        return (
+            f"=== RUN   {pricing.DIRECT_RPC_SMOKE}\n"
+            f"--- PASS: {pricing.DIRECT_RPC_SMOKE} (0.01s)\nPASS\n"
+        )
+
+    monkeypatch.setattr(pricing, "run", execute)
+
+    # when
+    pricing.verify_direct_rpc("services/pricing-service", 19090)
+
+    # then
+    assert commands == [
+        (
+            [
+                os.environ.get("MAKE_COMMAND", "make"),
+                "-C",
+                str(pricing.ROOT / "services/pricing-service"),
+                "_deploy-smoke-rpc",
+                f"GO={os.environ.get('GO', 'go')}",
+                "PRICING_SMOKE_GRPC_ADDR=127.0.0.1:19090",
+            ],
+            120,
+        )
+    ]
+
+
+def test_direct_rpc_smoke_rejects_missing_named_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    monkeypatch.setattr(pricing, "run", lambda *_args, **_kwargs: "PASS\n")
+
+    # when / then
+    with pytest.raises(DeploymentError, match="direct RPC smoke was not selected"):
+        pricing.verify_direct_rpc("services/pricing-service", 19090)
+
+
 @pytest.mark.integration
 def test_pricing_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     # given

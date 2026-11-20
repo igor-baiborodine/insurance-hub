@@ -32,6 +32,17 @@ SELECTOR = {"app.kubernetes.io/name": "pricing-api", "app.kubernetes.io/componen
 VERSION_LABEL = "app.kubernetes.io/version"
 PLACEHOLDER = "git-000000000000"
 PORTS = {"http": 8080, "grpc": 9090, "management": 8081}
+TRI_HTTP_REQUEST = (
+    b'{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15",'
+    b'"selectedCovers":["C1","C2"],"answers":['
+    b'{"questionCode":"NUM_OF_ADULTS","answer":1},'
+    b'{"questionCode":"NUM_OF_CHILDREN","answer":1},'
+    b'{"questionCode":"DESTINATION","answer":"EUR"}]}'
+)
+INVALID_DATE_HTTP_REQUEST = TRI_HTTP_REQUEST.replace(b"2017-04-16", b"invalid", 1)
+TRI_HTTP_RESPONSE = {"totalPrice": 78, "coversPrices": {"C1": 26, "C2": 52}}
+INVALID_DATE_HTTP_RESPONSE = {"code": 3, "message": "invalid request", "details": []}
+DIRECT_RPC_SMOKE = "TestDeployedDirectRPC_CalculatePrice"
 DNS_EGRESS = ("kube-system", {"k8s-app": "kube-dns"}, [(53, "UDP"), (53, "TCP")])
 ALLOY_EGRESS = (
     "qa-monitoring",
@@ -819,16 +830,61 @@ def stop(target: Target, items: dict[str, dict]) -> None:
     raise lifecycle.DeploymentError("Pricing stop exceeded 90 seconds")
 
 
-def response(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
+def response(port: int, path: str, payload: bytes | None = None) -> tuple[int, str, bytes]:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         conn.request(
             "POST" if payload else "GET", path, payload, {"Content-Type": "application/json"}
         )
         result = conn.getresponse()
-        return result.status, result.read(1024)
+        return result.status, result.getheader("Content-Type", ""), result.read(1024)
     finally:
         conn.close()
+
+
+def json_object(body: bytes, failure: str) -> dict[str, Any]:
+    try:
+        value = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise lifecycle.DeploymentError(failure) from error
+    require(type(value) is dict, failure)
+    return value
+
+
+def verify_business_http(port: int) -> None:
+    status, content_type, body = response(port, "/pricing/calculate", TRI_HTTP_REQUEST)
+    require(
+        status == 200
+        and content_type.split(";", 1)[0].strip().lower() == "application/json"
+        and json_object(body, "Pricing HTTP TRI quote differs") == TRI_HTTP_RESPONSE,
+        "Pricing HTTP TRI quote differs",
+    )
+    status, content_type, body = response(port, "/pricing/calculate", INVALID_DATE_HTTP_REQUEST)
+    require(
+        status == 400
+        and content_type.split(";", 1)[0].strip().lower() == "application/json"
+        and json_object(body, "Pricing HTTP invalid-date rejection differs")
+        == INVALID_DATE_HTTP_RESPONSE,
+        "Pricing HTTP invalid-date rejection differs",
+    )
+
+
+def verify_direct_rpc(module_path: str, port: int) -> None:
+    output = run(
+        [
+            os.environ.get("MAKE_COMMAND", "make"),
+            "-C",
+            str(ROOT / module_path),
+            "_deploy-smoke-rpc",
+            f"GO={os.environ.get('GO', 'go')}",
+            f"PRICING_SMOKE_GRPC_ADDR=127.0.0.1:{port}",
+        ],
+        timeout=120,
+    )
+    require(
+        f"=== RUN   {DIRECT_RPC_SMOKE}" in output and f"--- PASS: {DIRECT_RPC_SMOKE}" in output,
+        "Pricing direct RPC smoke was not selected",
+    )
 
 
 def verify(target: Target, items: dict[str, dict]) -> None:
@@ -858,25 +914,13 @@ def verify(target: Target, items: dict[str, dict]) -> None:
             for name, port in PORTS.items()
         }
         require(
-            response(ports["management"], "/livez") == (200, b"live\n")
-            and response(ports["management"], "/readyz") == (200, b"ready\n"),
+            response(ports["management"], "/livez") == (200, "text/plain; charset=utf-8", b"live\n")
+            and response(ports["management"], "/readyz")
+            == (200, "text/plain; charset=utf-8", b"ready\n"),
             "Pricing liveness or readiness response differs",
         )
-        status, body = response(ports["http"], "/v1/example/echo", b'{"message":"hello"}')
-        require(
-            status == 200 and json.loads(body) == {"message": "hello"}, "Pricing HTTP Echo differs"
-        )
-        run(
-            [
-                os.environ.get("MAKE_COMMAND", "make"),
-                "-C",
-                str(ROOT / target.record["modulePath"]),
-                "_deploy-smoke-rpc",
-                f"GO={os.environ.get('GO', 'go')}",
-                f"PRICING_SMOKE_GRPC_ADDR=127.0.0.1:{ports['grpc']}",
-            ],
-            timeout=120,
-        )
+        verify_business_http(ports["http"])
+        verify_direct_rpc(target.record["modulePath"], ports["grpc"])
     logs = target.kubectl("logs", pod["metadata"]["name"], "-c", "pricing-api")
     records = [json.loads(line) for line in logs.splitlines()]
     expected = {
@@ -895,7 +939,8 @@ def verify(target: Target, items: dict[str, dict]) -> None:
         "Pricing runtime identity differs",
     )
     print(
-        f"Pricing HTTP Echo, direct gRPC Echo, liveness, readiness and identity passed: {expected}"
+        "Pricing HTTP and direct gRPC TRI quote/rejection, liveness, readiness and identity "
+        f"passed: {expected}"
     )
     if probe == "1":
         verify_denial(target, pod)

@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Pricing foundation deployment](#pricing-foundation-deployment)
+- [Pricing service deployment](#pricing-service-deployment)
   - [Candidate checks](#candidate-checks)
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
@@ -10,11 +10,11 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Pricing foundation deployment
+# Pricing service deployment
 
 Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Java Policy retains
-its environment-specific `pricing-api-legacy:80` upstream. Go Pricing serves only the bootstrap
-Echo. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
+its environment-specific `pricing-api-legacy:80` upstream. Go Pricing privately serves
+PostgreSQL-backed quotes. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
 Operators use a loopback-bound Kubernetes API port-forward. The foundation has no Kubernetes
 Service, ingress route or workload token. The API receives only the Pricing reader Secret and
 its CA; migration and seed credentials are mounted only into the retained administration Job.
@@ -117,9 +117,10 @@ inspect that pulled image and require the published digest to match the ready Po
 ## Private smoke and recovery
 
 `go-svc-deploy-verify` resolves the ready Pricing Pod and uses private port-forwards for all
-three listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management
-`200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. For manual troubleshooting, forward the exact Pod selected by status.
+three listeners. It checks the TRI C1/C2 quote and invalid-date rejection through HTTP and the
+generated gRPC client, management `200 live\n` and `200 ready\n`, and the six safe startup identity
+fields, including the Pod UID. The verifier also proves the named direct-RPC smoke was selected.
+For manual troubleshooting, forward the exact Pod selected by status.
 
 ```bash
 : "${PRICING_POD:?set the ready Go Pricing Pod name from status}"
@@ -135,11 +136,19 @@ In another terminal, use bounded requests against the loopback ports.
 
 ```bash
 curl --fail --max-time 5 -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' http://127.0.0.1:18080/v1/example/echo
+  -d '{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15","selectedCovers":["C1","C2"],"answers":[{"questionCode":"NUM_OF_ADULTS","answer":1},{"questionCode":"NUM_OF_CHILDREN","answer":1},{"questionCode":"DESTINATION","answer":"EUR"}]}' \
+  http://127.0.0.1:18080/pricing/calculate
+curl --silent --show-error --max-time 5 -w '\n%{http_code}\n' \
+  -H 'Content-Type: application/json' \
+  -d '{"productCode":"TRI","policyFrom":"invalid","policyTo":"2018-04-15","selectedCovers":["C1","C2"],"answers":[{"questionCode":"NUM_OF_ADULTS","answer":1},{"questionCode":"NUM_OF_CHILDREN","answer":1},{"questionCode":"DESTINATION","answer":"EUR"}]}' \
+  http://127.0.0.1:18080/pricing/calculate
 make -C services/pricing-service _deploy-smoke-rpc PRICING_SMOKE_GRPC_ADDR=127.0.0.1:19090
 curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz
 ```
+
+The first response must be `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. The invalid-date
+request returns `{"code":3,"message":"invalid request","details":[]}` followed by status `400`.
 
 Local-dev permits only TCP and UDP 53 to kube-dns and PostgreSQL 5432 to the selected local Pricing
 cluster. QA permits the same exact database path plus OTLP/gRPC to the selected Alloy Pods. The API
