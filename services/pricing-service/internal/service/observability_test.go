@@ -28,31 +28,37 @@ const (
 )
 
 type recordingTelemetry struct {
-	metrics *sdkmetric.ManualReader
-	spans   *tracetest.SpanRecorder
-	meter   *sdkmetric.MeterProvider
-	tracer  *sdktrace.TracerProvider
+	metricReader  *sdkmetric.ManualReader
+	spanRecorder  *tracetest.SpanRecorder
+	meterProvider *sdkmetric.MeterProvider
+	traceProvider *sdktrace.TracerProvider
 }
 
 func newRecordingTelemetry(t *testing.T) *recordingTelemetry {
 	t.Helper()
 	provider := &recordingTelemetry{
-		metrics: sdkmetric.NewManualReader(),
-		spans:   tracetest.NewSpanRecorder(),
+		metricReader: sdkmetric.NewManualReader(),
+		spanRecorder: tracetest.NewSpanRecorder(),
 	}
-	provider.meter = sdkmetric.NewMeterProvider(sdkmetric.WithReader(provider.metrics))
-	provider.tracer = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(provider.spans))
+	provider.meterProvider = sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(provider.metricReader),
+	)
+	provider.traceProvider = sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(provider.spanRecorder),
+	)
 	t.Cleanup(func() {
-		_ = provider.meter.Shutdown(context.Background())
-		_ = provider.tracer.Shutdown(context.Background())
+		_ = provider.meterProvider.Shutdown(context.Background())
+		_ = provider.traceProvider.Shutdown(context.Background())
 	})
 	return provider
 }
 
-func (provider *recordingTelemetry) MeterProvider() metric.MeterProvider { return provider.meter }
+func (provider *recordingTelemetry) MeterProvider() metric.MeterProvider {
+	return provider.meterProvider
+}
 
 func (provider *recordingTelemetry) TracerProvider() trace.TracerProvider {
-	return provider.tracer
+	return provider.traceProvider
 }
 
 func (*recordingTelemetry) HTTPPropagator() propagation.TextMapPropagator {
@@ -69,7 +75,7 @@ func (*recordingTelemetry) Shutdown(context.Context) error { return nil }
 func (provider *recordingTelemetry) collect(t *testing.T) map[string][]attribute.Set {
 	t.Helper()
 	var collected metricdata.ResourceMetrics
-	if err := provider.metrics.Collect(context.Background(), &collected); err != nil {
+	if err := provider.metricReader.Collect(context.Background(), &collected); err != nil {
 		t.Fatal(err)
 	}
 	points := map[string][]attribute.Set{}
@@ -165,7 +171,7 @@ func TestRun_UnavailableTariffReadKeepsCallerTraceAndBoundedSignals(t *testing.T
 	if runErr != nil {
 		t.Fatalf("run returned %v", runErr)
 	}
-	spans := provider.spans.Ended()
+	spans := provider.spanRecorder.Ended()
 	var httpServer, rpcClient, rpcServer, acquire sdktrace.ReadOnlySpan
 	for _, span := range spans {
 		if span.SpanContext().TraceID().String() != callerTraceID {

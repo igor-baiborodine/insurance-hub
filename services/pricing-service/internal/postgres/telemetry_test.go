@@ -24,23 +24,27 @@ import (
 const privateMarker = "PRIVATE-MARKER-415"
 
 type observedSignals struct {
-	metrics *sdkmetric.ManualReader
-	spans   *tracetest.SpanRecorder
-	tracer  *sdktrace.TracerProvider
-	meter   *sdkmetric.MeterProvider
+	metricReader  *sdkmetric.ManualReader
+	spanRecorder  *tracetest.SpanRecorder
+	traceProvider *sdktrace.TracerProvider
+	meterProvider *sdkmetric.MeterProvider
 }
 
 func newObservedSignals(t *testing.T) observedSignals {
 	t.Helper()
 	signals := observedSignals{
-		metrics: sdkmetric.NewManualReader(),
-		spans:   tracetest.NewSpanRecorder(),
+		metricReader: sdkmetric.NewManualReader(),
+		spanRecorder: tracetest.NewSpanRecorder(),
 	}
-	signals.meter = sdkmetric.NewMeterProvider(sdkmetric.WithReader(signals.metrics))
-	signals.tracer = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(signals.spans))
+	signals.meterProvider = sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(signals.metricReader),
+	)
+	signals.traceProvider = sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(signals.spanRecorder),
+	)
 	t.Cleanup(func() {
-		_ = signals.meter.Shutdown(context.Background())
-		_ = signals.tracer.Shutdown(context.Background())
+		_ = signals.meterProvider.Shutdown(context.Background())
+		_ = signals.traceProvider.Shutdown(context.Background())
 	})
 	return signals
 }
@@ -48,7 +52,7 @@ func newObservedSignals(t *testing.T) observedSignals {
 func (signals observedSignals) collect(t *testing.T) map[string]metricdata.Metrics {
 	t.Helper()
 	var collected metricdata.ResourceMetrics
-	if err := signals.metrics.Collect(context.Background(), &collected); err != nil {
+	if err := signals.metricReader.Collect(context.Background(), &collected); err != nil {
 		t.Fatalf("collect metrics: %v", err)
 	}
 	measurements := map[string]metricdata.Metrics{}
@@ -175,20 +179,30 @@ func assertNoMarker(
 	}
 }
 
-func TestObserver_CollectsPoolStateAndStageSignalsUntilClosed(t *testing.T) {
+func TestDatabaseObserver_CollectsPoolStateAndStageSignalsUntilClosed(t *testing.T) {
 	// given
 	signals := newObservedSignals(t)
-	observer, err := NewObserver(lazyPool(t, "127.0.0.1:1"), signals.tracer, signals.meter)
+	observer, err := NewObserver(
+		lazyPool(t, "127.0.0.1:1"),
+		signals.traceProvider,
+		signals.meterProvider,
+	)
 	if err != nil {
 		t.Fatalf("create observer: %v", err)
 	}
 	t.Cleanup(func() { _ = observer.Close() })
 
 	// when
-	stageErr := observer.stage(context.Background(), "query", "SELECT tariff",
-		trace.SpanKindClient, func(context.Context) error { return nil })
-	observer.decode(context.Background(), nil)
-	observer.decode(context.Background(), application.ErrTariffInvalid)
+	stageErr := observer.stage(
+		context.Background(),
+		"calculate_price",
+		"query",
+		"SELECT tariff",
+		trace.SpanKindClient,
+		func(context.Context) error { return nil },
+	)
+	observer.decode(context.Background(), "calculate_price", nil)
+	observer.decode(context.Background(), "calculate_price", application.ErrTariffInvalid)
 	measurements := signals.collect(t)
 
 	// then
@@ -212,9 +226,9 @@ func TestObserver_CollectsPoolStateAndStageSignalsUntilClosed(t *testing.T) {
 		t.Errorf("pool maximum = %v, want 2", maximum)
 	}
 	want := map[string]int64{
-		"get_tariff/query/success":       1,
-		"get_tariff/decode/success":      1,
-		"get_tariff/decode/invalid_data": 1,
+		"calculate_price/query/success":       1,
+		"calculate_price/decode/success":      1,
+		"calculate_price/decode/invalid_data": 1,
 	}
 	got := operationPoints(t, measurements)
 	if len(got) != len(want) {
@@ -229,7 +243,7 @@ func TestObserver_CollectsPoolStateAndStageSignalsUntilClosed(t *testing.T) {
 	if len(query) != 1 || query[0].Count != 1 || query[0].Attributes.Len() != 5 {
 		t.Errorf("query duration points = %v", query)
 	}
-	spans := signals.spans.Ended()
+	spans := signals.spanRecorder.Ended()
 	if len(spans) != 1 || spans[0].Name() != "SELECT tariff" ||
 		spans[0].SpanKind() != trace.SpanKindClient || spans[0].Status().Code != codes.Unset {
 		t.Fatalf("query spans = %v", spans)
@@ -259,7 +273,7 @@ func TestReader_GetTariff_ObservesUnavailableAcquireWithinCallerTrace(t *testing
 	// given
 	signals := newObservedSignals(t)
 	pool := lazyPool(t, "127.0.0.1:1")
-	observer, err := NewObserver(pool, signals.tracer, signals.meter)
+	observer, err := NewObserver(pool, signals.traceProvider, signals.meterProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +282,7 @@ func TestReader_GetTariff_ObservesUnavailableAcquireWithinCallerTrace(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, parent := signals.tracer.Tracer("test").Start(context.Background(), "calculate")
+	ctx, parent := signals.traceProvider.Tracer("test").Start(context.Background(), "calculate")
 
 	// when
 	tariff, found, readErr := reader.GetTariff(ctx, privateMarker)
@@ -279,7 +293,7 @@ func TestReader_GetTariff_ObservesUnavailableAcquireWithinCallerTrace(t *testing
 		errors.Is(readErr, application.ErrTariffInvalid) {
 		t.Fatalf("GetTariff() = (%+v, %t, %v)", tariff, found, readErr)
 	}
-	spans := signals.spans.Ended()
+	spans := signals.spanRecorder.Ended()
 	if len(spans) != 2 || spans[0].Name() != "pricing.db.acquire" {
 		t.Fatalf("read spans = %v", spans)
 	}
@@ -301,7 +315,7 @@ func TestReader_GetTariff_ObservesUnavailableAcquireWithinCallerTrace(t *testing
 	}
 	measurements := signals.collect(t)
 	if got := operationPoints(t, measurements); len(got) != 1 ||
-		got["get_tariff/acquire/storage_unavailable"] != 1 {
+		got["calculate_price/acquire/storage_unavailable"] != 1 {
 		t.Errorf("database operations = %v", got)
 	}
 	wait := measurements["db.client.connection.wait_time"].Data.(metricdata.Histogram[float64]).DataPoints
@@ -321,7 +335,7 @@ func TestReader_GetTariff_CountsAcquireTimeoutAsUnavailableStorage(t *testing.T)
 	// given
 	signals := newObservedSignals(t)
 	pool := lazyPool(t, silentListener(t))
-	observer, err := NewObserver(pool, signals.tracer, signals.meter)
+	observer, err := NewObserver(pool, signals.traceProvider, signals.meterProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +360,7 @@ func TestReader_GetTariff_CountsAcquireTimeoutAsUnavailableStorage(t *testing.T)
 	if got := operationPoints(
 		t,
 		measurements,
-	); got["get_tariff/acquire/storage_unavailable"] != 1 {
+	); got["calculate_price/acquire/storage_unavailable"] != 1 {
 		t.Errorf("database operations = %v", got)
 	}
 }
@@ -425,15 +439,21 @@ func TestSelectTariff_PreservesInvalidBeforeAmbiguousPrecedence(t *testing.T) {
 	}
 }
 
-func TestObserver_NilObserverPreservesReadBehavior(t *testing.T) {
+func TestDatabaseObserver_NilObserverPreservesReadBehavior(t *testing.T) {
 	// given
 	var observer *Observer
 	want := errors.Join(application.ErrReaderUnavailable, errors.New(privateMarker))
 
 	// when
-	err := observer.stage(context.Background(), "query", "SELECT tariff", trace.SpanKindClient,
-		func(context.Context) error { return want })
-	observer.decode(context.Background(), err)
+	err := observer.stage(
+		context.Background(),
+		"calculate_price",
+		"query",
+		"SELECT tariff",
+		trace.SpanKindClient,
+		func(context.Context) error { return want },
+	)
+	observer.decode(context.Background(), "calculate_price", err)
 	closeErr := observer.Close()
 
 	// then
@@ -442,7 +462,7 @@ func TestObserver_NilObserverPreservesReadBehavior(t *testing.T) {
 	}
 }
 
-func TestNewObserver_RejectsMissingDependencies(t *testing.T) {
+func TestDatabaseObserver_RejectsMissingDependencies(t *testing.T) {
 	// when
 	observer, err := NewObserver(nil, nil, nil)
 

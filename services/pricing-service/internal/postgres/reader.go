@@ -34,39 +34,49 @@ func (reader *Reader) GetTariff(
 	ctx context.Context,
 	code string,
 ) (domain.Tariff, bool, error) {
-	connection, err := reader.acquire(ctx)
+	connection, err := reader.acquire(ctx, "calculate_price")
 	if err != nil {
 		return domain.Tariff{}, false, err
 	}
 	defer connection.Release()
 
+	readerContext := ctx
 	queryCtx, cancel := context.WithTimeout(ctx, reader.queryTimeout)
 	defer cancel()
 	var stored []storedTariff
 	err = reader.observer.stage(
 		queryCtx,
+		"calculate_price",
 		"query",
 		"SELECT tariff",
 		trace.SpanKindClient,
-		func(spanCtx context.Context) error {
-			rows, err := connection.Query(spanCtx, readTariffQuery, code)
-			if err != nil {
-				return classifyReaderFailure(ctx, "query tariff", err)
+		func(ctx context.Context) error {
+			rows, queryErr := connection.Query(ctx, readTariffQuery, code)
+			if queryErr != nil {
+				return classifyReaderFailure(
+					readerContext,
+					"query tariff",
+					queryErr,
+				)
 			}
 			defer rows.Close()
 			for rows.Next() {
 				var row storedTariff
-				if err := rows.Scan(
+				if scanErr := rows.Scan(
 					&row.code,
 					&row.rawBase,
 					&row.rawMarkup,
-				); err != nil {
-					return classifyReaderFailure(ctx, "scan tariff", err)
+				); scanErr != nil {
+					return classifyReaderFailure(
+						readerContext,
+						"scan tariff",
+						scanErr,
+					)
 				}
 				stored = append(stored, row)
 			}
-			if err := rows.Err(); err != nil {
-				return classifyReaderFailure(ctx, "read tariff", err)
+			if rowsErr := rows.Err(); rowsErr != nil {
+				return classifyReaderFailure(readerContext, "read tariff", rowsErr)
 			}
 			return nil
 		},
@@ -78,7 +88,7 @@ func (reader *Reader) GetTariff(
 		return domain.Tariff{}, false, nil
 	}
 	tariff, err := selectTariff(code, stored)
-	reader.observer.decode(queryCtx, err)
+	reader.observer.decode(queryCtx, "calculate_price", err)
 	if err != nil {
 		return domain.Tariff{}, false, err
 	}
@@ -104,33 +114,39 @@ func selectTariff(code string, stored []storedTariff) (domain.Tariff, error) {
 	return tariffs[0], nil
 }
 
-func (reader *Reader) acquire(ctx context.Context) (*pgxpool.Conn, error) {
+func (reader *Reader) acquire(ctx context.Context, operation string) (*pgxpool.Conn, error) {
+	readerContext := ctx
 	acquireCtx, cancel := context.WithTimeout(ctx, reader.acquireTimeout)
 	defer cancel()
 	var connection *pgxpool.Conn
 	err := reader.observer.stage(
 		acquireCtx,
+		operation,
 		"acquire",
 		"pricing.db.acquire",
 		trace.SpanKindInternal,
-		func(spanCtx context.Context) error {
+		func(ctx context.Context) error {
 			started := time.Now()
-			var err error
-			connection, err = reader.pool.Acquire(spanCtx)
+			var acquireErr error
+			connection, acquireErr = reader.pool.Acquire(ctx)
 			if reader.observer != nil {
 				reader.observer.waitTime.Record(
-					spanCtx,
+					ctx,
 					time.Since(started).Seconds(),
 					poolAttributes,
 				)
-				if err != nil &&
-					errors.Is(spanCtx.Err(), context.DeadlineExceeded) &&
-					ctx.Err() == nil {
-					reader.observer.timeouts.Add(spanCtx, 1, poolAttributes)
+				if acquireErr != nil &&
+					errors.Is(ctx.Err(), context.DeadlineExceeded) &&
+					readerContext.Err() == nil {
+					reader.observer.timeouts.Add(ctx, 1, poolAttributes)
 				}
 			}
-			if err != nil {
-				return classifyReaderFailure(ctx, "acquire connection", err)
+			if acquireErr != nil {
+				return classifyReaderFailure(
+					readerContext,
+					"acquire connection",
+					acquireErr,
+				)
 			}
 			return nil
 		},

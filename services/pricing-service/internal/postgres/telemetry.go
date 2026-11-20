@@ -14,16 +14,11 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 )
 
-const (
-	operationGetTariff = "get_tariff"
-	poolName           = "pricing-reader"
-)
-
 var poolAttributes = metric.WithAttributes(
-	attribute.String("db.client.connection.pool.name", poolName),
+	attribute.String("db.client.connection.pool.name", "pricing-reader"),
 )
 
-// Observer measures only tariff reads. The service owns its callback registration.
+// Observer measures only Pricing tariff reads. The service owns its callback registration.
 type Observer struct {
 	tracer       trace.Tracer
 	operations   metric.Int64Counter
@@ -39,9 +34,7 @@ func NewObserver(
 	meterProvider metric.MeterProvider,
 ) (*Observer, error) {
 	if pool == nil || tracerProvider == nil || meterProvider == nil {
-		return nil, errors.New(
-			"create Pricing PostgreSQL observer: dependencies are required",
-		)
+		return nil, errors.New("create PostgreSQL observer: dependencies are required")
 	}
 	meter := meterProvider.Meter("insurance-hub/pricing/postgres")
 	operations, err := meter.Int64Counter(
@@ -95,7 +88,7 @@ func NewObserver(
 				metric.WithAttributes(
 					attribute.String(
 						"db.client.connection.pool.name",
-						poolName,
+						"pricing-reader",
 					),
 					attribute.String("db.client.connection.state", "idle"),
 				),
@@ -106,7 +99,7 @@ func NewObserver(
 				metric.WithAttributes(
 					attribute.String(
 						"db.client.connection.pool.name",
-						poolName,
+						"pricing-reader",
 					),
 					attribute.String("db.client.connection.state", "used"),
 				),
@@ -136,7 +129,7 @@ func (observer *Observer) Close() error {
 
 func (observer *Observer) stage(
 	ctx context.Context,
-	stage, name string,
+	operation, stage, name string,
 	kind trace.SpanKind,
 	work func(context.Context) error,
 ) error {
@@ -144,7 +137,7 @@ func (observer *Observer) stage(
 		return work(ctx)
 	}
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.pricing.operation", operationGetTariff),
+		attribute.String("insurance_hub.pricing.operation", operation),
 		attribute.String("db.system.name", "postgresql"),
 		attribute.String("db.namespace", "pricing"),
 		attribute.String("db.collection.name", "public.tariff"),
@@ -163,7 +156,11 @@ func (observer *Observer) stage(
 	started := time.Now()
 	err := work(ctx)
 	outcome := databaseOutcome(err)
-	observer.record(ctx, stage, outcome)
+	observer.operations.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("insurance_hub.pricing.operation", operation),
+		attribute.String("insurance_hub.pricing.database.stage", stage),
+		attribute.String("insurance_hub.pricing.database.outcome", outcome),
+	))
 	if stage == "query" {
 		histogramAttrs := append([]attribute.KeyValue{}, attrs[:5]...)
 		if err != nil {
@@ -186,23 +183,19 @@ func (observer *Observer) stage(
 	return err
 }
 
-func (observer *Observer) decode(ctx context.Context, err error) {
+func (observer *Observer) decode(ctx context.Context, operation string, err error) {
 	if observer == nil {
 		return
 	}
-	observer.record(ctx, "decode", databaseOutcome(err))
-}
-
-func (observer *Observer) record(ctx context.Context, stage, outcome string) {
 	observer.operations.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("insurance_hub.pricing.operation", operationGetTariff),
-		attribute.String("insurance_hub.pricing.database.stage", stage),
-		attribute.String("insurance_hub.pricing.database.outcome", outcome),
+		attribute.String("insurance_hub.pricing.operation", operation),
+		attribute.String("insurance_hub.pricing.database.stage", "decode"),
+		attribute.String("insurance_hub.pricing.database.outcome", databaseOutcome(err)),
 	))
 }
 
-// databaseOutcome checks reader classifications first: an unavailable reader may wrap the
-// acquire or query deadline that caused it while the request itself remained active.
+// databaseOutcome checks the reader classification before context errors: an unavailable reader
+// may wrap the acquire or query deadline that caused it while the request itself remained active.
 func databaseOutcome(err error) string {
 	switch {
 	case err == nil:
