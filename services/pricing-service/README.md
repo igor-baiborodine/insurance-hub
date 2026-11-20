@@ -242,6 +242,8 @@ Local tests use an owned loopback OTLP receiver to verify actual trace/metric tr
 not prove Alloy pipelines or deployed delivery.
 
 For deployment, private verification and recovery, see the [Pricing deployment runbook](deployment-runbook.md).
+For monitoring assets, signal investigation and their recovery, see the
+[Pricing observability runbook](observability-runbook.md).
 
 ## Run and stop the service
 

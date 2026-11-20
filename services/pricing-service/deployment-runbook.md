@@ -5,19 +5,21 @@
   - [Candidate checks](#candidate-checks)
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
-  - [Private smoke and recovery](#private-smoke-and-recovery)
+  - [Private smoke](#private-smoke)
+  - [Stop conditions and recovery](#stop-conditions-and-recovery)
   - [PostgreSQL resource administration](#postgresql-resource-administration)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Pricing service deployment
 
-Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Java Policy retains
-its environment-specific `pricing-api-legacy:80` upstream. Go Pricing privately serves
-PostgreSQL-backed quotes. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
-Operators use a loopback-bound Kubernetes API port-forward. The foundation has no Kubernetes
-Service, ingress route or workload token. The API receives only the Pricing reader Secret and
-its CA; migration and seed credentials are mounted only into the retained administration Job.
+Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Go Pricing privately
+serves PostgreSQL-backed quotes. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081
+for kubelet health. Operators use a loopback-bound Kubernetes API port-forward. The workload has no
+Kubernetes Service, ingress route or workload token. The API receives only the Pricing reader
+Secret and its CA; migration and seed credentials are mounted only into the retained
+administration Job. For monitoring assets, signal investigation and their restoration, use the
+[observability runbook](observability-runbook.md).
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
@@ -34,9 +36,9 @@ make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=qa
 ```
 
-The shared QA owner includes only `./pricing/legacy`. The staged Pricing release bundle keeps the
-previous API image and suspends predecessor initialization, so merging these manifests cannot run
-new commands against the old image. Release preparation creates an immutable source, a
+The shared QA `qa-svc` owner does not deploy the Go Pricing API. The staged Pricing release bundle
+keeps the previous API image and suspends predecessor initialization, so merging these manifests
+cannot run new commands against the old image. Release preparation creates an immutable source, a
 migration-before-seed prerequisite, and the stable API owner in one reviewed bundle. Local-dev
 requires an explicit, source-matched image to perform operations. For disposable qualification,
 build a local image as below, then run
@@ -116,7 +118,7 @@ Status checks the exact deployment, ready Pod, Pod UID, version and running imag
 digest-qualified image reference for OCI revision and version checks. Status and verification
 inspect that pulled image and require the published digest to match the ready Pod image ID.
 
-## Private smoke and recovery
+## Private smoke
 
 `go-svc-deploy-verify` resolves the ready Pricing Pod and uses private port-forwards for all
 three listeners. It checks the TRI C1/C2 quote and invalid-date rejection through HTTP and the
@@ -161,28 +163,73 @@ fields in the Pricing startup record and verify corresponding
 telemetry by `service.name=pricing-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
-Use the [Dashboard runbook](../dashboard-service/deployment-runbook.md) first for source,
-image, Flux and transport troubleshooting. In local-dev, `make go-svc-stop SVC_NAME=pricing`
-with the same coordinates and image selection scales only the Go Deployment to zero.
-Redeploy the approved previous Go image by selecting its full source revision and tag and
-rerunning the direct deployment steps.
+Readiness requires the internal gateway connection and a Pricing reader access check within
+`PROBE_TIMEOUT`, so PostgreSQL loss makes `/readyz` fail while `/livez` keeps passing. Liveness
+covers only the process. Telemetry export never affects either probe. A refused or failed database
+connection returns HTTP 503 `service unavailable` (gRPC `UNAVAILABLE`); a hung database or an
+exhausted pool returns HTTP 504 (gRPC `DEADLINE_EXCEEDED`). Use the
+[observability runbook](observability-runbook.md#reader-symptoms) to identify the failed reader
+stage.
 
-If initialization fails, retain the Job and inspect its safe status and logs. Correct the cause,
-increment the reviewed release attempt, and publish a new bundle; never point the stable API owner
-at an incomplete attempt. If API reconciliation fails after successful initialization, restore the
-previous reviewed Pricing release bundle. Keep `./pricing/legacy` in the shared parent and run
-`make go-svc-deploy-check SVC_NAME=pricing` before publishing the correction.
+## Stop conditions and recovery
+
+Use the [Dashboard runbook](../dashboard-service/deployment-runbook.md) first for source,
+image, Flux and transport troubleshooting, and the
+[Product runbook](../../docs/migration/phase-4/product-service/observability-runbook.md) first for
+PostgreSQL reader access and pool behavior.
+
+Stop before a target mutation when any of these differs from the recorded release:
+
+- the context or namespace;
+- the Deployment or release owner name;
+- the source revision, image reference or digest;
+- the reader Secret shape;
+- the current Flux owner.
+
+Stop after a mutation for:
+
+- a placeholder or mismatched runtime identity;
+- an unexpected ready Pod;
+- a failed private quote or probe;
+- reader privilege expansion;
+- an unexplained readiness failure;
+- incomplete owned cleanup.
+
+Preserve the first failure and the current source, image and resource identities before retrying.
+
+In local-dev, `make go-svc-stop SVC_NAME=pricing` with the same coordinates and image selection
+scales only the Go Deployment to zero. Redeploy the approved previous Go image by selecting its
+full source revision and tag and rerunning the direct deployment steps.
+
+In QA, never patch the workload:
+
+- **Failed initialization.** Retain the Job and inspect its safe status and logs. Correct the
+  cause, increment the reviewed release attempt, and publish a new bundle. Never point the stable
+  API owner at an incomplete attempt.
+- **Failed API reconciliation after successful initialization.** Restore the previous reviewed
+  Pricing release bundle. Run `make go-svc-deploy-check SVC_NAME=pricing` before publishing the
+  correction.
 
 ```bash
 kubectl --context qa-insurance-hub -n flux-system get kustomization qa-pricing-api -o yaml
+kubectl --context qa-insurance-hub -n flux-system get gitrepository -l \
+  insurance-hub.io/release-identity
 kubectl --context qa-insurance-hub -n qa-svc get deployment qa-pricing-api --ignore-not-found
-kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
-  -l kubernetes.io/service-name=qa-pricing-api-legacy \
-  -o 'custom-columns=POD:.endpoints[*].targetRef.name,READY:.endpoints[*].conditions.ready'
 ```
 
-Expect the release owner to show the reviewed source and digest. Java Pricing remains selected only
-by `qa-pricing-api-legacy`, so Policy's upstream is unchanged throughout staging and rollback.
+After recovery, verify:
+
+- **Release owner.** It reports the reviewed release source as applied and ready.
+- **Status.** `make go-svc-deploy-status SVC_NAME=pricing` matches the ready Pod's image ID to the
+  release digest.
+- **Probes and quote.** `make go-svc-deploy-verify SVC_NAME=pricing` passes the probes, the TRI
+  quote, invalid-date rejection, the direct RPC and the identity fields.
+- **Signals.** The live `verify-service-observability` check from the
+  [observability runbook](observability-runbook.md#provision-apply-and-read-back) passes for the
+  same release revision.
+
+Restoring the application does not restore monitoring assets; use the observability runbook for
+those.
 
 ## PostgreSQL resource administration
 
