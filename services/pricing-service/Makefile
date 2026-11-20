@@ -28,13 +28,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/pricing/v1/example_service.proto
+PROTO_SCHEMA := api/pricing/v1/pricing_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/pricing/v1/example_service.pb.go \
-	gen/pricing/v1/example_service.pb.gw.go \
-	gen/pricing/v1/example_service_grpc.pb.go \
-	gen/openapiv2/pricing/v1/example_service.swagger.json
+	gen/pricing/v1/pricing_service.pb.go \
+	gen/pricing/v1/pricing_service.pb.gw.go \
+	gen/pricing/v1/pricing_service_grpc.pb.go \
+	gen/openapiv2/pricing/v1/pricing_service.swagger.json
 
 GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
@@ -53,6 +53,7 @@ OTEL_GRPC_VERSION := v0.71.0
 OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.1.0
+MVEL_VERSION := v1.0.0
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
@@ -93,7 +94,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
 	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
-	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
+	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-mvel check-servicekit check-candidate-servicekit run \
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
@@ -169,17 +170,25 @@ update-deps:
 		google.golang.org/protobuf@$(PROTOBUF_GO_VERSION) \
 		google.golang.org/genproto/googleapis/api@$(GENPROTO_GOOGLEAPIS_API_VERSION) \
 		golang.org/x/net@$(X_NET_VERSION)
+	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/mvel@$(MVEL_VERSION)
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
 	GOWORK=off $(GO) mod tidy
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto coverage-check test-integration build \
-	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
+	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-mvel check-servicekit
+
+check-mvel:
+	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-mvel: workspace override rejected' >&2; exit 1;; esac
+	@case " $${GOFLAGS:-} " in *-modfile*) echo 'check-mvel: alternate module file rejected' >&2; exit 1;; esac
+	@test "$$(GOWORK=off $(GO) list -mod=readonly -m -f '{{.Version}}{{if .Replace}} replaced{{end}}' github.com/igor-baiborodine/insurance-hub/libs/mvel)" = "$(MVEL_VERSION)" || { echo 'check-mvel: selected version or source differs' >&2; exit 1; }
+	@GOWORK=off $(GO) mod verify
+	@echo "check-mvel: selected public mvel $(MVEL_VERSION) with verified modules"
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/pricing/v1/example_service.swagger.json
+		--swagger gen/openapiv2/pricing/v1/pricing_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -262,7 +271,7 @@ deploy-smoke: python-toolchain-check
 
 _deploy-smoke-rpc:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run '^TestDeployedDirectRPC_Echo$$' -v ./internal/service
+		-run '^TestDeployedDirectRPC_CalculatePrice$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \

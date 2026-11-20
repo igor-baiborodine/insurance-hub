@@ -252,7 +252,9 @@
         "GCC for race tests",
         "public module and vulnerability services unless cached"
       ],
-      "consumers": [],
+      "consumers": [
+        "github.com/igor-baiborodine/insurance-hub/services/pricing-service"
+      ],
       "localReplacements": [],
       "ciWorkflow": ".github/workflows/go-pr-shared.yml"
     }

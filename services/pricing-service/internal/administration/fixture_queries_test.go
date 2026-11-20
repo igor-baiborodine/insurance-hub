@@ -93,3 +93,9 @@ var denyTariffUpdateQuery string
 
 //go:embed testdata/sql/deny-tariff-alter.sql
 var denyTariffAlterQuery string
+
+//go:embed testdata/sql/setup-reader-scenarios.sql
+var setupReaderScenariosQuery string
+
+//go:embed testdata/sql/delete-reader-scenarios.sql
+var deleteReaderScenariosQuery string

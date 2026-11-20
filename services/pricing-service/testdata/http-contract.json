@@ -1,22 +1,39 @@
 {
   "swagger": "2.0",
   "operation": {
-    "path": "/v1/example/echo",
+    "path": "/pricing/calculate",
     "method": "post",
-    "operation_id": "ExampleService_Echo",
+    "operation_id": "PricingService_CalculatePrice",
     "consumes": [
       "application/json"
     ],
     "produces": [
       "application/json"
     ],
-    "request_schema": "#/definitions/v1EchoRequest",
-    "success_schema": "#/definitions/v1EchoResponse",
+    "request_schema": "#/definitions/v1CalculatePriceRequest",
+    "success_schema": "#/definitions/v1CalculatePriceHTTPResponse",
     "error_schema": "#/definitions/rpcStatus"
   },
   "request_contract": {
     "json_members": [
-      "message"
+      "productCode",
+      "policyFrom",
+      "policyTo",
+      "selectedCovers",
+      "answers"
+    ],
+    "answer_members": [
+      "questionCode",
+      "answer"
+    ],
+    "answer_value_types": [
+      "string",
+      "number"
+    ],
+    "rpc_answer_members": [
+      "questionCode",
+      "text",
+      "number"
     ],
     "unknown_fields": "reject",
     "duplicate_fields": "reject",
@@ -29,16 +46,18 @@
       "application/json",
       "*/*"
     ],
-    "minimum_utf8_bytes": 1,
-    "maximum_utf8_bytes": 128,
-    "multibyte_boundary": {
-      "valid": "64 repetitions of é",
-      "invalid": "64 repetitions of é followed by a"
+    "price_representation": {
+      "http": "number",
+      "rpc": "exact decimal string"
     }
   },
   "responses": {
     "200": {
-      "message": "hello"
+      "totalPrice": 78,
+      "coversPrices": {
+        "C1": 26,
+        "C2": 52
+      }
     },
     "400": {
       "code": 3,
@@ -94,16 +113,80 @@
     }
   },
   "schemas": {
-    "v1EchoRequest": {
-      "message": "string"
+    "v1Answer": {
+      "questionCode": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "number": {
+        "type": "string"
+      }
     },
-    "v1EchoResponse": {
-      "message": "string"
+    "v1CalculatePriceRequest": {
+      "productCode": {
+        "type": "string"
+      },
+      "policyFrom": {
+        "type": "string"
+      },
+      "policyTo": {
+        "type": "string"
+      },
+      "selectedCovers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "answers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "$ref": "#/definitions/v1Answer"
+        }
+      }
+    },
+    "v1CalculatePriceHTTPResponse": {
+      "totalPrice": {
+        "type": "number",
+        "format": "double"
+      },
+      "coversPrices": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1CalculatePriceResponse": {
+      "totalPrice": {
+        "type": "string"
+      },
+      "coversPrices": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      }
     },
     "rpcStatus": {
-      "code": "integer",
-      "message": "string",
-      "details": "array"
+      "code": {
+        "type": "integer",
+        "format": "int32"
+      },
+      "message": {
+        "type": "string"
+      },
+      "details": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "$ref": "#/definitions/protobufAny"
+        }
+      }
     }
   }
 }

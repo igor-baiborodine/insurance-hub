@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	pricingv1 "github.com/igor-baiborodine/insurance-hub/services/pricing-service/gen/pricing/v1"
 )
 
-func TestDeployedDirectRPC_Echo(t *testing.T) {
+func TestDeployedDirectRPC_CalculatePrice(t *testing.T) {
 	// given
 	address := os.Getenv("PRICING_SMOKE_GRPC_ADDR")
 	host, port, err := net.SplitHostPort(address)
@@ -34,13 +36,43 @@ func TestDeployedDirectRPC_Echo(t *testing.T) {
 	defer cancel()
 
 	// when
-	result, err := pricingv1.NewExampleServiceClient(conn).Echo(
+	client := pricingv1.NewPricingServiceClient(conn)
+	request := &pricingv1.CalculatePriceRequest{
+		ProductCode: "TRI", PolicyFrom: "2017-04-16", PolicyTo: "2018-04-15",
+		SelectedCovers: []string{"C1", "C2"},
+		Answers: []*pricingv1.Answer{
+			{
+				QuestionCode: "NUM_OF_ADULTS",
+				Value:        &pricingv1.Answer_Number{Number: "1"},
+			},
+			{
+				QuestionCode: "NUM_OF_CHILDREN",
+				Value:        &pricingv1.Answer_Number{Number: "1"},
+			},
+			{
+				QuestionCode: "DESTINATION",
+				Value:        &pricingv1.Answer_Text{Text: "EUR"},
+			},
+		},
+	}
+	result, err := client.CalculatePrice(
 		ctx,
-		&pricingv1.EchoRequest{Message: "hello"},
+		request,
 	)
 
 	// then
-	if err != nil || result.GetMessage() != "hello" {
-		t.Fatalf("direct Pricing Echo = (%v, %v)", result, err)
+	if err != nil || result.GetTotalPrice() != "78" ||
+		result.GetCoversPrices()["C1"] != "26" || result.GetCoversPrices()["C2"] != "52" {
+		t.Fatal("direct Pricing quote differs")
+	}
+
+	// when
+	request.PolicyFrom = "invalid"
+	rejected, err := client.CalculatePrice(ctx, request)
+
+	// then
+	if rejected != nil || status.Code(err) != codes.InvalidArgument ||
+		status.Convert(err).Message() != "invalid request" {
+		t.Fatal("direct Pricing rejection differs")
 	}
 }

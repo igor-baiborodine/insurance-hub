@@ -28,7 +28,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const calculatePriceRoute = "POST /pricing/calculate"
 
 type Settings struct {
 	RequestTimeout time.Duration
@@ -40,14 +40,11 @@ type Settings struct {
 }
 
 // NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client pricingv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
+func NewHandler(client pricingv1.PricingServiceClient, settings Settings) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
-	}
+	marshaler := newPricingMarshaler()
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
@@ -57,7 +54,7 @@ func NewHandler(client pricingv1.ExampleServiceClient, settings Settings) (http.
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := pricingv1.RegisterExampleServiceHandlerClient(
+	if err := pricingv1.RegisterPricingServiceHandlerClient(
 		context.Background(),
 		mux,
 		client,
@@ -65,7 +62,10 @@ func NewHandler(client pricingv1.ExampleServiceClient, settings Settings) (http.
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.calculatePrice = handler.instrument(
+		calculatePriceRoute,
+		http.HandlerFunc(handler.serveCalculatePrice),
+	)
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -101,10 +101,10 @@ func validSettings(settings Settings) bool {
 }
 
 type Handler struct {
-	mux       http.Handler
-	settings  Settings
-	echo      http.Handler
-	unmatched http.Handler
+	mux            http.Handler
+	settings       Settings
+	calculatePrice http.Handler
+	unmatched      http.Handler
 }
 
 type requestFacts struct {
@@ -125,8 +125,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
+	if facts.originalPath == "/pricing/calculate" && request.Method == http.MethodPost {
+		handler.calculatePrice.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
@@ -150,7 +150,7 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 	)
 }
 
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) serveCalculatePrice(writer http.ResponseWriter, request *http.Request) {
 	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
@@ -187,17 +187,18 @@ func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Requ
 		)
 		return
 	}
-	if !validRequestJSON(body) {
+	normalized, ok := normalizeRequestJSON(body)
+	if !ok {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Body = io.NopCloser(bytes.NewReader(normalized))
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
+	if facts.originalPath == "/pricing/calculate" {
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -288,35 +289,177 @@ func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	return data, len(data) > maximum, err
 }
 
-func validRequestJSON(data []byte) bool {
+func normalizeRequestJSON(data []byte) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return false
+		return nil, false
 	}
-	seen := false
+	seen := make(map[string]struct{}, 5)
+	request := &pricingv1.CalculatePriceRequest{}
 	for decoder.More() {
-		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
+		value, tokenErr := decoder.Token()
+		name, nameOK := value.(string)
+		if tokenErr != nil || !nameOK {
+			return nil, false
 		}
-		seen = true
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return false
+		if _, duplicate := seen[name]; duplicate {
+			return nil, false
 		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
+		seen[name] = struct{}{}
+		switch name {
+		case "productCode":
+			err = decoder.Decode(&request.ProductCode)
+		case "policyFrom":
+			err = decoder.Decode(&request.PolicyFrom)
+		case "policyTo":
+			err = decoder.Decode(&request.PolicyTo)
+		case "selectedCovers":
+			err = decoder.Decode(&request.SelectedCovers)
+		case "answers":
+			var answers []json.RawMessage
+			if err = decoder.Decode(&answers); err == nil {
+				request.Answers = make([]*pricingv1.Answer, 0, len(answers))
+				for _, raw := range answers {
+					answer, valid := decodeHTTPAnswer(raw)
+					if !valid {
+						return nil, false
+					}
+					request.Answers = append(request.Answers, answer)
+				}
 			}
+		default:
+			return nil, false
+		}
+		if err != nil {
+			return nil, false
 		}
 	}
 	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
+		return nil, false
 	}
 	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
+	if !errors.Is(err, io.EOF) {
+		return nil, false
+	}
+	normalized, err := protojson.Marshal(request)
+	return normalized, err == nil
 }
+
+func decodeHTTPAnswer(data []byte) (*pricingv1.Answer, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	answer := &pricingv1.Answer{}
+	seen := make(map[string]struct{}, 2)
+	for decoder.More() {
+		value, tokenErr := decoder.Token()
+		name, nameOK := value.(string)
+		if tokenErr != nil || !nameOK {
+			return nil, false
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, false
+		}
+		seen[name] = struct{}{}
+		switch name {
+		case "questionCode":
+			err = decoder.Decode(&answer.QuestionCode)
+		case "answer":
+			var value any
+			if err = decoder.Decode(&value); err == nil {
+				switch typed := value.(type) {
+				case string:
+					answer.Value = &pricingv1.Answer_Text{Text: typed}
+				case json.Number:
+					answer.Value = &pricingv1.Answer_Number{
+						Number: typed.String(),
+					}
+				default:
+					return nil, false
+				}
+			}
+		default:
+			return nil, false
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	_, err = decoder.Token()
+	return answer, errors.Is(err, io.EOF)
+}
+
+type pricingMarshaler struct{ *runtime.JSONPb }
+
+func newPricingMarshaler() *pricingMarshaler {
+	return &pricingMarshaler{JSONPb: &runtime.JSONPb{
+		MarshalOptions:   protojson.MarshalOptions{},
+		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+	}}
+}
+
+func (marshaler *pricingMarshaler) Marshal(value any) ([]byte, error) {
+	response, ok := value.(*pricingv1.CalculatePriceResponse)
+	if !ok {
+		return marshaler.JSONPb.Marshal(value)
+	}
+	mapped := struct {
+		TotalPrice   json.RawMessage            `json:"totalPrice"`
+		CoversPrices map[string]json.RawMessage `json:"coversPrices"`
+	}{
+		CoversPrices: make(map[string]json.RawMessage, len(response.GetCoversPrices())),
+	}
+	var valid bool
+	mapped.TotalPrice, valid = exactJSONNumber(response.GetTotalPrice())
+	if !valid {
+		return nil, errors.New("marshal quote: invalid total")
+	}
+	for code, price := range response.GetCoversPrices() {
+		number, valid := exactJSONNumber(price)
+		if !valid {
+			return nil, errors.New("marshal quote: invalid cover price")
+		}
+		mapped.CoversPrices[code] = number
+	}
+	return json.Marshal(mapped)
+}
+
+func exactJSONNumber(text string) (json.RawMessage, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	if _, ok := value.(json.Number); !ok {
+		return nil, false
+	}
+	_, err := decoder.Token()
+	return json.RawMessage(text), errors.Is(err, io.EOF)
+}
+
+func (marshaler *pricingMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
+	return encoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(data)
+		return err
+	})
+}
+
+type encoderFunc func(any) error
+
+func (encoder encoderFunc) Encode(value any) error { return encoder(value) }
 
 func isJSON(value string) bool {
 	mediaType, parameters, err := mime.ParseMediaType(value)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the generated Echo Swagger against the independent HTTP contract fixture."""
+"""Verify generated Pricing Swagger and its Java-compatible HTTP contract fixture."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 
 class ContractError(ValueError):
-    """The fixture or generated Swagger violates the owned Echo contract."""
+    """The fixture or generated Swagger violates the owned Pricing contract."""
 
 
 def require(condition: bool, message: str) -> None:
@@ -29,7 +29,7 @@ def load_object(path: Path, label: str) -> dict[str, Any]:
 
 
 def require_schema(
-    definitions: dict[str, Any], name: str, expected_properties: dict[str, str]
+    definitions: dict[str, Any], name: str, expected_properties: dict[str, Any]
 ) -> None:
     schema = definitions.get(name)
     require(isinstance(schema, dict), f"Swagger definition is missing: {name}")
@@ -42,12 +42,12 @@ def require_schema(
         set(properties) == set(expected_properties),
         f"Swagger definition {name} properties differ from the contract",
     )
-    for field, expected_type in expected_properties.items():
+    for field, expected in expected_properties.items():
         value = properties[field]
         require(isinstance(value, dict), f"Swagger property {name}.{field} must be an object")
         require(
-            value.get("type") == expected_type,
-            f"Swagger property {name}.{field} must have type {expected_type}",
+            value == expected,
+            f"Swagger property {name}.{field} differs from the contract",
         )
 
 
@@ -57,12 +57,15 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
     operation_contract = contract.get("operation")
     responses_contract = contract.get("responses")
     schemas_contract = contract.get("schemas")
+    request_contract = contract.get("request_contract")
     require(isinstance(operation_contract, dict), "HTTP contract operation must be an object")
     require(isinstance(responses_contract, dict), "HTTP contract responses must be an object")
     require(isinstance(schemas_contract, dict), "HTTP contract schemas must be an object")
+    require(isinstance(request_contract, dict), "HTTP request contract must be an object")
     assert isinstance(operation_contract, dict)
     assert isinstance(responses_contract, dict)
     assert isinstance(schemas_contract, dict)
+    assert isinstance(request_contract, dict)
 
     require(swagger.get("swagger") == contract.get("swagger"), "Swagger version differs")
     path = operation_contract.get("path")
@@ -77,7 +80,7 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
     require(isinstance(path_item, dict), f"Swagger path {path} must be an object")
     require(set(path_item) == {method}, f"Swagger path {path} must expose only {method}")
     operation = path_item[method]
-    require(isinstance(operation, dict), "Swagger Echo operation must be an object")
+    require(isinstance(operation, dict), "Swagger Pricing operation must be an object")
     assert isinstance(operation, dict)
 
     require(
@@ -134,6 +137,28 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
         )
         require_schema(definitions, name, expected_properties)
 
+    require(
+        request_contract.get("json_members") == list(schemas_contract["v1CalculatePriceRequest"]),
+        "Java-compatible request members differ from the RPC request schema",
+    )
+    require(
+        request_contract.get("answer_members") == ["questionCode", "answer"],
+        "Java-compatible answer members differ",
+    )
+    require(
+        request_contract.get("answer_value_types") == ["string", "number"],
+        "Java-compatible answer value types differ",
+    )
+    require(
+        request_contract.get("rpc_answer_members") == list(schemas_contract["v1Answer"]),
+        "RPC answer members differ",
+    )
+    require(
+        request_contract.get("price_representation")
+        == {"http": "number", "rpc": "exact decimal string"},
+        "HTTP and RPC price representations differ",
+    )
+
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -149,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContractError as error:
         print(f"check-gateway-contract: {error}", file=sys.stderr)
         return 1
-    print("check-gateway-contract: generated Swagger matches the independent Echo contract")
+    print("check-gateway-contract: generated Swagger matches the Pricing HTTP contract")
     return 0
 
 

@@ -23,6 +23,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
 	pricingv1 "github.com/igor-baiborodine/insurance-hub/services/pricing-service/gen/pricing/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/pricing-service/internal/grpc"
@@ -68,27 +69,36 @@ type gatewayConnection interface {
 type dependencies struct {
 	openPool       func(context.Context, config.Database) (*pgxpool.Pool, error)
 	checkDatabase  func(context.Context, *pgxpool.Pool, time.Duration, time.Duration) error
+	newReader      func(*pgxpool.Pool, time.Duration, time.Duration) (application.TariffReader, error)
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.CalculatePrice) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(pricingv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(pricingv1.PricingServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
 }
 
 func productionDependencies() dependencies {
 	return dependencies{
 		openPool:      postgres.OpenPool,
 		checkDatabase: postgres.CheckReadAccess,
-		listen:        net.Listen,
+		newReader: func(pool *pgxpool.Pool, acquireTimeout, queryTimeout time.Duration) (application.TariffReader, error) {
+			return postgres.NewReader(pool, acquireTimeout, queryTimeout)
+		},
+		listen: net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, calculatePrice transport.CalculatePrice) (grpcServer, error) {
+			return transport.NewServer(
+				logger,
+				tracer,
+				propagator,
+				settings,
+				calculatePrice,
+			)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -104,7 +114,6 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
 }
 
@@ -206,6 +215,18 @@ func run(
 			return fail(fmt.Errorf("run service: verify Pricing database: %w", err))
 		}
 	}
+	reader, err := deps.newReader(
+		runtime.pool,
+		settings.Database.AcquireTimeout,
+		settings.Database.QueryTimeout,
+	)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize Pricing reader: %w", err))
+	}
+	calculatePrice, err := application.NewCalculatePrice(reader)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize Pricing calculation: %w", err))
+	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
 	if err != nil {
 		return fail(err)
@@ -218,7 +239,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+		}, calculatePrice.Execute,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -280,7 +301,7 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		pricingv1.NewExampleServiceClient(runtime.connection),
+		pricingv1.NewPricingServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {

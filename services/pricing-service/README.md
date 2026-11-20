@@ -11,7 +11,7 @@
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [PostgreSQL administration commands](#postgresql-administration-commands)
-  - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
+  - [Quote RPC and HTTP gateway](#quote-rpc-and-http-gateway)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
@@ -19,9 +19,9 @@
 
 # Pricing service
 
-The Go Pricing foundation exposes the bootstrap Echo contract over direct gRPC and an HTTP
-gateway. Its separate management listener serves liveness and readiness. Java Pricing continues
-to serve Policy's pricing requests.
+The Go Pricing service reads the ordered tariff catalog from PostgreSQL and exposes private quote
+calculation over direct gRPC and an HTTP gateway. Its separate management listener serves liveness
+and readiness. Java Pricing continues to serve Policy's pricing requests until the upstream switch.
 
 ## Prerequisites
 
@@ -70,17 +70,17 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned Go dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/pricing/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/pricing/v1/pricing_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.4; readonly modules; runtime settings below.                                           |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/pricing/v1/example_service.pb.go
-gen/pricing/v1/example_service.pb.gw.go
-gen/pricing/v1/example_service_grpc.pb.go
-gen/openapiv2/pricing/v1/example_service.swagger.json
+gen/pricing/v1/pricing_service.pb.go
+gen/pricing/v1/pricing_service.pb.gw.go
+gen/pricing/v1/pricing_service_grpc.pb.go
+gen/openapiv2/pricing/v1/pricing_service.swagger.json
 ```
 
 ### Non-mutating validation targets
@@ -223,8 +223,8 @@ seconds; queue saturation has a separate safe warning. The executable installs t
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
 `insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /v1/example/echo` or
-`unmatched`; gRPC records the fixed Echo operation and final status. Request paths, queries,
+bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /pricing/calculate` or
+`unmatched`; gRPC records the fixed `pricing.v1.PricingService/CalculatePrice` operation and final status. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 
@@ -273,7 +273,7 @@ reserved interval within the one overall deadline.
 
 ## PostgreSQL administration commands
 
-`cmd/migrate` runs independently from the Echo server. It accepts `--operation` with
+`cmd/migrate` runs independently from the quote-serving process. It accepts `--operation` with
 `status`, `version` or `migrate`, and requires `--environment`, `--context`, `--target-file`,
 `--database-url-file` and `--ca-file`. The connection URL uses the enrolled host, the migrator
 login, `sslmode=verify-full`, and `sslrootcert` set to the selected CA file.
@@ -299,27 +299,37 @@ container, with separate target, migrator and seeder Secret mounts. It has no au
 operators inspect a retained failure before preparing an explicit next attempt. The API Deployment
 mounts only the reader Secret and CA, matching Product's common database boundary.
 
-## Example RPC and HTTP gateway
+## Quote RPC and HTTP gateway
 
-The generated `pricing.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
-message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
-the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
-`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
-return `Internal` with the stable message `internal error`. The generated gateway exposes the same
-operation as `POST /v1/example/echo` with an `application/json` body:
+The generated `pricing.v1.PricingService` exposes unary `CalculatePrice`. Its RPC request carries
+date-only strings, selected cover codes and typed answer choices; exact decimal results remain
+strings in the generated RPC response. Protovalidate and the transport boundary reject invalid
+calendar dates as `InvalidArgument` with the stable message `invalid request`. Domain, tariff or
+evaluation failures return `Internal` with `internal error`, and unavailable PostgreSQL returns
+`Unavailable` with `service unavailable`.
+
+The generated gateway exposes the same use case as `POST /pricing/calculate` and converts exact
+prices to JSON numbers for Java compatibility:
 
 ```sh
 curl --fail-with-body \
   -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' \
-  http://127.0.0.1:8080/v1/example/echo
+  -d '{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15","selectedCovers":["C1","C2"],"answers":[{"questionCode":"NUM_OF_ADULTS","answer":1},{"questionCode":"NUM_OF_CHILDREN","answer":1},{"questionCode":"DESTINATION","answer":"EUR"}]}' \
+  http://127.0.0.1:8080/pricing/calculate
 ```
 
-The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
-query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
-The generated Swagger 2.0 document is
-`gen/openapiv2/pricing/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
+The response is `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. An invalid date returns
+HTTP 400 and `{"code":3,"message":"invalid request","details":[]}`. Malformed, duplicate or
+unknown JSON members, a nonempty query, unsupported media, an unknown route and a wrong method
+receive fixed JSON error envelopes. The generated Swagger 2.0 document is
+`gen/openapiv2/pricing/v1/pricing_service.swagger.json`; `testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`.
+
+Against the seeded TRI tariff, the generated gRPC client receives exact decimal text:
+`total_price = "78"`, `C1 = "26"`, and `C2 = "52"`. Amounts keep Java's caller-visible scale:
+a base formula result carries no trailing fractional zeros, each applied markup rounds to two
+places, and the total keeps the widest cover scale. The deployment verifier uses
+structured `go test -json` events to prove that this named direct-RPC smoke ran and passed once.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,
 forwarding, `Grpc-Timeout` and `Grpc-Metadata-*` headers are stripped; application metadata and
@@ -339,9 +349,9 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed quote operation, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Business architecture | Product application-owned catalog ports and injected adapters | Pricing owns its calculation use case and tariff-reader port; PostgreSQL remains behind an injected reader adapter. |
 
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -355,9 +365,9 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/grpc` | Generated Pricing registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Pricing identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Completion-log and quote signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/pricing/v1`, `gen/pricing/v1`, `gen/openapiv2/pricing/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -386,10 +396,11 @@ flowchart TD
     config --> sharedIdentity["servicekit/identity"]
 ```
 
-At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
-HTTP server span, uses the generated client across the instrumented connection, obtains client and
-server spans, passes protobuf validation and calls the injected function with the shorter deadline.
+At startup, composition opens the read-only PostgreSQL pool, binds all listeners, starts gRPC,
+derives the same-process client target from the bound address and waits for that channel to become
+ready. An HTTP quote obtains a bounded HTTP server span, uses the generated client across the
+instrumented connection, obtains client and server spans, passes validation and calls the
+application calculation use case with the shorter deadline.
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
 accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
 the shared deadline.
