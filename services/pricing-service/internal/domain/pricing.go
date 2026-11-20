@@ -46,13 +46,13 @@ type Tariff struct {
 
 type BaseRule struct {
 	CoverCode string
-	Condition string
+	Condition *string
 	Formula   string
 }
 
 type MarkupRule struct {
 	Kind      string
-	Condition string
+	Condition *string
 	Factor    Decimal
 }
 

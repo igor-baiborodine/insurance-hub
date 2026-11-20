@@ -85,12 +85,12 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 				MarkupRules: []domain.MarkupRule{
 					{
 						Kind:      percentMarkup,
-						Condition: "FLOOD == 'YES'",
+						Condition: condition("FLOOD == 'YES'"),
 						Factor:    decimal(t, "1.50"),
 					},
 					{
 						Kind:      percentMarkup,
-						Condition: "NUM_OF_CLAIM > 1",
+						Condition: condition("NUM_OF_CLAIM > 1"),
 						Factor:    decimal(t, "1.25"),
 					},
 				},
@@ -111,12 +111,12 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 				MarkupRules: []domain.MarkupRule{
 					{
 						Kind:      percentMarkup,
-						Condition: "NUM_OF_CLAIM > 1",
+						Condition: condition("NUM_OF_CLAIM > 1"),
 						Factor:    decimal(t, "1.25"),
 					},
 					{
 						Kind:      percentMarkup,
-						Condition: "FLOOD == 'YES'",
+						Condition: condition("FLOOD == 'YES'"),
 						Factor:    decimal(t, "1.50"),
 					},
 				},
@@ -131,16 +131,18 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 		{
 			name: "FAI sequential factors",
 			tariff: domain.Tariff{
-				BaseRules: []domain.BaseRule{{CoverCode: "C1", Formula: "10B"}},
+				BaseRules: []domain.BaseRule{
+					{CoverCode: "C1", Condition: condition(""), Formula: "10B"},
+				},
 				MarkupRules: []domain.MarkupRule{
 					{
 						Kind:      percentMarkup,
-						Condition: "FLOOD == 'YES'",
+						Condition: condition("FLOOD == 'YES'"),
 						Factor:    decimal(t, "1.50"),
 					},
 					{
 						Kind:      percentMarkup,
-						Condition: "NUM_OF_CLAIM > 2",
+						Condition: condition("NUM_OF_CLAIM > 2"),
 						Factor:    decimal(t, "2.00"),
 					},
 				},
@@ -158,7 +160,7 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 				MarkupRules: []domain.MarkupRule{
 					{
 						Kind:      percentMarkup,
-						Condition: "NUM_OF_CLAIM > 2",
+						Condition: condition("NUM_OF_CLAIM > 2"),
 						Factor:    decimal(t, "50.00"),
 					},
 				},
@@ -173,7 +175,7 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 				MarkupRules: []domain.MarkupRule{
 					{
 						Kind:      percentMarkup,
-						Condition: "NUM_OF_CLAIM > 2",
+						Condition: condition("NUM_OF_CLAIM > 2"),
 						Factor:    decimal(t, "50.00"),
 					},
 				},
@@ -188,7 +190,10 @@ func TestCalculatePrice_AppliesOrderedMarkupAndHalfUpRounding(t *testing.T) {
 					{CoverCode: "C1", Formula: "AREA * 1B"},
 				},
 				MarkupRules: []domain.MarkupRule{
-					{Kind: percentMarkup, Factor: decimal(t, "1.00")},
+					{
+						Kind: percentMarkup, Condition: condition(""),
+						Factor: decimal(t, "1.00"),
+					},
 				},
 			},
 			request: request("C1", numberAnswer(t, "AREA", "-0.015")),
@@ -337,6 +342,8 @@ func numberAnswer(t *testing.T, code, value string) domain.Answer {
 func textAnswer(code, value string) domain.Answer {
 	return domain.Answer{QuestionCode: code, Kind: domain.TextAnswer, Text: value}
 }
+
+func condition(value string) *string { return &value }
 
 func decimal(t *testing.T, value string) domain.Decimal {
 	t.Helper()

@@ -7,3 +7,6 @@ var assumeOwnerQuery string
 
 //go:embed queries/inspect-reader-access.sql
 var inspectReaderAccessQuery string
+
+//go:embed queries/read-tariff.sql
+var readTariffQuery string

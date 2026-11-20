@@ -17,6 +17,8 @@ var (
 	ErrInvalidRequest    = errors.New("invalid pricing request")
 	ErrCalculation       = errors.New("pricing calculation failed")
 	ErrTariffNotFound    = errors.New("tariff not found")
+	ErrTariffAmbiguous   = errors.New("ambiguous stored tariff")
+	ErrTariffInvalid     = errors.New("invalid stored tariff")
 	ErrReaderUnavailable = errors.New("tariff reader unavailable")
 )
 
@@ -208,15 +210,15 @@ func calculateBase(
 	return domain.Decimal{}, errors.New("selected cover has no matching base rule")
 }
 
-func predicateApplies(source string, context map[string]binding) (bool, error) {
-	if source == "" {
+func predicateApplies(source *string, context map[string]binding) (bool, error) {
+	if source == nil || *source == "" {
 		return true, nil
 	}
-	predicate, err := mvel.CompilePredicate(source)
+	predicate, err := mvel.CompilePredicate(*source)
 	if err != nil {
 		return false, fmt.Errorf("compile predicate: %w", err)
 	}
-	bindings, err := expressionBindings(source, context)
+	bindings, err := expressionBindings(*source, context)
 	if err != nil {
 		return false, err
 	}
