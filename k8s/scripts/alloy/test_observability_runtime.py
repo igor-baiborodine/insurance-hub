@@ -14,6 +14,7 @@ from unittest import mock
 import probe_chat
 import probe_dashboard
 import probe_document
+import probe_pricing
 import probe_product
 import pytest
 
@@ -416,3 +417,103 @@ def test_forced_probe_recovery_reclaims_product_group_and_postgres(tmp_path: Pat
         mock.call(5252, signal.SIGKILL),
     ]
     docker.assert_called_once_with(["docker", "rm", "-f", "ih-product-probe-4242"], timeout=15)
+
+
+def test_pricing_probe_keeps_harness_values_out_of_the_service_environment() -> None:
+    # given
+    inherited = {
+        probe_pricing.SENTINEL_ENVIRONMENT: backend_ingestion.PRICING_SENSITIVE_SENTINEL,
+        probe_pricing.FAILURE_TRACE_ENVIRONMENT: backend_ingestion.PRICING_FAILURE_TRACE_ID,
+    }
+
+    # when
+    with mock.patch.dict(os.environ, inherited):
+        values = probe_pricing.pricing_environment(
+            "postgresql://reader", "http://127.0.0.1:4317", "git-135beef00000", "pod", 1, 2, 3
+        )
+
+    # then
+    assert backend_ingestion.PRICING_SENSITIVE_SENTINEL not in values.values()
+    assert backend_ingestion.PRICING_FAILURE_TRACE_ID not in values.values()
+    assert values["DB_MAX_CONNS"] == "4"
+    assert values["DEPLOYMENT_ENVIRONMENT"] == "qa"
+
+
+def test_pricing_probe_restarts_the_stopped_database_after_a_failed_request() -> None:
+    # given
+    docker: list[list[str]] = []
+
+    def run(arguments, **_kwargs):
+        docker.append(list(arguments))
+        return ""
+
+    # when / then
+    with (
+        mock.patch.object(probe_pricing, "run", side_effect=run),
+        mock.patch.object(probe_pricing, "wait_postgres") as wait_postgres,
+        mock.patch.object(probe_pricing, "calculate", side_effect=OSError("connection reset")),
+        pytest.raises(OSError, match="connection reset"),
+    ):
+        probe_pricing.exercise_outage("pg", "http://calculate", "http://ready", "0" * 32, "x")
+    assert docker == [["docker", "stop", "--time", "5", "pg"], ["docker", "start", "pg"]]
+    wait_postgres.assert_called_once_with("pg")
+
+
+def test_pricing_probe_rejects_a_quote_from_the_stopped_database() -> None:
+    # given
+    with (
+        mock.patch.object(probe_pricing, "run", return_value=""),
+        mock.patch.object(probe_pricing, "wait_postgres"),
+        mock.patch.object(probe_pricing, "calculate", return_value=(200, probe_pricing.TRI_QUOTE)),
+        # when / then
+        pytest.raises(probe_pricing.ProbeError, match="stopped database returned HTTP 200"),
+    ):
+        probe_pricing.exercise_outage("pg", "http://calculate", "http://ready", "0" * 32, "x")
+
+
+def test_pricing_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> None:
+    # given
+    args = type("Args", (), {"ownership_file": None})()
+    observed: list[float] = []
+
+    def remove(_arguments, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess([], 0)
+
+    # when / then
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                probe_pricing.FAILURE_TRACE_ENVIRONMENT: "0" * 32,
+                probe_pricing.SENTINEL_ENVIRONMENT: "sentinel",
+            },
+        ),
+        mock.patch.object(
+            probe_pricing, "run", side_effect=probe_pricing.ProbeError("setup failed")
+        ),
+        mock.patch.object(probe_pricing.subprocess, "run", side_effect=remove),
+        pytest.raises(probe_pricing.ProbeError, match="setup failed"),
+    ):
+        probe_pricing.execute_in_root(args, tmp_path)
+    assert len(observed) == 1
+    assert 0 < observed[0] <= 15
+
+
+@pytest.mark.parametrize(
+    ("operations", "expected"),
+    [
+        ({("acquire", "success"): 2, ("acquire", "storage_unavailable"): 1}, "acquire"),
+        ({("acquire", "success"): 3, ("query", "storage_unavailable"): 1}, "query"),
+        ({("decode", "invalid_data"): 1}, None),
+        ({("acquire", "storage_unavailable"): 1, ("query", "storage_unavailable"): 1}, None),
+        ({("acquire", "success"): 3}, None),
+    ],
+)
+def test_pricing_outage_stage_requires_one_unavailable_reader_stage(operations, expected) -> None:
+    # when / then
+    if expected is None:
+        with pytest.raises(backend_ingestion.HarnessError):
+            backend_ingestion.pricing_failed_stage(operations)
+    else:
+        assert backend_ingestion.pricing_failed_stage(operations) == expected

@@ -39,6 +39,8 @@ SYNTHETIC_TRACE_ID = "51515151515151515151515151515151"
 JAVA_TRACE_ID = "42424242424242424242424242424242"
 DOCUMENT_SENSITIVE_SENTINEL = "SENTINEL-document-observability-private"
 CHAT_SENSITIVE_SENTINEL = "SENTINEL-chat-observability-private"
+PRICING_SENSITIVE_SENTINEL = "SENTINEL-pricing-observability-private"
+PRICING_FAILURE_TRACE_ID = "50350350350350350350350350350350"
 
 METRIC_IDENTITY = {
     "service_namespace": "insurance-hub",
@@ -458,6 +460,14 @@ class DockerHarness:
                 {
                     "DOCUMENT_DATABASE_URL": DOCUMENT_SENSITIVE_SENTINEL,
                     "MINIO_SECRET_KEY": DOCUMENT_SENSITIVE_SENTINEL,
+                }
+            )
+        elif service_domain == "pricing":
+            environment = dict(os.environ)
+            environment.update(
+                {
+                    "PRICING_PROBE_FAILURE_TRACE_ID": PRICING_FAILURE_TRACE_ID,
+                    "PRICING_PROBE_SENTINEL": PRICING_SENSITIVE_SENTINEL,
                 }
             )
         child = subprocess.Popen(
@@ -1215,6 +1225,234 @@ def validate_dashboard_metrics(prometheus_port: int) -> None:
     validate_runtime_metrics("dashboard", prometheus_port)
 
 
+PRICING_QUERY_DIMENSIONS = {
+    "insurance_hub_pricing_operation": "calculate_price",
+    "db_system_name": "postgresql",
+    "db_namespace": "pricing",
+    "db_collection_name": "public.tariff",
+    "db_operation_name": "SELECT",
+}
+PRICING_STAGE_SPANS = {"acquire": "pricing.db.acquire", "query": "SELECT tariff"}
+
+
+def pricing_database_operations(prometheus_port: int) -> dict[tuple[str, str], float]:
+    expression = 'insurance_hub_pricing_database_operations_total{service_name="pricing-service"}'
+    response = wait_json(
+        f"http://127.0.0.1:{prometheus_port}/api/v1/query?"
+        + urllib.parse.urlencode({"query": expression}),
+        lambda value: len(query_results(value)) >= 4,
+        "pricing database stage counters",
+    )
+    allowed = set(METRIC_IDENTITY) | {
+        "service_name",
+        "job",
+        "instance",
+        "__name__",
+        "insurance_hub_pricing_operation",
+        "insurance_hub_pricing_database_stage",
+        "insurance_hub_pricing_database_outcome",
+    }
+    operations: dict[tuple[str, str], float] = {}
+    for result in query_results(response):
+        assert_metric_labels(result, "pricing-service")
+        labels = result["metric"]
+        if set(labels) != allowed or labels["insurance_hub_pricing_operation"] != "calculate_price":
+            raise HarnessError(f"unexpected pricing database operation labels: {labels}")
+        key = (
+            labels["insurance_hub_pricing_database_stage"],
+            labels["insurance_hub_pricing_database_outcome"],
+        )
+        operations[key] = float(result["value"][1])
+    return operations
+
+
+def pricing_failed_stage(operations: Mapping[tuple[str, str], float]) -> str:
+    """Return the single reader stage that observed the stopped database."""
+    failures = {key: value for key, value in operations.items() if key[1] != "success"}
+    if len(failures) != 1:
+        raise HarnessError(f"pricing database failures are {failures}, expected one outage")
+    (stage, outcome), value = next(iter(failures.items()))
+    if stage not in PRICING_STAGE_SPANS or outcome != "storage_unavailable" or value != 1:
+        raise HarnessError(
+            f"pricing outage recorded {stage}/{outcome}={value:g}, "
+            "expected one storage_unavailable acquire or query"
+        )
+    return stage
+
+
+def validate_pricing_metrics(prometheus_port: int) -> None:
+    service_name = "pricing-service"
+    operations = pricing_database_operations(prometheus_port)
+    failed_stage = pricing_failed_stage(operations)
+    successes = {
+        stage: value for (stage, outcome), value in operations.items() if outcome == "success"
+    }
+    # Two healthy quotes complete every stage; a query-stage outage also acquired once.
+    expected = {"acquire": 2 + (failed_stage == "query"), "query": 2, "decode": 2}
+    if successes != expected:
+        raise HarnessError(
+            f"pricing successful database stages are {successes}, expected {expected}"
+        )
+    if failed_stage == "query":
+        validate_histogram_inventory(
+            prometheus_port,
+            "db_client_operation_duration_seconds",
+            service_name,
+            [
+                PRICING_QUERY_DIMENSIONS,
+                dict(PRICING_QUERY_DIMENSIONS, error_type="storage_unavailable"),
+            ],
+        )
+    else:
+        validate_histogram(
+            prometheus_port,
+            "db_client_operation_duration_seconds",
+            service_name,
+            PRICING_QUERY_DIMENSIONS,
+            DATABASE_HISTOGRAM_BOUNDS,
+        )
+    validate_histogram(
+        prometheus_port,
+        "db_client_connection_wait_time_seconds",
+        service_name,
+        {"db_client_connection_pool_name": "pricing-reader"},
+        DATABASE_HISTOGRAM_BOUNDS,
+    )
+    # A stopped database refuses connections; it must not be reported as an acquire timeout.
+    timeouts = query_results(
+        prom_query(
+            prometheus_port,
+            'db_client_connection_timeouts_total{service_name="pricing-service"}',
+        )
+    )
+    if any(float(result["value"][1]) != 0 for result in timeouts):
+        raise HarnessError(f"pricing refused connections were counted as timeouts: {timeouts}")
+    pool_states = metric_series(
+        prometheus_port,
+        "db_client_connection_count",
+        service_name,
+        [
+            {
+                "db_client_connection_pool_name": "pricing-reader",
+                "db_client_connection_state": state,
+            }
+            for state in ("idle", "used")
+        ],
+    )
+    state_values = {
+        result["metric"]["db_client_connection_state"]: float(result["value"][1])
+        for result in pool_states
+    }
+    if state_values["used"] != 0 or state_values["idle"] < 1:
+        raise HarnessError(f"pricing pool states are {state_values}, expected idle and none used")
+    pool_max = metric_series(
+        prometheus_port,
+        "db_client_connection_max",
+        service_name,
+        [{"db_client_connection_pool_name": "pricing-reader"}],
+    )
+    if float(pool_max[0]["value"][1]) != 4:
+        raise HarnessError("pricing pool maximum is not the configured value 4")
+    validate_runtime_metrics("pricing", prometheus_port)
+
+
+def trace_spans(trace: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [
+        span
+        for batch in trace.get("batches", [])
+        for scope in batch.get("scopeSpans", batch.get("instrumentationLibrarySpans", []))
+        for span in scope.get("spans", [])
+    ]
+
+
+def span_attribute(span: Mapping[str, Any], key: str) -> Any:
+    for attribute in span.get("attributes", []):
+        if attribute.get("key") == key:
+            return next(iter(attribute.get("value", {}).values()), None)
+    return None
+
+
+def validate_pricing_diagnosis(
+    prometheus_port: int,
+    loki_port: int,
+    tempo_port: int,
+    start: int,
+    end: int,
+) -> None:
+    """Prove the healthy tariff read, the outage stage and sentinel exclusion in every backend."""
+    wait_json(
+        f"http://127.0.0.1:{tempo_port}/api/traces/{SERVICE_TRACE_ID}",
+        lambda value: (
+            set(PRICING_STAGE_SPANS.values()) <= {span.get("name") for span in trace_spans(value)}
+        ),
+        "healthy pricing trace through the tariff read",
+    )
+    failed_stage = pricing_failed_stage(pricing_database_operations(prometheus_port))
+    failure_trace = wait_json(
+        f"http://127.0.0.1:{tempo_port}/api/traces/{PRICING_FAILURE_TRACE_ID}",
+        lambda value: any(
+            span.get("name") == PRICING_STAGE_SPANS[failed_stage] for span in trace_spans(value)
+        ),
+        f"pricing outage trace with its failed {failed_stage} span",
+    )
+    failed_spans = [
+        span
+        for span in trace_spans(failure_trace)
+        if span.get("name") == PRICING_STAGE_SPANS[failed_stage]
+    ]
+    if (
+        len(failed_spans) != 1
+        or failed_spans[0].get("status", {}).get("code") not in ("STATUS_CODE_ERROR", 2)
+        or span_attribute(failed_spans[0], "insurance_hub.pricing.database.stage") != failed_stage
+        or span_attribute(failed_spans[0], "error.type") != "storage_unavailable"
+    ):
+        raise HarnessError(f"pricing outage span does not identify the {failed_stage} stage")
+    if PRICING_SENSITIVE_SENTINEL in json.dumps(failure_trace):
+        raise HarnessError("pricing outage trace exposed the synthetic sensitive sentinel")
+
+    def loki_lines(query: str) -> str:
+        return f"http://127.0.0.1:{loki_port}/loki/api/v1/query_range?" + urllib.parse.urlencode(
+            {"query": query, "start": start, "end": end, "limit": 20}
+        )
+
+    logs = wait_json(
+        loki_lines(
+            f'{{service_name="pricing-service"}} |= "{PRICING_FAILURE_TRACE_ID}" '
+            '|= "request completed"'
+        ),
+        lambda value: sum(len(stream.get("values", [])) for stream in query_results(value)) == 2,
+        "2 correlated pricing outage completion logs",
+    )
+    records = [json.loads(entry[1]) for stream in query_results(logs) for entry in stream["values"]]
+    observed = {
+        (
+            record.get("level"),
+            record.get("transport"),
+            record.get("outcome"),
+            record.get("http_status_code", record.get("rpc_status_code")),
+        )
+        for record in records
+    }
+    expected = {
+        ("ERROR", "http", "internal_error", 503),
+        ("ERROR", "grpc", "internal_error", "UNAVAILABLE"),
+    }
+    if observed != expected:
+        raise HarnessError(f"pricing outage completions are {observed}, expected {expected}")
+    status, body = request(
+        loki_lines(f'{{service_name="pricing-service"}} |= "{PRICING_SENSITIVE_SENTINEL}"')
+    )
+    if status != 200 or query_results(json.loads(body)):
+        raise HarnessError("pricing Loki records exposed the synthetic sensitive sentinel")
+    status, body = request(
+        f"http://127.0.0.1:{prometheus_port}/api/v1/series?"
+        + urllib.parse.urlencode({"match[]": '{service_name="pricing-service"}'})
+    )
+    if status != 200 or PRICING_SENSITIVE_SENTINEL.encode() in body:
+        raise HarnessError("pricing Prometheus labels exposed the synthetic sensitive sentinel")
+    print(f"pricing outage evidence: failed reader stage {failed_stage}, recovery succeeded")
+
+
 def validate_document_metrics(prometheus_port: int) -> None:
     service_name = "document-service"
     prefix = "insurance_hub_document_"
@@ -1452,6 +1690,7 @@ def validate_service_backends(
         "dashboard": "sales_trends",
         "document": "find_documents",
         "policy-search": "search",
+        "pricing": "calculate_price",
     }.get(service_domain, "list")
     if service_domain == "chat":
         request_dimensions = []
@@ -1470,6 +1709,26 @@ def validate_service_backends(
                 "rpc_response_status_code": "OK",
             },
         ]
+    elif service_domain == "pricing":
+        # Healthy and recovered quotes succeed on both transports; the outage quote
+        # fails once on each. The gateway's RPC is the same business request.
+        request_dimensions = [
+            {
+                "insurance_hub_pricing_operation": operation,
+                "insurance_hub_pricing_transport": "http",
+                "insurance_hub_pricing_outcome": outcome,
+                "http_response_status_code": status,
+            }
+            for outcome, status in (("success", "200"), ("internal_error", "503"))
+        ] + [
+            {
+                "insurance_hub_pricing_operation": operation,
+                "insurance_hub_pricing_transport": "grpc",
+                "insurance_hub_pricing_outcome": outcome,
+                "rpc_response_status_code": status,
+            }
+            for outcome, status in (("success", "OK"), ("internal_error", "UNAVAILABLE"))
+        ]
     else:
         request_dimensions = [
             {
@@ -1486,7 +1745,17 @@ def validate_service_backends(
             service_name,
             request_dimensions,
         )
-        if any(float(result["value"][1]) != 1 for result in request_counter):
+        if service_domain == "pricing":
+            expected_counts = {"success": 2, "internal_error": 1}
+            if any(
+                float(result["value"][1])
+                != expected_counts[result["metric"]["insurance_hub_pricing_outcome"]]
+                for result in request_counter
+            ):
+                raise HarnessError(
+                    "pricing request counters are not two successes and one failure per transport"
+                )
+        elif any(float(result["value"][1]) != 1 for result in request_counter):
             raise HarnessError(f"{service_domain} request counters are not exactly one each")
         if request_histogram_buckets != len(REQUEST_HISTOGRAM_BOUNDS):
             raise HarnessError(
@@ -1494,7 +1763,7 @@ def validate_service_backends(
                 f"{len(REQUEST_HISTOGRAM_BOUNDS)} buckets, configured proof expects "
                 f"{request_histogram_buckets}"
             )
-        if service_domain == "dashboard":
+        if service_domain in {"dashboard", "pricing"}:
             validate_histogram_inventory(
                 prometheus_port,
                 f"insurance_hub_{metric_domain}_request_duration_seconds",
@@ -1519,6 +1788,8 @@ def validate_service_backends(
         validate_document_metrics(prometheus_port)
     elif service_domain == "policy-search":
         validate_policy_search_metrics(prometheus_port)
+    elif service_domain == "pricing":
+        validate_pricing_metrics(prometheus_port)
     else:
         raise HarnessError(f"no backend signal validator is registered for {service_domain}")
     target = prom_query(prometheus_port, f'target_info{{service_name="{service_name}"}}')
@@ -1546,7 +1817,11 @@ def validate_service_backends(
         {"query": query, "start": start, "end": end, "limit": 20}
     )
     expected_completion_logs = (
-        3 if service_domain == "chat" else 2 if service_domain in {"dashboard", "document"} else 1
+        3
+        if service_domain == "chat"
+        else 2
+        if service_domain in {"dashboard", "document", "pricing"}
+        else 1
     )
     logs = wait_json(
         url,
@@ -1575,7 +1850,11 @@ def validate_service_backends(
         }
     )
     expected_levels = (
-        {"INFO", "WARN", "ERROR"} if service_domain in {"chat", "document"} else {"INFO"}
+        {"INFO", "WARN", "ERROR"}
+        if service_domain in {"chat", "document"}
+        else {"INFO", "ERROR"}
+        if service_domain == "pricing"
+        else {"INFO"}
     )
     series = wait_json(
         series_url,
@@ -1602,6 +1881,8 @@ def validate_service_backends(
         raise HarnessError(
             f"{service_domain} Loki levels are {actual_levels}, expected {expected_levels}"
         )
+    if service_domain == "pricing":
+        validate_pricing_diagnosis(prometheus_port, loki_port, tempo_port, start, end)
     for job in ("prometheus", "alloy"):
         up = prom_query(prometheus_port, f'up{{job="{job}"}}')
         results = query_results(up)
@@ -1840,6 +2121,8 @@ def execute(args: argparse.Namespace) -> None:
                 raise HarnessError("Document probe exposed the synthetic sensitive sentinel")
             if CHAT_SENSITIVE_SENTINEL in service_log:
                 raise HarnessError("Chat probe exposed the synthetic sensitive sentinel")
+            if PRICING_SENSITIVE_SENTINEL in service_log:
+                raise HarnessError("Pricing probe exposed the synthetic sensitive sentinel")
             validate_service_backends(
                 args.service_domain,
                 args.request_histogram_buckets,

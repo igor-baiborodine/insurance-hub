@@ -115,6 +115,7 @@ PYTHON_OBSERVABILITY_FILES := \
 	k8s/scripts/alloy/probe_chat.py \
 	k8s/scripts/alloy/probe_document.py \
 	k8s/scripts/alloy/probe_policy_search.py \
+	k8s/scripts/alloy/probe_pricing.py \
 	k8s/scripts/alloy/probe_product.py \
 	k8s/scripts/alloy/test_check_backend_config.py \
 	k8s/scripts/alloy/test_check_config.py \
