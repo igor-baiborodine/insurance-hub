@@ -371,7 +371,9 @@ def calculate(url: str, trace_id: str, body: Mapping[str, Any]) -> tuple[int, An
 def expect_quote(url: str, trace_id: str, description: str) -> None:
     status, body = calculate(url, trace_id, TRI_REQUEST)
     if status != 200 or body != TRI_QUOTE:
-        raise ProbeError(f"{description} TRI quote returned HTTP {status}: {body}")
+        raise ProbeError(
+            f"{description} TRI quote did not match the expected response (HTTP {status})"
+        )
 
 
 def failure_request(sentinel: str) -> Mapping[str, Any]:
@@ -433,7 +435,10 @@ def exercise_outage(
         run(["docker", "start", container], timeout=30)
         wait_postgres(container)
     if status != 503 or body != UNAVAILABLE_BODY:
-        raise ProbeError(f"stopped database returned HTTP {status}: {body}")
+        raise ProbeError(
+            f"stopped database response did not match the expected unavailable envelope "
+            f"(HTTP {status})"
+        )
     wait_http(readiness_url, timeout=30)
 
 

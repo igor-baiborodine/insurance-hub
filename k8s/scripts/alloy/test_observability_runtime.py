@@ -462,14 +462,37 @@ def test_pricing_probe_restarts_the_stopped_database_after_a_failed_request() ->
 
 def test_pricing_probe_rejects_a_quote_from_the_stopped_database() -> None:
     # given
+    private_marker = "PRIVATE-RESPONSE-MARKER"
     with (
         mock.patch.object(probe_pricing, "run", return_value=""),
         mock.patch.object(probe_pricing, "wait_postgres"),
-        mock.patch.object(probe_pricing, "calculate", return_value=(200, probe_pricing.TRI_QUOTE)),
+        mock.patch.object(
+            probe_pricing, "calculate", return_value=(200, {"value": private_marker})
+        ),
         # when / then
-        pytest.raises(probe_pricing.ProbeError, match="stopped database returned HTTP 200"),
+        pytest.raises(probe_pricing.ProbeError, match="expected unavailable envelope") as error,
     ):
         probe_pricing.exercise_outage("pg", "http://calculate", "http://ready", "0" * 32, "x")
+    assert private_marker not in str(error.value)
+
+
+def test_pricing_probe_keeps_unexpected_quote_bodies_out_of_diagnostics() -> None:
+    # given
+    private_marker = "PRIVATE-QUOTE-MARKER"
+
+    # when / then
+    with (
+        mock.patch.object(
+            probe_pricing,
+            "calculate",
+            return_value=(200, {"value": private_marker}),
+        ),
+        pytest.raises(
+            probe_pricing.ProbeError, match="did not match the expected response"
+        ) as error,
+    ):
+        probe_pricing.expect_quote("http://calculate", "0" * 32, "healthy")
+    assert private_marker not in str(error.value)
 
 
 def test_pricing_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> None:
