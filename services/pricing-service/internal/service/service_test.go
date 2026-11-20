@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -351,25 +354,51 @@ type fixtureReader struct {
 	unavailable atomic.Bool
 }
 
+// newFixtureReader serves the committed seed tariffs so quotes exercise the stored rule text.
 func newFixtureReader(t *testing.T) *fixtureReader {
 	t.Helper()
-	return &fixtureReader{tariffs: map[string]domain.Tariff{
-		"TRI": {
-			Code: "TRI",
-			BaseRules: []domain.BaseRule{
-				{CoverCode: "C1", Formula: "NUM_OF_ADULTS * 26"},
-				{CoverCode: "C2", Formula: "NUM_OF_CHILDREN * 52"},
-			},
-		},
-		"HSI": {
-			Code: "HSI",
-			BaseRules: []domain.BaseRule{
-				{CoverCode: "C1", Formula: "AREA * 1.25"},
-				{CoverCode: "C2", Formula: "AREA * 0.25"},
-				{CoverCode: "C3", Formula: "30"},
-			},
-		},
-	}}
+	data, err := os.ReadFile(filepath.Join("..", "administration", "seeds", "base.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seeds struct {
+		Tariffs []struct {
+			Code string `json:"code"`
+			Base []struct {
+				Cover     string  `json:"cover"`
+				Condition *string `json:"condition"`
+				Formula   string  `json:"formula"`
+			} `json:"base"`
+			Markup []struct {
+				Kind      string  `json:"kind"`
+				Condition *string `json:"condition"`
+				Factor    string  `json:"factor"`
+			} `json:"markup"`
+		} `json:"tariffs"`
+	}
+	if err := json.Unmarshal(data, &seeds); err != nil {
+		t.Fatal(err)
+	}
+	tariffs := make(map[string]domain.Tariff, len(seeds.Tariffs))
+	for _, seed := range seeds.Tariffs {
+		tariff := domain.Tariff{Code: seed.Code}
+		for _, rule := range seed.Base {
+			tariff.BaseRules = append(tariff.BaseRules, domain.BaseRule{
+				CoverCode: rule.Cover, Condition: rule.Condition, Formula: rule.Formula,
+			})
+		}
+		for _, rule := range seed.Markup {
+			factor, err := domain.NewDecimal(rule.Factor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tariff.MarkupRules = append(tariff.MarkupRules, domain.MarkupRule{
+				Kind: rule.Kind, Condition: rule.Condition, Factor: factor,
+			})
+		}
+		tariffs[seed.Code] = tariff
+	}
+	return &fixtureReader{tariffs: tariffs}
 }
 
 func (reader *fixtureReader) GetTariff(

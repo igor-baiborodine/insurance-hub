@@ -40,7 +40,8 @@ TRI_HTTP_REQUEST = (
     b'{"questionCode":"DESTINATION","answer":"EUR"}]}'
 )
 INVALID_DATE_HTTP_REQUEST = TRI_HTTP_REQUEST.replace(b"2017-04-16", b"invalid", 1)
-TRI_HTTP_RESPONSE = {"totalPrice": 78, "coversPrices": {"C1": 26, "C2": 52}}
+# Compare exact bytes: parsed JSON equates 78.00 with 78 and would hide a scale change.
+TRI_HTTP_RESPONSE = b'{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}'
 INVALID_DATE_HTTP_RESPONSE = {"code": 3, "message": "invalid request", "details": []}
 DIRECT_RPC_SMOKE = "TestDeployedDirectRPC_CalculatePrice"
 DNS_EGRESS = ("kube-system", {"k8s-app": "kube-dns"}, [(53, "UDP"), (53, "TCP")])
@@ -857,7 +858,7 @@ def verify_business_http(port: int) -> None:
     require(
         status == 200
         and content_type.split(";", 1)[0].strip().lower() == "application/json"
-        and json_object(body, "Pricing HTTP TRI quote differs") == TRI_HTTP_RESPONSE,
+        and body == TRI_HTTP_RESPONSE,
         "Pricing HTTP TRI quote differs",
     )
     status, content_type, body = response(port, "/pricing/calculate", INVALID_DATE_HTTP_REQUEST)

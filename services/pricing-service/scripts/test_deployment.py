@@ -470,8 +470,9 @@ def test_business_http_smoke_uses_tri_and_representative_rejection(
         (200, "application/json", b'{"message":"hello"}'),
         (200, "application/json", b'{"totalPrice":79,"coversPrices":{"C1":26,"C2":52}}'),
         (200, "application/json", b'{"totalPrice":"78","coversPrices":{"C1":26,"C2":52}}'),
+        (200, "application/json", b'{"totalPrice":78.00,"coversPrices":{"C1":26.00,"C2":52.00}}'),
     ],
-    ids=["stale-echo", "wrong-total", "quoted-total"],
+    ids=["stale-echo", "wrong-total", "quoted-total", "scaled-total"],
 )
 def test_business_http_smoke_rejects_incompatible_quote(
     monkeypatch: pytest.MonkeyPatch, status: int, content_type: str, body: bytes
