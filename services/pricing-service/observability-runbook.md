@@ -132,6 +132,8 @@ Keep these commands in one shell so the evidence directory and revisions remain 
 3. Capture the current state before any write:
 
 ```sh
+set -eu
+
 export MONITORING_SOURCE_REVISION="$(git rev-parse --verify 'HEAD^{commit}')"
 export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
 test -z "$(git status --porcelain)"
@@ -149,12 +151,16 @@ export PRICING_RELEASE_REVISION="$(jq -r '.spec.ref.commit' \
 kubectl --context qa-insurance-hub -n qa-svc get \
   deployment/qa-pricing-api -o json \
   > "$MONITORING_EVIDENCE_DIR/pricing-deployment.json"
+prior_rule_tmp="$MONITORING_EVIDENCE_DIR/prior-rule.tmp"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
   prometheusrule/qa-pricing-service -o json --ignore-not-found \
-  > "$MONITORING_EVIDENCE_DIR/prior-rule.json"
+  > "$prior_rule_tmp"
+mv "$prior_rule_tmp" "$MONITORING_EVIDENCE_DIR/prior-rule.json"
+prior_dashboard_tmp="$MONITORING_EVIDENCE_DIR/prior-dashboard.tmp"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
   configmap/qa-pricing-dashboard -o json --ignore-not-found \
-  > "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+  > "$prior_dashboard_tmp"
+mv "$prior_dashboard_tmp" "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
 
 if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
   jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace, uid: .metadata.uid}, spec}' \
@@ -258,7 +264,20 @@ monitoring resources:
 
 ```sh
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=pricing
+if test -f "$MONITORING_EVIDENCE_DIR/prior-rule.absent"; then
+  kubectl --context qa-insurance-hub -n qa-monitoring get \
+    prometheusrule/qa-pricing-service -o jsonpath='{.metadata.uid}' \
+    > "$MONITORING_EVIDENCE_DIR/installed-rule-uid.txt"
+  test -s "$MONITORING_EVIDENCE_DIR/installed-rule-uid.txt"
+fi
+
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=pricing
+if test -f "$MONITORING_EVIDENCE_DIR/prior-dashboard.absent"; then
+  kubectl --context qa-insurance-hub -n qa-monitoring get \
+    configmap/qa-pricing-dashboard -o jsonpath='{.metadata.uid}' \
+    > "$MONITORING_EVIDENCE_DIR/installed-dashboard-uid.txt"
+  test -s "$MONITORING_EVIDENCE_DIR/installed-dashboard-uid.txt"
+fi
 ```
 
 Read back both objects, then re-render the same source and require it to match the retained
@@ -495,10 +514,22 @@ cmp "$MONITORING_EVIDENCE_DIR/prior-dashboard-source.json" \
 Follow a live restore with the reviewed repository revert, so that the source keeps owning the
 assets.
 
-To retire a proven first installation, delete only these two objects, with separate
-authorization:
+To retire a proven first installation, use the same retained evidence directory and first require
+that both resources were absent before installation and that their current UIDs identify the
+objects created by that installation. Delete only these two objects, with separate authorization:
 
 ```sh
+set -eu
+test -f "$MONITORING_EVIDENCE_DIR/prior-rule.absent"
+test -f "$MONITORING_EVIDENCE_DIR/prior-dashboard.absent"
+test -s "$MONITORING_EVIDENCE_DIR/installed-rule-uid.txt"
+test -s "$MONITORING_EVIDENCE_DIR/installed-dashboard-uid.txt"
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-pricing-service -o jsonpath='{.metadata.uid}')" \
+  = "$(cat "$MONITORING_EVIDENCE_DIR/installed-rule-uid.txt")"
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-pricing-dashboard -o jsonpath='{.metadata.uid}')" \
+  = "$(cat "$MONITORING_EVIDENCE_DIR/installed-dashboard-uid.txt")"
 kubectl --context qa-insurance-hub -n qa-monitoring delete \
   prometheusrule/qa-pricing-service
 kubectl --context qa-insurance-hub -n qa-monitoring delete \
