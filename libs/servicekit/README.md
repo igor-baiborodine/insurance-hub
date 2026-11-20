@@ -3,284 +3,102 @@
 
 - [Servicekit](#servicekit)
   - [Package boundary](#package-boundary)
-  - [Configuration and identity](#configuration-and-identity)
-  - [Health probes and ownership](#health-probes-and-ownership)
-  - [Logging and telemetry](#logging-and-telemetry)
+  - [Public API](#public-api)
   - [Owning commands](#owning-commands)
-  - [Resolution and registration](#resolution-and-registration)
   - [Release](#release)
-  - [Compatibility and handoff](#compatibility-and-handoff)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Servicekit
 
-`github.com/igor-baiborodine/insurance-hub/libs/servicekit` is the independently versioned
-runtime library owned by Insurance Hub repository maintainers. Igor Baiborodine is the initial
-accountable release maintainer. Configuration, neutral identity, health, logging and telemetry
-mechanics are implemented. Product and the scaffold are active consumers that pin published
-releases with normal Go checksums and no filesystem replacement.
+`github.com/igor-baiborodine/insurance-hub/libs/servicekit` is the independently versioned runtime
+library for Insurance Hub Go services. It provides configuration parsing, neutral identity, health
+probes, structured logging and OpenTelemetry mechanics. Insurance Hub repository maintainers own
+it. Product and the service scaffold are its active consumers and pin published releases.
+
+Each consumer composes the runtime objects it needs and keeps policy, lifecycle ordering and
+cleanup ownership. No package reads the environment or initializes process state on import.
 
 ## Package boundary
 
-| Public package | Intended responsibility | Remains with the consumer |
+| Package | Responsibility | Remains with the consumer |
 | --- | --- | --- |
-| `config` | Explicit parsing and safe validation of neutral setting groups | Environment loader, required database settings, policy and startup validation |
-| `identity` | Neutral identity values, development defaults and opt-in deployment validation | Identity loading, test-instance generation and the scaffold's separate policy |
-| `logger` | JSON handlers, recursive attribute redaction and trace correlation | Completion status, severity, route and business classification |
-| `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | Scope/view/propagation selection, process-global installation, transport and business spans |
-| `health` | State and bounded injected readiness checks | Dependencies, readiness transition and resource lifetime |
+| `config` | Explicit parsing and safe validation of neutral setting groups | Environment loading, service-specific settings and startup validation |
+| `identity` | Neutral identity values and opt-in deployment validation | Identity loading and instance generation |
+| `logger` | JSON handlers, recursive attribute redaction and trace correlation | Message wording, severity and business classification |
+| `telemetry` | Explicit provider construction, runtime instruments and bounded cleanup | Scope, view and propagation choices, global installation and business spans |
+| `health` | Readiness state and bounded injected dependency checks | Dependencies, readiness transitions and resource lifetime |
 
-The library contains no business models, DTOs, repositories, use cases, database schemas, server
-executable or generated contracts. `check-boundaries` rejects imports of other repository modules
-and additional public package roots. Source/API review must also reject business declarations
-that require no prohibited imports. The owning service composes runtime objects and retains their
-cleanup ownership.
+The library contains no business models, DTOs, repositories, database schemas, server executable
+or generated contracts. `check-boundaries` rejects imports of other repository modules and
+additional public package roots.
 
-## Configuration and identity
+## Public API
 
-`config.Runtime` contains value-only request, probe and shutdown timeouts plus the diagnostic log
-level. It supports named composition or embedding, but has no promoted loading or validation
-method. A service's `internal/config.Load` supplies `config.Lookup` (normally `os.LookupEnv`),
-explicitly parses settings and invokes `config.ValidateRuntime`, `config.ValidateTelemetry` and
-its own validation before creating runtime dependencies. No package reads the environment or
-initializes process state on import.
+- **`config`:** `Runtime`, `DefaultRuntime`, `DefaultGRPC`, `DefaultHTTPServer` and
+  `DefaultTelemetry` return fresh value-only defaults. The defaults are business HTTP
+  `127.0.0.1:8080`, health `127.0.0.1:8081` and gRPC `127.0.0.1:9090`. A service's own loader
+  supplies a `config.Lookup` such as `os.LookupEnv`, parses settings with helpers like
+  `LoadAddress`, `LoadPositiveDuration` and `OptionalEndpoint`, and then calls `ValidateRuntime`,
+  `ValidateTelemetry` and its own validation. `ValueOrDefault` falls back only when a value is
+  absent; an explicitly empty value fails. Parse errors carry only schema names and fixed reasons.
+  `ErrorDetails` extracts them without rendering wrapped error text.
+- **`identity`:** `Identity` is a plain value with namespace, service, version, instance,
+  environment and implementation. `ValidateDeployment` is an explicit policy for services that use
+  Product's deployment identity rules. It returns `ValidationError` with fixed setting and reason
+  fields.
+- **`health`:** `NewState(timeout, check)` starts not ready. The composition root calls
+  `SetReady(true)` after startup and `SetReady(false)` before drain. `NewHandler` serves `GET /livez`
+  (always 200) and `GET /readyz`. The readiness probe returns 503 before startup, on dependency
+  failure or cancellation, or after readiness is withdrawn during the probe. Probe bodies are
+  fixed and never include dependency errors. `NewManagementServer` returns an unstarted
+  `*http.Server` with header and idle timeouts. The caller owns its listener, exposure and shutdown.
+- **`logger`:** `New` and `NewIdentity` create JSON loggers with UTC timestamps, trace and span
+  correlation, and recursive redaction of sensitive attributes. Messages are not rewritten.
+  `LogRequired` writes a caller-owned contract record that bypasses the diagnostic level.
+- **`telemetry`:** `New` builds providers from validated `config.Telemetry` and explicit `Options`.
+  `RuntimeScope` is required, and propagators, views and the sampler are caller choices. Disabled
+  telemetry creates no exporter or connection. Enabled telemetry uses OTLP/gRPC with bounded queues,
+  batching, retry and export timeouts. `ForceFlush` and idempotent `Shutdown` honor the shorter of
+  the caller context and the exporter timeout. `InstallDiagnostics` is the only process-global
+  action. It returns a cleanup that callers must run in LIFO order after providers shut down. The
+  library never installs a global tracer provider, meter provider or propagator.
 
-`DefaultRuntime`, `DefaultGRPC`, `DefaultHTTPServer` and `DefaultTelemetry` return fresh defaults.
-The address defaults are business HTTP `127.0.0.1:8080`, health `127.0.0.1:8081` and gRPC
-`127.0.0.1:9090`. Address constants do not create listeners or a business API. `LoadAddress`
-preserves explicit overrides, IPv6 and port zero; callers use `Address.Port` to apply their own
-collision policy. The scaffold uses the shared health default.
-
-`ValidHost` exposes the host-syntax check used by listener and OTLP endpoint parsing. Pass an
-unbracketed host without a port or URL text. It accepts IP literals and ASCII DNS-style names
-with labels up to 63 bytes and a total length up to 253 bytes; it rejects empty hosts, ASCII
-space/tab/CR/LF, empty labels, leading or trailing label hyphens and other characters. It
-returns a boolean without including rejected input in diagnostics and performs no DNS lookup.
-Product's PostgreSQL URL parsing and credential-redaction policy remain in Product; it calls this
-predicate only for the URL host.
-
-`ValueOrDefault` uses a fallback only when a value is absent; an explicitly empty value fails.
-`LoadPositiveDuration`, `LoadBoundedInt`, `ParseLogLevel` and `ParseBool` retain the consumer
-parsing semantics. `OptionalEndpoint` is the deliberate exception: absent or empty means no
-endpoint when export is disabled, and fails when enabled. Nonempty endpoints are validated even
-when disabled. OTLP/gRPC endpoints require HTTP(S), a host and nonzero numeric port; credentials,
-query values, fragments and OTLP/HTTP paths are rejected. A trailing slash is normalized away.
-
-Parsing errors retain only schema names and fixed reasons. All name arguments and both arguments
-to `Invalid` must be trusted schema text, never environment values or raw parser errors.
-`ErrorDetails` extracts those fields through wrappers and returns a constant category for unknown
-errors; it never renders the wrapper. It is not a general sanitizer for arbitrary message text.
-
-`identity.ValidateDeployment` is an explicit policy for services using the Product deployment
-identity rules. It validates the caller's expected name when telemetry is enabled, accepts
-development only with telemetry disabled, and test identities under their existing rules. It applies
-a SHA-version and UUID-shaped instance rule to every other valid lowercase environment name.
-It does not load or generate values. Identity failures expose fixed setting/reason fields through
-`identity.ValidationError`; `config.ErrorDetails` extracts them through wrappers without
-rendering arbitrary error text. The scaffold retains its own identity policy.
-
-`identity.Identity` is a plain value containing namespace, service, version, instance, environment
-and implementation. It has no promoted validator or instance generator. `ValidateTelemetry` checks a
-positive timeout and endpoint mechanics, without constraining identity or enforcing Product's
-enabled exactly-2s timeout. Product retains required database settings and credential redaction,
-pool bounds, QA/test identity, timeout relationships and listener collision rules. The scaffold
-retains its explicit non-development identity policy and ephemeral-listener behavior. These
-policies must still be called explicitly by each consumer; passing common validation is not a
-complete service validation result. Treat parsed settings, including endpoint URLs, as immutable
-after startup.
-
-## Health probes and ownership
-
-`health.NewState(timeout, check)` rejects nonpositive budgets and nil checks and starts not ready.
-The composition root calls `SetReady(true)` only after startup and `SetReady(false)` before drain.
-`Ready` reports lifecycle state only; `/readyz` also checks dependencies. The injected `Check` may
-compose several dependencies and must honor cancellation and return promptly. It runs synchronously
-under the shorter of the caller deadline and probe budget; the library creates no detached worker
-to hide a check that ignores cancellation. Clients and their cleanup remain caller-owned.
-
-`health.NewHandler` accepts a state returned by `NewState`. A `GET /readyz` returns 503 before
-startup, on dependency failure or cancellation, or after readiness withdrawal during the probe;
-bounded success returns 200. It rechecks cancellation and state after the dependency returns.
-`GET /livez` always returns 200 independently of dependencies. Bodies are fixed `live\n`,
-`ready\n` and `not ready\n`, with `text/plain; charset=utf-8` and `Cache-Control: no-store`.
-The standard HTTP mux provides method/path rejection. Dependency errors are never returned in
-responses. Listener creation, authentication/exposure policy, startup rollback and the overall
-shutdown budget remain with the service composition root.
-
-`health.NewManagementServer(state)` optionally returns a fresh, unstarted `*http.Server` with
-the same probe handler, a 5-second header timeout and a 30-second idle timeout. Read and write
-timeouts remain zero. A service may set different timeout fields before serving; it still owns
-the listener address and exposure, readiness transitions, serving and shutdown.
-
-## Logging and telemetry
-
-`logger.New` creates a JSON logger with a short service label. `logger.NewIdentity` binds the six
-caller-owned identity fields. Both use UTC timestamps, add valid trace/span IDs from the logging
-context and recursively redact sensitive attribute keys in groups, maps, structs and lists.
-Errors and unsupported structured values are replaced with `[REDACTED]`. Bound attributes are
-sanitized when the logger is derived. Attribute redaction does not inspect or rewrite arbitrary
-message strings; callers must keep messages safe.
-
-`logger.LogRequired` bypasses the diagnostic threshold for a caller-owned contract record when
-the logger comes from `logger.New` or `logger.NewIdentity`, including `With` and `WithGroup`
-derivatives. A logger using another `slog.Handler` may filter the record. Its message, severity and
-classification remain explicit arguments, so completion wording and Product/route/business
-policy stay in the consumer. Migrate a consumer's logger constructor and required-record call
-together to retain the bypass. Logs are written only to the supplied writer; executables select
-stdout or stderr.
-
-`telemetry.New` accepts caller-validated `config.Telemetry` and explicit `telemetry.Options`.
-`RuntimeScope` is required. HTTP/gRPC propagators, metric views and the trace sampler are caller
-choices; nil propagators use W3C trace context and a nil sampler uses parent-based always-sample.
-`HistogramView` preserves caller-owned signal names and buckets. Product retains its W3C+B3 HTTP
-policy, W3C-only gRPC policy, business/database views and transport completion behavior. The
-scaffold retains its own request signal names. This module intentionally has no B3 or transport
-instrumentation dependency.
-
-Disabled telemetry creates no exporter, reader, callback or network connection and returns no-op
-providers while retaining the selected propagators. Enabled telemetry validates all six resource
-identity values before exporter startup, uses OTLP/gRPC, cumulative metrics, caller-bounded export
-timeouts, a 2048-span nonblocking queue, 256-span batches, one-second batching and bounded retry.
-Runtime instruments cover memory, allocation, GC, goroutine and processor state under the exact
-caller scope. Provider construction closes already-created resources when a later exporter or
-runtime step fails. `ForceFlush` and idempotent `Shutdown` use the shorter of the caller context
-and exporter timeout; the composition root retains the overall lifecycle budget.
-
-`telemetry.InstallDiagnostics` is an explicit process-global action. It replaces raw SDK errors
-with fixed, rate-limited warnings and returns an idempotent cleanup that restores the previous
-handler and detaches the supplied logger. Installations must be restored in LIFO order after
-providers have shut down. On the first installation, OpenTelemetry's default handler retains a
-delegate permanently; after cleanup it emits only a fixed, rate-limited fallback warning without
-using the released logger. The library does not install a global tracer provider, meter provider
-or propagator.
+The OpenTelemetry packages are pinned at v1.46.0. The library has no B3 or transport
+instrumentation dependency. Package documentation covers parsing rules, defaults and limits in
+detail.
 
 ## Owning commands
 
-Run from this directory or use `make -C libs/servicekit` from the repository root. Prerequisites
-are Go 1.27.4, managed CPython 3.14.8, GCC for race tests, and access to public Go/tool/vulnerability
-services unless cached. Prepare Python through the root `python-toolchain-setup` target first.
+Run commands from the repository root after `make python-toolchain-setup`:
 
 ```sh
-make bootstrap-go-tools
-make format FORMAT_SCOPE=all
-make check-go-pr FORMAT_SCOPE=all
+make -C libs/servicekit bootstrap-go-tools
+make -C libs/servicekit check-go-pr FORMAT_SCOPE=all
+make -C libs/servicekit coverage
 ```
 
-Setup explicitly installs golangci-lint v2.14.0 and govulncheck v1.8.0 under `.tools/bin`.
-Checks never install tools. `TOOLS_BIN`, `GO` and `PYTHON` support explicit compatible overrides.
-`test TEST_PACKAGES=./config` selects unit packages; `test-race` selects all packages.
-`build` compiles packages without assuming an executable. `check-deps` tidies only a disposable
-copy and compares both manifests. `update-deps` is the explicit manifest-maintenance operation.
-Formatting reuses the repository's gofumpt/goimports/golines pipeline and 100-column policy.
-The gate includes format, lint/vet, race, build, dependency, vulnerability and boundary checks.
-The tests cover parsing, safe failures, default ports, explicit local validation, real HTTP probes,
-deadline/cancellation, readiness withdrawal, recursive logging redaction, trace correlation,
-resource/scope/view preservation, disabled mode, bounded export queues and partial-startup cleanup.
-Identity is a value-only package. These checks do not establish consumer adoption, transport
-final-status behavior or complete service startup/shutdown behavior.
-
-The OTel packages are pinned at v1.46.0, matching current consumers. Both consumers retain
-otelgrpc v0.71.0 because transport instrumentation remains local.
-
-## Resolution and registration
-
-Normal resolution is standalone with `GOWORK=off`, exact version requirements, checked-in checksums
-and no servicekit replacement. The library owner and shared workflow inspect effective workspace
-and caller/persistent flags before setting standalone flags; alternate manifests and servicekit
-replacements fail. The active consumers enforce exact versions and normal checksums. A tag alone
-is not eligible for a consumer upgrade.
-
-Topology schema 2 retains one module inventory and adds `activeConsumers`. The library's
-`consumers` allowlist and `activeConsumers` registry include Product and the scaffold. Registration
-cross-checks requirements/imports, owner/directory identity, workflow jobs, unique phases and
-explicit Make bindings. A still-required/imported dependency cannot be hidden by deleting or
-downgrading its record. Every active registration implements the baseline phase adapters plus its
-applicable generated, breaking, copy, integration and image phases. Unsupported phases fail closed.
-
-From the repository root, `go-shared-plan` takes full `PR_BASE` and `PR_HEAD` SHAs and checks the
-complete diff, including both ends of renames and the union of base/head module roots. More than
-one changed module fails before setup. Shared changes select every active consumer against the
-candidate. Hosted consumer-only changes rely on the selected-module workflow for their normal
-gate, so the supplemental workflow does not repeat it. Root tooling changes run the shared tooling
-and topology checks; full local validation additionally selects all modules normally. A hosted plan
-with no module obligations completes without starting validation or result-reconciliation runners.
-The original Go PR and Report Card workflows remain unchanged.
-
-`go-shared-validate` uses a verified Git extraction in a private temporary directory, with
-alternate manifests only in disposable copies. A live private socket issues phase contexts;
-normal flags or a copied context file cannot enable candidate mode. Each simple candidate phase
-uses the actual selected graph before/after execution. Composite owning targets may report
-several distinct phases in one invocation. Original manifests/source, alternate files, source
-content and full candidate SHA are checked. The controller removes its temporary tree on success,
-failure and handled interruption. Hard-killed runners require disposal. The scaffold supplies its
-generated, breaking and copy adapters; Product supplies generated, breaking, integration and image
-adapters. Both registrations declare why their inapplicable phase is omitted.
-
-The module work budget is 40 minutes; child processes have 30-second progress heartbeats and
-10-second teardown, with separate controller shutdown. Reports retain original/alternate lockfile
-hashes, source identity, selected graph and separate phase outcomes. The aggregate recomputes
-expected obligations and rejects missing, duplicate, unexpected, failed, cancelled, skipped or
-misidentified results. Zero consumers is explicit and is not adoption coverage. Planning/results
-are stored under ignored `.work/servicekit`; temporary overrides never live there.
+Prerequisites are Go 1.27.4, managed CPython 3.14.8, GCC for race tests, and access to public Go,
+tool and vulnerability services unless they are cached. `bootstrap-go-tools` installs
+golangci-lint v2.14.0 and govulncheck v1.8.0 under `.tools/bin`; checks never install tools.
+`check-go-pr` covers tool pins, formatting, lint, race tests, build, dependency consistency,
+vulnerabilities and the package boundary. `format` and `update-deps` are the explicit mutating
+targets. Shared PR CI also validates every active consumer against a Servicekit change, and uploads
+coverage to Codecov under the `servicekit` flag.
 
 ## Release
 
-The **Go Library Release** workflow runs after a `libs/servicekit` change is pushed to
-`main`, including a direct push. Monotag calculates a scoped stable v1 version from
-conventional commits and existing library tags, beginning at `v1.0.0`. Because the Go
-module is in `libs/servicekit`, its tag uses `libs/servicekit/vX.Y.Z`. The single release
-workflow plans the exact triggering source, validates the library and every active consumer in
-an independently reconciled matrix, then creates the scoped tag. At most four validation jobs run
-at once. The publication job verifies public Go proxy and checksum resolution with fresh standalone
-and container builds, then creates a non-draft GitHub Release with notes marked Latest. Release
-creation uses the same settings as Go service releases.
+Servicekit releases through the shared
+[Go library release workflow](../../docs/migration/phase-4/go-module-topology.md#shared-library-validation-and-release)
+with tags `libs/servicekit/vX.Y.Z`. A release validates the library and every active consumer at
+the exact source, creates the tag, and verifies public resolution through `proxy.golang.org` and
+`sum.golang.org` before creating the GitHub Release. A tag alone does not establish a successful
+release. Before upgrading a consumer, check the hosted run, the tag's source SHA and public module
+resolution.
 
-The workflow needs no separate approval, release-immutability setting, qualification asset,
-attestation, package upload, consumer pin edit or service-image release. Planning and validation
-have read-only repository access; only the publication job has `contents: write`. Module-wide
-concurrency does not cancel an in-progress release. Tag creation is create-if-absent with exact
-SHA readback; a collision fails, while the same source may resume verification. A corrected source
-uses a new version.
-
-Candidate integration coverage is written to controller-owned disposable storage rather than a
-consumer source tree. The candidate receipt therefore keeps strict source-manifest verification
-while allowing coverage-producing integration tests to run. When a candidate owner fails, the
-controller exposes its diagnostic output while preserving the nonzero result, teardown and cleanup
-requirements.
-
-The serial baseline on GitHub-hosted `ubuntu-24.04` runners was captured on 2026-10-30 with the
-library and two active consumers. Release `v0.2.2` took 12 minutes 26 seconds, including 10 minutes
-49 seconds for validation; release `v1.0.0` took 13 minutes 27 seconds, including 11 minutes
-48 seconds for validation. Splitting validation by module removes the sum of every module from a
-single job's critical path. Wall-clock time is instead bounded by the slowest module in each
-four-job wave, while total runner minutes still grow with every consumer. The four-job cap limits
-concurrent runner use. A move to a paid provider such as Harness must reassess this concurrency,
-its billing unit and available capacity from measured runs before preserving or changing the cap.
-
-Public verification uses an empty dependency/build cache, `proxy.golang.org`,
-`sum.golang.org`, exact selected-version and source-content checks, and standalone plus
-fresh-container smoke builds. Its overall limit is 15 minutes, proxy requests are bounded
-to 30 seconds and image cleanup has a separate 30-second budget. Only transient proxy
-availability is retried; checksum failure is fatal. A tag may remain downloadable after
-a failed run. Before a consumer upgrade, inspect the hosted run, tag/source SHA and public module
-resolution. Consumers pin exact versions, retain normal Go checksums and run their owning
-build/test gates. Local tests do not establish hosted publication.
-
-## Compatibility and handoff
-
-Library versions are independent of service images. Version `v1.0.0` declares the current
-Servicekit API and documented behavior stable without changing runtime behavior. The module path
-remains unchanged because Go requires a major-version path suffix only from v2. During v1, minor
-and patch releases preserve backward compatibility; a breaking change requires a separately
-reviewed major release with migration notes naming old/new versions, affected settings/APIs/
-consumers, before/after behavior, required checks and a previously working rollback target with
-reversal limits. Consumers explicitly pin and verify exact versions; automatic upgrades are
-unsupported. Rollback restores the previous pin and necessary source/configuration changes in
-that consumer's own PR and reruns its full gate. The release workflow never moves a tag. All four
-active consumers completed compatibility validation against the current API. Each consumer remains
-independently pinned and upgrades through a separate module-scoped PR after publication.
-
-Root validation owners are `go-shared-test`, `go-shared-test-integration`, `go-topology-check`,
-`go-topology-test` and the existing Python shared-tooling suites. Future releases repeat the
-applicable hosted release and normal consumer/image qualification gates.
+Library versions are independent of service images. During v1, minor and patch releases preserve
+backward compatibility. A breaking change requires a separately reviewed major release with
+migration notes covering affected APIs, settings and consumers, and a working rollback target.
+Consumers pin exact versions with normal Go checksums and no local replacement, and upgrade
+through their own PRs. Rollback restores the previous pin in that consumer's PR and reruns its full
+gate. The release workflow never moves a tag.

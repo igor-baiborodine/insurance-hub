@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - 'libs/mvel/**'
       - 'libs/servicekit/**'
       - 'services/*-service/**/*.go'
       - 'services/*-service/go.mod'
@@ -37,6 +38,10 @@ jobs:
             role: public-shared
             coverage_files: libs/servicekit/coverage.txt
             flag: servicekit
+          - module: libs/mvel
+            role: public-shared
+            coverage_files: libs/mvel/coverage.txt
+            flag: mvel
           - module: services/product-service
             role: business-service
             coverage_files: services/product-service/coverage.txt,services/product-service/integration-coverage.txt

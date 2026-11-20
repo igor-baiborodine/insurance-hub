@@ -123,18 +123,23 @@ jobs:
           MODULE_DIR: ${{ matrix.module }}
         run: make go-shared-validate
 
-      - name: Generate servicekit coverage
-        if: matrix.module == 'libs/servicekit'
-        run: make -C libs/servicekit coverage
+      - name: Generate shared library coverage
+        id: coverage
+        if: startsWith(matrix.module, 'libs/')
+        env:
+          MODULE_DIR: ${{ matrix.module }}
+        run: |
+          make -C "$MODULE_DIR" coverage
+          echo "flag=${MODULE_DIR#libs/}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload servicekit coverage to Codecov
-        if: success() && matrix.module == 'libs/servicekit'
+      - name: Upload shared library coverage to Codecov
+        if: success() && startsWith(matrix.module, 'libs/')
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: libs/servicekit/coverage.txt
-          flags: servicekit
-          name: servicekit
+          files: ${{ matrix.module }}/coverage.txt
+          flags: ${{ steps.coverage.outputs.flag }}
+          name: ${{ steps.coverage.outputs.flag }}
           disable_search: true
           handle_no_reports_found: false
           fail_ci_if_error: true

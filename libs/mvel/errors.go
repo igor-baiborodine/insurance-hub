@@ -48,6 +48,10 @@ func bindingError(name, reason string) error {
 	return &evaluatorError{category: ErrBinding, position: -1, name: name, reason: reason}
 }
 
+func bindingLimitError(name, reason string) error {
+	return &evaluatorError{category: ErrLimit, position: -1, name: name, reason: reason}
+}
+
 func decimalError(category error, reason string) error {
 	return &evaluatorError{category: category, position: -1, reason: reason}
 }

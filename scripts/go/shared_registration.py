@@ -286,11 +286,7 @@ def shared_ci_contract(root: Path, path: str) -> None:
         (i for i, step in enumerate(steps) if step.get("run") == "make go-shared-validate"), -1
     )
     coverage = next(
-        (
-            i
-            for i, step in enumerate(steps)
-            if step.get("run") == "make -C libs/servicekit coverage"
-        ),
+        (i for i, step in enumerate(steps) if step.get("id") == "coverage"),
         -1,
     )
     upload = next(
@@ -299,25 +295,28 @@ def shared_ci_contract(root: Path, path: str) -> None:
     )
     require(
         validation >= 0 and validation < coverage < upload,
-        "missing or misordered servicekit coverage",
+        "missing or misordered shared library coverage",
     )
     require(
-        steps[coverage].get("if") == "matrix.module == 'libs/servicekit'",
-        "servicekit coverage must run only for the library",
+        steps[coverage].get("if") == "startsWith(matrix.module, 'libs/')"
+        and steps[coverage].get("env") == {"MODULE_DIR": "${{ matrix.module }}"}
+        and steps[coverage].get("run")
+        == 'make -C "$MODULE_DIR" coverage\necho "flag=${MODULE_DIR#libs/}" >> "$GITHUB_OUTPUT"\n',
+        "shared library coverage must run only for libraries through the module owner",
     )
     require(
-        steps[upload].get("if") == "success() && matrix.module == 'libs/servicekit'"
+        steps[upload].get("if") == "success() && startsWith(matrix.module, 'libs/')"
         and steps[upload].get("with")
         == {
             "token": "${{ secrets.CODECOV_TOKEN }}",
-            "files": "libs/servicekit/coverage.txt",
-            "flags": "servicekit",
-            "name": "servicekit",
+            "files": "${{ matrix.module }}/coverage.txt",
+            "flags": "${{ steps.coverage.outputs.flag }}",
+            "name": "${{ steps.coverage.outputs.flag }}",
             "disable_search": True,
             "handle_no_reports_found": False,
             "fail_ci_if_error": True,
         },
-        "servicekit Codecov upload contract",
+        "shared library Codecov upload contract",
     )
 
 

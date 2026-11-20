@@ -133,6 +133,18 @@ func TestCompile_RejectsUnsupportedKindsAndLimits(t *testing.T) {
 		{"magnitude", strings.Repeat("9", 21) + "B", "decimal", mvel.ErrLimit},
 		{"scale", "0." + strings.Repeat("1", 19) + "B", "decimal", mvel.ErrLimit},
 		{"nodes", strings.Repeat("1B+", 32) + "1B", "decimal", mvel.ErrLimit},
+		// 129 tokens but only 63 nodes, so the token budget alone rejects it.
+		{"tokens", strings.Repeat("(1)+", 31) + "((1))", "decimal", mvel.ErrLimit},
+		{"empty", "", "decimal", mvel.ErrSyntax},
+		{"invalid UTF-8", "TYP == '\xff'", "predicate", mvel.ErrSyntax},
+		{"unterminated string", "TYP == 'APT", "predicate", mvel.ErrSyntax},
+		{"unmatched parenthesis", "1B)", "decimal", mvel.ErrSyntax},
+		{"ternary without colon", "FLOOD == 'YES' ? 1B", "decimal", mvel.ErrSyntax},
+		{"trailing token", "1B 2B", "decimal", mvel.ErrSyntax},
+		{"equality on decimals", "AREA == 1B", "predicate", mvel.ErrResultKind},
+		{"comparison on strings", "TYP > 'APT'", "predicate", mvel.ErrResultKind},
+		{"arithmetic on strings", "TYP + 1B", "decimal", mvel.ErrResultKind},
+		{"ternary string branch", "FLOOD == 'YES' ? 'A' : 1B", "decimal", mvel.ErrResultKind},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// when
@@ -213,8 +225,8 @@ func TestEvaluate_EnforcesStringAndIntermediateDecimalLimits(t *testing.T) {
 	if atStringLimitErr != nil {
 		t.Fatalf("string at limit: %v", atStringLimitErr)
 	}
-	if !errors.Is(beyondStringLimitErr, mvel.ErrBinding) {
-		t.Fatalf("string beyond limit error = %v, want binding error", beyondStringLimitErr)
+	if !errors.Is(beyondStringLimitErr, mvel.ErrLimit) {
+		t.Fatalf("string beyond limit error = %v, want limit error", beyondStringLimitErr)
 	}
 	if !errors.Is(intermediateErr, mvel.ErrLimit) {
 		t.Fatalf("intermediate result error = %v, want limit error", intermediateErr)
@@ -229,6 +241,11 @@ func TestLimits_AcceptsDocumentedBoundaries(t *testing.T) {
 		strings.Repeat("9", 20) + "B",
 		"0." + strings.Repeat("1", 18) + "B",
 		strings.Repeat("1B+", 31) + "1B",
+		// Exactly 64 nodes: three in the condition, one ternary, 30 leaves plus 29 additions
+		// in the true branch and one leaf in the false branch.
+		"FLOOD=='Y'?" + strings.Repeat("1+", 29) + "1:1",
+		// Valid expressions always have an odd token count, so 127 is the largest accepted.
+		strings.Repeat("(1)+", 31) + "(1)",
 	} {
 		if _, err := mvel.CompileDecimal(source); err != nil {
 			t.Errorf("compile at documented boundary: %v", err)
@@ -259,6 +276,15 @@ func TestLimits_AcceptsDocumentedBoundaries(t *testing.T) {
 	if err != nil || got.String() != "5" {
 		t.Fatalf("seven-binding result = %s, error %v; want 5", got.String(), err)
 	}
+
+	// when
+	bindings["EXTRA"] = mustNumber(t, "1")
+	_, beyondCountErr := expression.Evaluate(bindings)
+
+	// then
+	if !errors.Is(beyondCountErr, mvel.ErrLimit) {
+		t.Fatalf("eight-binding error = %v, want limit error", beyondCountErr)
+	}
 }
 
 func nestedTernary(depth int) string {
@@ -281,6 +307,34 @@ func TestDecimal_PreservesSignedValueAndScale(t *testing.T) {
 			got.Scale(),
 			err,
 		)
+	}
+}
+
+func TestCompile_ReportsSourcePosition(t *testing.T) {
+	// when
+	_, err := mvel.CompileDecimal("AREA *")
+
+	// then
+	if !errors.Is(err, mvel.ErrSyntax) || !strings.Contains(err.Error(), "at byte 6") {
+		t.Fatalf("compile error = %v, want syntax error at byte 6", err)
+	}
+}
+
+func TestParseDecimal_RejectsMalformedText(t *testing.T) {
+	for _, text := range []string{"", "-", "1.", ".5", "1.2.3", "+1", "1e3", "1_000"} {
+		t.Run(text, func(t *testing.T) {
+			// when
+			_, err := mvel.ParseDecimal(text)
+
+			// then
+			if !errors.Is(err, mvel.ErrSyntax) {
+				t.Fatalf(
+					"ParseDecimal(%q) error = %v, want syntax error",
+					text,
+					err,
+				)
+			}
+		})
 	}
 }
 

@@ -85,12 +85,12 @@ func validateBindings(bindings Bindings, references map[string]valueKind) error 
 				return bindingError(name, "string is not valid UTF-8")
 			}
 			if len(binding.text) > maxStringBytes {
-				return bindingError(name, "string byte limit exceeded")
+				return bindingLimitError(name, "string byte limit exceeded")
 			}
 		}
 		if kind == decimalKind {
 			if _, err := checkedDecimal(binding.decimal.value); err != nil {
-				return bindingError(name, "decimal limit exceeded")
+				return bindingLimitError(name, "decimal limit exceeded")
 			}
 		}
 	}

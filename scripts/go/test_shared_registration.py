@@ -500,7 +500,7 @@ def test_installed_workflow_contracts() -> None:
     triggers = workflow.get("on", workflow.get(True))
     assert set(triggers) == {"push"}
     assert triggers["push"]["branches"] == ["main"]
-    assert triggers["push"]["paths"] == ["libs/mvel/**", "libs/servicekit/**"]
+    assert triggers["push"]["paths"] == ["libs/mvel/**", "libs/servicekit/**", "!libs/**/*.md"]
     assert workflow["concurrency"]["cancel-in-progress"] is False
     assert workflow["env"]["RELEASE_BASE"] == "${{ github.event.before }}"
     assert workflow["env"]["RELEASE_SHA"] == "${{ github.sha }}"
@@ -570,7 +570,7 @@ def test_installed_workflow_contracts() -> None:
 
 @pytest.mark.parametrize(
     "step_name",
-    ["Generate servicekit coverage", "Upload servicekit coverage to Codecov"],
+    ["Generate shared library coverage", "Upload shared library coverage to Codecov"],
 )
 def test_shared_workflow_rejects_missing_library_coverage(tmp_path: Path, step_name: str) -> None:
     # given
@@ -584,7 +584,7 @@ def test_shared_workflow_rejects_missing_library_coverage(tmp_path: Path, step_n
     path.write_text(yaml.safe_dump(workflow))
 
     # when / then
-    with pytest.raises(SharedError, match="missing or misordered servicekit coverage"):
+    with pytest.raises(SharedError, match="missing or misordered shared library coverage"):
         registration.shared_ci_contract(tmp_path, ".github/workflows/go-pr-shared.yml")
 
 

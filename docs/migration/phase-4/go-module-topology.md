@@ -5,6 +5,10 @@
   - [Current topology](#current-topology)
   - [Supported commands and mutation boundary](#supported-commands-and-mutation-boundary)
   - [Continuous integration](#continuous-integration)
+  - [Shared library validation and release](#shared-library-validation-and-release)
+    - [Resolution and consumer registration](#resolution-and-consumer-registration)
+    - [Shared PR validation](#shared-pr-validation)
+    - [Library release](#library-release)
   - [Import and consumer policy](#import-and-consumer-policy)
   - [Onboard a module or workspace](#onboard-a-module-or-workspace)
   - [Evidence](#evidence)
@@ -116,9 +120,11 @@ through their Makefiles. The copy proof transfers no environment, lock, or helpe
 verifies those repository references and bounds every child phase and cleanup. No runtime package
 import or Go module dependency points at the scaffold or shared tooling directory.
 
-Servicekit has a separate library-only Make interface using the same formatter policy and exact
-Go/tool pins. It requires no executable, Protobuf generator, database or service-image release.
-See its [ownership, registration and release contract](../../../libs/servicekit/README.md).
+Public shared libraries ([Servicekit](../../../libs/servicekit/README.md) and
+[MVEL](../../../libs/mvel/README.md)) have separate library-only Make interfaces using the same
+formatter policy and exact Go/tool pins. They require no executable, Protobuf generator, database
+or service-image release. Their shared registration, validation and release mechanics are
+described in [Shared library validation and release](#shared-library-validation-and-release).
 
 `go-topology-test` creates local temporary repositories with no network requirement. It proves
 malformed and drifted inventory failures, workspace and replacement masking, allowed contract
@@ -208,6 +214,84 @@ obligations and checks source, lockfile and candidate identities. The empty acti
 an explicit initial state. Branch protection requires separate repository configuration; adding
 YAML does not establish it. The `go-release-lib.yml` workflow runs on library changes pushed to
 `main` and owns scoped source-tag publication and a non-draft GitHub Release marked Latest.
+
+## Shared library validation and release
+
+This section covers the repository mechanics shared by every `public-shared` library under
+`libs/`. Each library's README owns its API, owning commands and release identity.
+
+### Resolution and consumer registration
+
+Libraries resolve standalone with `GOWORK=off`, exact version requirements, checked-in checksums
+and no library replacement. Library owners and the shared workflow inspect the effective workspace
+and caller or persistent flags before setting standalone flags. Alternate manifests and library
+replacements fail. Consumers enforce exact versions and normal checksums.
+
+Topology schema 2 keeps one module inventory and adds `activeConsumers`. Servicekit's `consumers`
+allowlist and `activeConsumers` registry include Product and the scaffold; MVEL has none yet.
+Registration cross-checks requirements and imports, owner and directory identity, workflow jobs,
+unique phases and explicit Make bindings. A dependency that is still required or imported cannot be
+hidden by deleting or downgrading its record. Every active registration implements the baseline
+phase adapters plus its applicable generated, breaking, copy, integration and image phases.
+Unsupported phases fail closed.
+
+### Shared PR validation
+
+From the repository root, `go-shared-plan` takes full `PR_BASE` and `PR_HEAD` SHAs. It checks the
+complete diff, including both ends of renames and the union of base and head module roots. A
+library change selects that library's gate and every active consumer against the candidate.
+Changes to more than one service module fail before setup.
+
+`go-shared-validate` works in a verified Git extraction in a private temporary directory. It keeps
+alternate manifests only in disposable copies. A live private socket issues phase contexts, so
+normal flags or a copied context file cannot enable candidate mode. Each candidate phase records
+the selected graph before and after execution. The controller checks original manifests, source
+content and the full candidate SHA. It removes its temporary tree on success, failure and handled
+interruption; hard-killed runners require manual disposal. Candidate integration coverage is
+written to controller-owned disposable storage, never to a consumer source tree.
+
+The module work budget is 40 minutes. Child processes have 30-second progress heartbeats and a
+10-second teardown, with separate controller shutdown. The aggregate recomputes expected
+obligations and rejects missing, duplicate, unexpected, failed, cancelled, skipped or misidentified
+results. Zero consumers is explicit and does not count as adoption coverage. Plans and results are
+stored under the ignored `.work/servicekit` directory. For each selected library, the validate job
+runs the library's `coverage` target and uploads the report to Codecov under a flag named after
+its directory. **Go Main Coverage** publishes the same flags from `main`.
+
+### Library release
+
+The **Go Library Release** workflow runs when a non-Markdown change to a registered library reaches
+`main`, including a direct push. It plans the exact triggering source, compares it with the
+previous `main` revision and selects each changed library. Each library gets its own validation
+entries, Monotag tag prefix and publication job. Monotag calculates a scoped stable v1 version from
+conventional commits and that library's tags, starting at `v1.0.0`. Servicekit validates every
+active consumer in the release matrix. At most four validation jobs run at once, and publication
+jobs run one at a time.
+
+Planning and validation have read-only repository access; only publication has `contents: write`.
+One workflow-wide concurrency group serializes releases and never cancels an in-progress release.
+The workflow needs no separate approval, qualification asset, attestation, package upload,
+consumer pin edit or service-image release. Tag creation is create-if-absent with exact SHA
+read-back. A collision fails, while the same source may resume verification, and a corrected source
+uses a new version. A library's first release has a fixed version (MVEL `v1.0.0`); later releases
+require existing release history for that library.
+
+Public verification uses an empty dependency and build cache, `proxy.golang.org`,
+`sum.golang.org`, exact selected-version and source-content checks, and standalone plus
+fresh-container smoke builds. Its overall limit is 15 minutes. Proxy requests are bounded to 30
+seconds, and image cleanup has a separate 30-second budget. Only transient proxy availability is
+retried; a checksum failure is fatal. A tag may remain downloadable after a failed run, so a tag
+alone does not establish a release. The workflow then creates a non-draft GitHub Release marked
+Latest, with the same settings as Go service releases.
+
+On 2026-10-30, the serial Servicekit baseline on GitHub-hosted `ubuntu-24.04` runners with two
+active consumers took 12 min 26 s for `v0.2.2` and 13 min 27 s for `v1.0.0`, mostly validation.
+Validation is now split by module, so wall-clock time follows the slowest module in each four-job
+wave while total runner minutes still grow with every consumer. A move to a paid CI provider must
+reassess the four-job cap from measured runs.
+
+The root validation owners are `go-shared-test`, `go-shared-test-integration`,
+`go-topology-check`, `go-topology-test` and the shared Python tooling suites.
 
 ## Import and consumer policy
 

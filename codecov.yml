@@ -17,6 +17,9 @@ flag_management:
     - name: servicekit
       paths:
         - libs/servicekit/
+    - name: mvel
+      paths:
+        - libs/mvel/
     - name: product-service
       paths:
         - services/product-service/
