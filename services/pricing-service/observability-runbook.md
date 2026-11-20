@@ -280,26 +280,30 @@ if test -f "$MONITORING_EVIDENCE_DIR/prior-dashboard.absent"; then
 fi
 ```
 
-Read back both objects, then re-render the same source and require it to match the retained
-candidate byte for byte:
+Normalize the retained candidate and the live read-back to their stable source payloads, then
+require each live object to match the retained candidate:
 
 ```sh
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=client \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" -o json \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, spec}' \
+  > "$MONITORING_EVIDENCE_DIR/candidate-rule-source.json"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=client \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" -o json \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, data}' \
+  > "$MONITORING_EVIDENCE_DIR/candidate-dashboard-source.json"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
-  prometheusrule/qa-pricing-service -o yaml \
-  > "$MONITORING_EVIDENCE_DIR/applied-rule.yaml"
+  prometheusrule/qa-pricing-service -o json \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, spec}' \
+  > "$MONITORING_EVIDENCE_DIR/applied-rule-source.json"
 kubectl --context qa-insurance-hub -n qa-monitoring get \
-  configmap/qa-pricing-dashboard -o yaml \
-  > "$MONITORING_EVIDENCE_DIR/applied-dashboard.yaml"
-make --no-print-directory -C k8s \
-  prometheus-rules-render ENV_NAME=qa SVC_NAME=pricing \
-  > "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
-make --no-print-directory -C k8s \
-  grafana-dashboard-render ENV_NAME=qa SVC_NAME=pricing \
-  > "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
-cmp "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" \
-  "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
-cmp "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" \
-  "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
+  configmap/qa-pricing-dashboard -o json \
+  | jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace}, data}' \
+  > "$MONITORING_EVIDENCE_DIR/applied-dashboard-source.json"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-rule-source.json" \
+  "$MONITORING_EVIDENCE_DIR/applied-rule-source.json"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-dashboard-source.json" \
+  "$MONITORING_EVIDENCE_DIR/applied-dashboard-source.json"
 ```
 
 Then verify the live service and signals:
