@@ -30,6 +30,23 @@ def test_wrong_target_is_rejected_before_access(monkeypatch: pytest.MonkeyPatch)
         pricing.Target()
 
 
+def test_disposable_workload_namespace_does_not_redirect_resource_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    monkeypatch.setenv("DEPLOY_DATA_NS", "local-dev-all")
+    target = pricing.Target()
+
+    # when
+    target.namespace = "pricing-smoke-example"
+
+    # then
+    assert pricing.resource_environment(target)["PRICING_RESOURCE_SVC_NS"] == "local-dev-all"
+
+
 @pytest.mark.parametrize("defect", ["legacy selector", "public service", "allow Pod ingress"])
 def test_render_rejects_access_or_selector_defects(defect: str) -> None:
     # given

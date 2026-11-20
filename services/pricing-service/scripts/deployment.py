@@ -492,6 +492,7 @@ class Target:
         self.configuration = target_record(ROOT, self.record, self.environment)
         self.context = self.configuration["context"]
         self.namespace = self.configuration["namespace"]
+        self.resource_service_namespace = self.namespace
         self.data_namespace = self.configuration["dataNamespace"]
         for key, expected in (
             ("DEPLOY_CONTEXT", self.context),
@@ -702,7 +703,7 @@ def resource_environment(target: Target) -> dict[str, str]:
             "PRICING_RESOURCE_ENV": target.environment,
             "PRICING_RESOURCE_CONTEXT": target.context,
             "PRICING_RESOURCE_DATA_NS": target.data_namespace,
-            "PRICING_RESOURCE_SVC_NS": target.namespace,
+            "PRICING_RESOURCE_SVC_NS": target.resource_service_namespace,
             "PRICING_RESOURCE_CLUSTER": f"{target.environment}-postgres-pricing",
             "PRICING_RESOURCE_READER_SECRET": target.secret,
             "PRICING_RESOURCE_DB_HOST": (
