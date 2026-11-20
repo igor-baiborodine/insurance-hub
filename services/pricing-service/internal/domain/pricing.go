@@ -21,10 +21,7 @@ func NewDecimal(text string) (Decimal, error) {
 }
 
 func (value Decimal) String() string {
-	scale := -value.value.Exponent()
-	if scale < 0 {
-		scale = 0
-	}
+	scale := max(-value.value.Exponent(), 0)
 	return value.value.StringFixed(scale)
 }
 
