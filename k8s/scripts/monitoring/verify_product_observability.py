@@ -572,6 +572,99 @@ def query_results(value: Mapping[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
+def pricing_completion_streams(
+    streams: Sequence[Mapping[str, Any]], trace_id: str
+) -> list[dict[str, Any]]:
+    transports: set[str] = set()
+    for stream in streams:
+        values = stream.get("values", [])
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, list) or len(value) != 2 or not isinstance(value[1], str):
+                continue
+            try:
+                record = json.loads(value[1])
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(record, dict) or record.get("trace_id") != trace_id:
+                continue
+            if record.get("operation") != "calculate_price" or record.get("outcome") != "success":
+                continue
+            transport = record.get("transport")
+            if transport == "http" and record.get("http_status_code") == 200:
+                transports.add(transport)
+            if transport == "grpc" and record.get("rpc_status_code") == "OK":
+                transports.add(transport)
+    return list(streams) if transports == {"http", "grpc"} else []
+
+
+def trace_spans(trace: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    batches = trace.get("batches", [])
+    if not isinstance(batches, list):
+        return []
+    return [
+        span
+        for batch in batches
+        if isinstance(batch, dict)
+        for scope in batch.get("scopeSpans", batch.get("instrumentationLibrarySpans", []))
+        if isinstance(scope, dict)
+        for span in scope.get("spans", [])
+        if isinstance(span, dict)
+    ]
+
+
+def span_attribute(span: Mapping[str, Any], key: str) -> Any:
+    for attribute in span.get("attributes", []):
+        if isinstance(attribute, dict) and attribute.get("key") == key:
+            value = attribute.get("value", {})
+            if isinstance(value, dict):
+                return next(iter(value.values()), None)
+    return None
+
+
+def span_kind(span: Mapping[str, Any], kind: str) -> bool:
+    expected = {"client": {3, "3", "SPAN_KIND_CLIENT"}, "server": {2, "2", "SPAN_KIND_SERVER"}}
+    return span.get("kind") in expected[kind]
+
+
+def pricing_trace_batches(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
+    spans = trace_spans(trace)
+    by_parent: dict[str, list[Mapping[str, Any]]] = {}
+    for span in spans:
+        parent = span.get("parentSpanId")
+        if isinstance(parent, str):
+            by_parent.setdefault(parent, []).append(span)
+
+    def children(parent: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        span_id = parent.get("spanId")
+        return by_parent.get(span_id, []) if isinstance(span_id, str) else []
+
+    def calculate_rpc(span: Mapping[str, Any]) -> bool:
+        return span_attribute(span, "rpc.method") == "CalculatePrice" or str(
+            span.get("name", "")
+        ).endswith("/CalculatePrice")
+
+    for http_server in spans:
+        if http_server.get("name") != "POST /pricing/calculate" or not span_kind(
+            http_server, "server"
+        ):
+            continue
+        for rpc_client in children(http_server):
+            if not span_kind(rpc_client, "client") or not calculate_rpc(rpc_client):
+                continue
+            for rpc_server in children(rpc_client):
+                if not span_kind(rpc_server, "server") or not calculate_rpc(rpc_server):
+                    continue
+                if any(
+                    query.get("name") == "SELECT tariff" and span_kind(query, "client")
+                    for query in children(rpc_server)
+                ):
+                    batches = trace.get("batches", [])
+                    return list(batches) if isinstance(batches, list) else []
+    return []
+
+
 def wait_for(description: str, probe: Any, timeout: float = QUERY_TIMEOUT) -> Any:
     deadline = time.monotonic() + timeout
     last: Any = None
@@ -765,12 +858,10 @@ def verify_pricing_enabled_signals(
 
     def completion_streams() -> list[dict[str, Any]]:
         # A gateway quote logs one HTTP and one gRPC completion with the same trace ID.
-        streams = query_results(request_json(loki_url))
-        return streams if sum(len(stream.get("values", [])) for stream in streams) >= 2 else []
+        return pricing_completion_streams(query_results(request_json(loki_url)), trace_id)
 
     def tariff_read_batches() -> Any:
-        batches = request_json(trace_url).get("batches")
-        return batches if "SELECT tariff" in json.dumps(batches) else None
+        return pricing_trace_batches(request_json(trace_url))
 
     trace_url = f"http://127.0.0.1:{ports['tempo']}/api/traces/{trace_id}"
     logs = wait_for("correlated Pricing HTTP and gRPC completion logs", completion_streams)

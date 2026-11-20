@@ -19,6 +19,61 @@ from monitoring_assets import VerificationContract
 ASSETS_ROOT = Path(__file__).parents[2] / "observability"
 
 
+def pricing_completion(transport: str, trace_id: str = "a" * 32) -> str:
+    record = {
+        "trace_id": trace_id,
+        "operation": "calculate_price",
+        "transport": transport,
+        "outcome": "success",
+    }
+    if transport == "http":
+        record["http_status_code"] = 200
+    else:
+        record["rpc_status_code"] = "OK"
+    return json.dumps(record)
+
+
+def pricing_trace() -> dict[str, object]:
+    method = [{"key": "rpc.method", "value": {"stringValue": "CalculatePrice"}}]
+    return {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "name": "POST /pricing/calculate",
+                                "kind": "SPAN_KIND_SERVER",
+                                "spanId": "1111111111111111",
+                            },
+                            {
+                                "name": "pricing.v1.PricingService/CalculatePrice",
+                                "kind": "SPAN_KIND_CLIENT",
+                                "spanId": "2222222222222222",
+                                "parentSpanId": "1111111111111111",
+                                "attributes": method,
+                            },
+                            {
+                                "name": "pricing.v1.PricingService/CalculatePrice",
+                                "kind": "SPAN_KIND_SERVER",
+                                "spanId": "3333333333333333",
+                                "parentSpanId": "2222222222222222",
+                                "attributes": method,
+                            },
+                            {
+                                "name": "SELECT tariff",
+                                "kind": "SPAN_KIND_CLIENT",
+                                "spanId": "4444444444444444",
+                                "parentSpanId": "3333333333333333",
+                            },
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+
 class TestProductObservabilityVerification:
     def setup_method(self) -> None:
         self.assets = verifier.load_assets(ASSETS_ROOT, "qa", "product")
@@ -896,9 +951,20 @@ class TestProductObservabilityVerification:
 
         def backend(url: str) -> object:
             if "/api/traces/" in url:
-                return {"batches": [{"name": "SELECT tariff"}]}
+                return pricing_trace()
             if "/loki/" in url:
-                return {"data": {"result": [{"values": [["1", "http"], ["2", "grpc"]]}]}}
+                return {
+                    "data": {
+                        "result": [
+                            {
+                                "values": [
+                                    ["1", pricing_completion("http")],
+                                    ["2", pricing_completion("grpc")],
+                                ]
+                            }
+                        ]
+                    }
+                }
             queries.append(urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0])
             return {"data": {"result": [{"value": [0, "0" if "ALERTS" in url else "1"]}]}}
 
@@ -926,3 +992,26 @@ class TestProductObservabilityVerification:
             "correlated Pricing trace through the tariff read",
         ]
         assert all('service_instance_id="pod-uid"' in query for query in queries[:3])
+
+    def test_pricing_completion_logs_reject_duplicate_http_records(self) -> None:
+        # given
+        streams = [
+            {
+                "values": [
+                    ["1", pricing_completion("http")],
+                    ["2", pricing_completion("http")],
+                ]
+            }
+        ]
+
+        # when / then
+        assert verifier.pricing_completion_streams(streams, "a" * 32) == []
+
+    def test_pricing_trace_requires_the_connected_rpc_server_hop(self) -> None:
+        # given
+        trace = pricing_trace()
+        spans = trace["batches"][0]["scopeSpans"][0]["spans"]
+        del spans[2]
+
+        # when / then
+        assert verifier.pricing_trace_batches(trace) == []
