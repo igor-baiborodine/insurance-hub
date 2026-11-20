@@ -15,6 +15,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -38,6 +39,7 @@ ENROLLMENT_CONTEXT = "pricing-observability"
 FAILURE_TRACE_ENVIRONMENT = "PRICING_PROBE_FAILURE_TRACE_ID"
 SENTINEL_ENVIRONMENT = "PRICING_PROBE_SENTINEL"
 TLS_DIRECTORY = "/var/lib/postgresql/tls"
+CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
 TRI_REQUEST: Mapping[str, Any] = {
     "productCode": "TRI",
     "policyFrom": "2017-04-16",
@@ -167,7 +169,43 @@ def create_certificate(root: Path, openssl: str = "openssl") -> tuple[Path, Path
     return certificate, key
 
 
-def start_postgres(container: str, root: Path, certificate: Path, key: Path) -> int:
+def write_ownership(
+    path: Path | None,
+    *,
+    container_id: str,
+    process_group: int | None = None,
+) -> None:
+    if path is None:
+        return
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(
+        json.dumps({"container_id": container_id, "process_group": process_group}) + "\n",
+        encoding="ascii",
+    )
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+
+
+def remove_postgres(container_id: str) -> None:
+    removal = subprocess.run(
+        ["docker", "rm", "-f", "-v", container_id],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=alloy_runtime.teardown_timeout(15),
+        check=False,
+    )
+    if removal.returncode != 0:
+        raise ProbeError(f"could not remove disposable PostgreSQL: {container_id}")
+
+
+def start_postgres(
+    container: str,
+    root: Path,
+    certificate: Path,
+    key: Path,
+    ownership_file: Path | None,
+    owned_containers: list[str],
+) -> tuple[str, int]:
     """Start TLS PostgreSQL on a fixed loopback port that survives the outage restart."""
     environment = root / "postgres.env"
     alloy_runtime.write_protected_env_file(
@@ -184,7 +222,7 @@ def start_postgres(container: str, root: Path, certificate: Path, key: Path) -> 
         "exec docker-entrypoint.sh postgres -c ssl=on "
         f"-c ssl_cert_file={TLS_DIRECTORY}/server.crt -c ssl_key_file={TLS_DIRECTORY}/server.key"
     )
-    run(
+    container_id = run(
         [
             "docker",
             "create",
@@ -201,11 +239,15 @@ def start_postgres(container: str, root: Path, certificate: Path, key: Path) -> 
             startup,
         ]
     )
-    run(["docker", "cp", str(certificate), f"{container}:/tmp/server.crt"])
-    run(["docker", "cp", str(key), f"{container}:/tmp/server.key"])
-    run(["docker", "start", container])
-    wait_postgres(container)
-    return port
+    if not CONTAINER_ID.fullmatch(container_id):
+        raise ProbeError("Docker returned an invalid disposable PostgreSQL identity")
+    owned_containers.append(container_id)
+    write_ownership(ownership_file, container_id=container_id)
+    run(["docker", "cp", str(certificate), f"{container_id}:/tmp/server.crt"])
+    run(["docker", "cp", str(key), f"{container_id}:/tmp/server.key"])
+    run(["docker", "start", container_id])
+    wait_postgres(container_id)
+    return container_id, port
 
 
 def database_url(role: str, password: str, port: int, certificate: Path) -> str:
@@ -400,11 +442,20 @@ def execute_in_root(args: argparse.Namespace, root: Path) -> None:
     sentinel = os.environ.get(SENTINEL_ENVIRONMENT, "")
     if len(failure_trace_id) != 32 or not sentinel:
         raise ProbeError("the harness must supply the failure trace ID and synthetic sentinel")
-    container = f"ih-pricing-probe-{os.getpid()}"
+    container_name = f"ih-pricing-probe-{os.getpid()}"
+    container_id: str | None = None
+    owned_containers: list[str] = []
     process: subprocess.Popen[bytes] | None = None
     try:
         certificate, key = create_certificate(root)
-        postgres_port = start_postgres(container, root, certificate, key)
+        container_id, postgres_port = start_postgres(
+            container_name,
+            root,
+            certificate,
+            key,
+            args.ownership_file,
+            owned_containers,
+        )
         binaries = root / "bin"
         binaries.mkdir()
         run(
@@ -421,7 +472,9 @@ def execute_in_root(args: argparse.Namespace, root: Path) -> None:
             cwd=args.service_root,
             timeout=240,
         )
-        reader_url = prepare_database(args, root, binaries, container, postgres_port, certificate)
+        reader_url = prepare_database(
+            args, root, binaries, container_id, postgres_port, certificate
+        )
 
         http_port, grpc_port, health_port = free_port(), free_port(), free_port()
         calculate_url = f"http://127.0.0.1:{http_port}/pricing/calculate"
@@ -444,11 +497,14 @@ def execute_in_root(args: argparse.Namespace, root: Path) -> None:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-            if args.ownership_file is not None:
-                args.ownership_file.write_text(f"{process.pid}\n", encoding="ascii")
+            write_ownership(
+                args.ownership_file,
+                container_id=container_id,
+                process_group=process.pid,
+            )
             wait_http(readiness_url, timeout=30)
             expect_quote(calculate_url, args.trace_id, "healthy")
-            exercise_outage(container, calculate_url, readiness_url, failure_trace_id, sentinel)
+            exercise_outage(container_id, calculate_url, readiness_url, failure_trace_id, sentinel)
             expect_quote(calculate_url, secrets.token_hex(16), "recovered")
             # The metric reader exports every ten seconds. Give one full interval plus
             # the collector's one-second batch enough time before graceful shutdown.
@@ -469,18 +525,11 @@ def execute_in_root(args: argparse.Namespace, root: Path) -> None:
                     )
                 except Exception as error:
                     errors.append(error)
-            try:
-                removal = subprocess.run(
-                    ["docker", "rm", "-f", container],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=alloy_runtime.teardown_timeout(15),
-                    check=False,
-                )
-                if removal.returncode != 0:
-                    raise ProbeError(f"could not remove disposable PostgreSQL: {container}")
-            except Exception as error:
-                errors.append(error)
+            if owned_containers:
+                try:
+                    remove_postgres(owned_containers[0])
+                except Exception as error:
+                    errors.append(error)
             if errors:
                 if primary is not None:
                     primary.add_note(f"probe cleanup also failed: {errors}")

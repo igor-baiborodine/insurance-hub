@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import stat
@@ -473,11 +474,18 @@ def test_pricing_probe_rejects_a_quote_from_the_stopped_database() -> None:
 
 def test_pricing_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> None:
     # given
-    args = type("Args", (), {"ownership_file": None})()
-    observed: list[float] = []
+    ownership = tmp_path / "owned"
+    args = type("Args", (), {"ownership_file": ownership})()
+    container_id = "a" * 64
+    observed: list[tuple[list[str], float]] = []
 
-    def remove(_arguments, **kwargs):
-        observed.append(kwargs["timeout"])
+    def setup(arguments, **_kwargs):
+        if arguments[:2] == ["docker", "create"]:
+            return container_id
+        raise probe_pricing.ProbeError("setup failed")
+
+    def remove(arguments, **kwargs):
+        observed.append((list(arguments), kwargs["timeout"]))
         return subprocess.CompletedProcess([], 0)
 
     # when / then
@@ -490,14 +498,83 @@ def test_pricing_probe_docker_removal_has_a_finite_timeout(tmp_path: Path) -> No
             },
         ),
         mock.patch.object(
-            probe_pricing, "run", side_effect=probe_pricing.ProbeError("setup failed")
+            probe_pricing,
+            "create_certificate",
+            return_value=(tmp_path / "server.crt", tmp_path / "server.key"),
+        ),
+        mock.patch.object(
+            probe_pricing,
+            "run",
+            side_effect=setup,
         ),
         mock.patch.object(probe_pricing.subprocess, "run", side_effect=remove),
         pytest.raises(probe_pricing.ProbeError, match="setup failed"),
     ):
         probe_pricing.execute_in_root(args, tmp_path)
     assert len(observed) == 1
-    assert 0 < observed[0] <= 15
+    assert observed[0][0] == ["docker", "rm", "-f", "-v", container_id]
+    assert 0 < observed[0][1] <= 15
+    assert not ownership.exists()
+
+
+def test_pricing_probe_name_collision_does_not_remove_the_existing_container(
+    tmp_path: Path,
+) -> None:
+    # given
+    args = type("Args", (), {"ownership_file": tmp_path / "owned"})()
+
+    # when / then
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                probe_pricing.FAILURE_TRACE_ENVIRONMENT: "0" * 32,
+                probe_pricing.SENTINEL_ENVIRONMENT: "sentinel",
+            },
+        ),
+        mock.patch.object(
+            probe_pricing,
+            "create_certificate",
+            return_value=(tmp_path / "server.crt", tmp_path / "server.key"),
+        ),
+        mock.patch.object(
+            probe_pricing,
+            "run",
+            side_effect=probe_pricing.ProbeError("container name is already in use"),
+        ),
+        mock.patch.object(probe_pricing.subprocess, "run") as remove,
+        pytest.raises(probe_pricing.ProbeError, match="already in use"),
+    ):
+        probe_pricing.execute_in_root(args, tmp_path)
+    remove.assert_not_called()
+    assert not args.ownership_file.exists()
+
+
+def test_parent_probe_reclaims_pricing_container_by_recorded_identity(tmp_path: Path) -> None:
+    # given
+    ownership = tmp_path / "owned"
+    container_id = "b" * 64
+    ownership.write_text(
+        json.dumps({"container_id": container_id, "process_group": 4364}),
+        encoding="ascii",
+    )
+    child = mock.Mock(pid=1234, returncode=None)
+    child.communicate.side_effect = [subprocess.TimeoutExpired("probe", 1), ("", "")]
+    harness = backend_ingestion.DockerHarness("fixture", tmp_path)
+
+    # when / then
+    with (
+        mock.patch.object(backend_ingestion.subprocess, "Popen", return_value=child),
+        mock.patch.object(backend_ingestion.os, "killpg"),
+        mock.patch.object(harness, "container_exists", return_value=True),
+        mock.patch.object(harness, "command") as command,
+        pytest.raises(subprocess.TimeoutExpired),
+    ):
+        harness.probe(["probe"], ownership, service_domain="pricing", timeout=1)
+    command.assert_called_once_with(
+        ["docker", "rm", "-f", "-v", container_id],
+        timeout=15,
+    )
 
 
 @pytest.mark.parametrize(

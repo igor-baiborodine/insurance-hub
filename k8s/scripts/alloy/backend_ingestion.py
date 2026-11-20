@@ -41,6 +41,7 @@ DOCUMENT_SENSITIVE_SENTINEL = "SENTINEL-document-observability-private"
 CHAT_SENSITIVE_SENTINEL = "SENTINEL-chat-observability-private"
 PRICING_SENSITIVE_SENTINEL = "SENTINEL-pricing-observability-private"
 PRICING_FAILURE_TRACE_ID = "50350350350350350350350350350350"
+CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
 
 METRIC_IDENTITY = {
     "service_namespace": "insurance-hub",
@@ -508,18 +509,37 @@ class DockerHarness:
                             recovery_errors.append(error)
                     # The service binary has its own session; the probe records its
                     # group before readiness, allowing recovery after forced death.
+                    owned_process_group: int | None = None
+                    owned_container: str | None = None
                     if ownership_file.exists():
                         try:
-                            os.killpg(
-                                int(ownership_file.read_text(encoding="ascii")), signal.SIGKILL
-                            )
-                        except (OSError, ValueError) as error:
+                            ownership_text = ownership_file.read_text(encoding="ascii").strip()
+                            if ownership_text.startswith("{"):
+                                ownership = json.loads(ownership_text)
+                                process_group = ownership.get("process_group")
+                                container_id = ownership.get("container_id")
+                                if process_group is not None and not isinstance(process_group, int):
+                                    raise ValueError("owned process group is invalid")
+                                if not isinstance(container_id, str) or not CONTAINER_ID.fullmatch(
+                                    container_id
+                                ):
+                                    raise ValueError("owned container identity is invalid")
+                                owned_process_group = process_group
+                                owned_container = container_id
+                            else:
+                                owned_process_group = int(ownership_text)
+                            if owned_process_group is not None:
+                                os.killpg(owned_process_group, signal.SIGKILL)
+                        except (json.JSONDecodeError, OSError, TypeError, ValueError) as error:
                             if not isinstance(error, ProcessLookupError):
                                 recovery_errors.append(error)
-                    container = f"ih-{service_domain}-probe-{child.pid}"
                     try:
-                        if self.container_exists(container):
-                            self.command(["docker", "rm", "-f", container], timeout=15)
+                        if owned_container is not None and self.container_exists(owned_container):
+                            self.command(["docker", "rm", "-f", "-v", owned_container], timeout=15)
+                        elif service_domain != "pricing":
+                            container = f"ih-{service_domain}-probe-{child.pid}"
+                            if self.container_exists(container):
+                                self.command(["docker", "rm", "-f", container], timeout=15)
                     except Exception as error:
                         recovery_errors.append(error)
             except Exception as cleanup_error:
