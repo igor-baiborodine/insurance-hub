@@ -546,6 +546,7 @@ def test_policy_probe_allows_only_service_http() -> None:
     def kubectl(*args: str, input_text: str | None = None, **_kwargs: object) -> str:
         if args[0] == "create":
             created.update(json.loads(input_text or "{}"))
+            created["status"] = {"phase": "Succeeded"}
         elif args[0] == "logs":
             return "\n".join(
                 (

@@ -71,6 +71,14 @@ PROBE_IMAGE = (
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
 PROBE_OWNER_LABEL = "insurance-hub.io/pricing-denial-owner"
+# curl reports a completed TCP handshake as either message, depending on its version.
+PROBE_SHELL_FUNCTIONS = (
+    'connected() { case "$1" in *"Connected to"*|*"Established connection"*) return 0;; esac; '
+    "return 1; }; "
+    "denied() { status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
+    '"telnet://$1" 2>&1) || status=$?; ! connected "$output" '
+    '&& { [ "$status" = 7 ] || [ "$status" = 28 ]; }; }; '
+)
 require = lifecycle.require
 
 
@@ -1110,20 +1118,20 @@ def verify(target: Target, items: dict[str, dict]) -> None:
     require(after == before, "Pricing protected state changed during verification")
 
 
-def verify_denial(target: Target, pod: dict) -> None:
-    name = "pricing-access-denied"
+def run_probe(
+    target: Target, name: str, description: str, labels: dict[str, str], args: list[str]
+) -> list[str]:
     token = uuid.uuid4().hex
     require(
         not target.json("get", "pod", name, "--ignore-not-found"), "Pricing probe name is occupied"
     )
-    ip = str(IPv4Address(pod["status"]["podIP"]))
     probe = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
             "name": name,
             "namespace": target.namespace,
-            "labels": {PROBE_OWNER_LABEL: token},
+            "labels": {**labels, PROBE_OWNER_LABEL: token},
         },
         "spec": {
             "restartPolicy": "Never",
@@ -1146,208 +1154,7 @@ def verify_denial(target: Target, pod: dict) -> None:
                         "capabilities": {"drop": ["ALL"]},
                     },
                     "command": ["sh", "-ec"],
-                    "args": [
-                        "address=$1; shift; for port do "
-                        "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
-                        '"telnet://$address:$port" 2>&1) || status=$?; '
-                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
-                        '[ "$status" = 7 ] || [ "$status" = 28 ]; '
-                        'echo "Pricing port $port denied"; done',
-                        "probe",
-                        ip,
-                        *(str(port) for port in PORTS.values()),
-                    ],
-                }
-            ],
-        },
-    }
-    try:
-        target.kubectl("create", "-f", "-", input_text=json.dumps(probe))
-        try:
-            target.kubectl(
-                "wait",
-                "--for=jsonpath={.status.phase}=Succeeded",
-                f"pod/{name}",
-                "--timeout=90s",
-                timeout=100,
-            )
-        except CommandError:
-            print(target.kubectl("logs", name), file=sys.stderr)
-            raise
-        observed = target.kubectl("logs", name).splitlines()
-        require(
-            observed == [f"Pricing port {port} denied" for port in PORTS.values()],
-            "Pricing workload denial result differs",
-        )
-        print("\n".join(observed))
-    finally:
-        primary_failure = sys.exception()
-        try:
-            actual = target.json("get", "pod", name, "--ignore-not-found")
-            if actual:
-                require(
-                    actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
-                    "Pricing denial probe ownership differs",
-                )
-                target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
-        except Exception as cleanup_error:
-            if primary_failure is None:
-                raise
-            print(
-                f"pricing-deployment: denial probe cleanup failed: {cleanup_error}", file=sys.stderr
-            )
-
-
-def verify_policy_access(target: Target, pod: dict) -> None:
-    name = "pricing-policy-access"
-    token = uuid.uuid4().hex
-    require(
-        not target.json("get", "pod", name, "--ignore-not-found"), "Pricing probe name is occupied"
-    )
-    ip = str(IPv4Address(pod["status"]["podIP"]))
-    probe = {
-        "apiVersion": "v1",
-        "kind": "Pod",
-        "metadata": {
-            "name": name,
-            "namespace": target.namespace,
-            "labels": {**LEGACY_POLICY_SELECTOR, PROBE_OWNER_LABEL: token},
-        },
-        "spec": {
-            "restartPolicy": "Never",
-            "activeDeadlineSeconds": 90,
-            "automountServiceAccountToken": False,
-            "enableServiceLinks": False,
-            "securityContext": {
-                "runAsNonRoot": True,
-                "runAsUser": 65532,
-                "runAsGroup": 65532,
-                "seccompProfile": {"type": "RuntimeDefault"},
-            },
-            "containers": [
-                {
-                    "name": "probe",
-                    "image": PROBE_IMAGE,
-                    "securityContext": {
-                        "allowPrivilegeEscalation": False,
-                        "readOnlyRootFilesystem": True,
-                        "capabilities": {"drop": ["ALL"]},
-                    },
-                    "command": ["sh", "-ec"],
-                    "args": [
-                        "service=$1; address=$2; request=$3; expected=$4; shift 4; "
-                        "response=$(curl --silent --show-error --fail --connect-timeout 2 "
-                        "--max-time 5 -H 'Content-Type: application/json' --data \"$request\" "
-                        '"http://$service:8080/pricing/calculate"); '
-                        '[ "$response" = "$expected" ]; echo "Pricing Policy HTTP access passed"; '
-                        "for port do status=0; output=$(curl --verbose --connect-timeout 2 "
-                        ' --max-time 3 "telnet://$address:$port" 2>&1) || status=$?; '
-                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
-                        '[ "$status" = 7 ] || [ "$status" = 28 ]; '
-                        'echo "Pricing Policy port $port denied"; done',
-                        "probe",
-                        target.deployment,
-                        ip,
-                        TRI_HTTP_REQUEST.decode(),
-                        TRI_HTTP_RESPONSE.decode(),
-                        str(PORTS["grpc"]),
-                        str(PORTS["management"]),
-                    ],
-                }
-            ],
-        },
-    }
-    try:
-        target.kubectl("create", "-f", "-", input_text=json.dumps(probe))
-        target.kubectl(
-            "wait",
-            "--for=jsonpath={.status.phase}=Succeeded",
-            f"pod/{name}",
-            "--timeout=90s",
-            timeout=100,
-        )
-        observed = target.kubectl("logs", name).splitlines()
-        require(
-            observed
-            == [
-                "Pricing Policy HTTP access passed",
-                f"Pricing Policy port {PORTS['grpc']} denied",
-                f"Pricing Policy port {PORTS['management']} denied",
-            ],
-            "Pricing Policy access result differs",
-        )
-        print("\n".join(observed))
-    finally:
-        primary_failure = sys.exception()
-        try:
-            actual = target.json("get", "pod", name, "--ignore-not-found")
-            if actual:
-                require(
-                    actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
-                    "Pricing Policy probe ownership differs",
-                )
-                target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
-        except Exception as cleanup_error:
-            if primary_failure is None:
-                raise
-            print(
-                f"pricing-deployment: Policy probe cleanup failed: {cleanup_error}", file=sys.stderr
-            )
-
-
-def verify_go_policy_access(target: Target, pod: dict) -> None:
-    name = "pricing-go-policy-access"
-    token = uuid.uuid4().hex
-    require(
-        not target.json("get", "pod", name, "--ignore-not-found"), "Pricing probe name is occupied"
-    )
-    ip = str(IPv4Address(pod["status"]["podIP"]))
-    probe = {
-        "apiVersion": "v1",
-        "kind": "Pod",
-        "metadata": {
-            "name": name,
-            "namespace": target.namespace,
-            "labels": {**GO_POLICY_SELECTOR, PROBE_OWNER_LABEL: token},
-        },
-        "spec": {
-            "restartPolicy": "Never",
-            "activeDeadlineSeconds": 90,
-            "automountServiceAccountToken": False,
-            "enableServiceLinks": False,
-            "securityContext": {
-                "runAsNonRoot": True,
-                "runAsUser": 65532,
-                "runAsGroup": 65532,
-                "seccompProfile": {"type": "RuntimeDefault"},
-            },
-            "containers": [
-                {
-                    "name": "probe",
-                    "image": PROBE_IMAGE,
-                    "securityContext": {
-                        "allowPrivilegeEscalation": False,
-                        "readOnlyRootFilesystem": True,
-                        "capabilities": {"drop": ["ALL"]},
-                    },
-                    "command": ["sh", "-ec"],
-                    "args": [
-                        "service=$1; address=$2; "
-                        "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
-                        '"telnet://$service:9090" 2>&1) || status=$?; '
-                        'case "$output" in *"Connected to"*|*"Established connection"*) ;; *) '
-                        'echo "Pricing Go Policy gRPC probe failed: $output" >&2; exit 1;; esac; '
-                        'echo "Pricing Go Policy gRPC access passed"; '
-                        'for endpoint in "$service:8080" "$address:8081"; do '
-                        "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
-                        '"telnet://$endpoint" 2>&1) || status=$?; '
-                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
-                        '[ "$status" = 7 ] || [ "$status" = 28 ]; '
-                        'echo "Pricing Go Policy $endpoint denied"; done',
-                        "probe",
-                        target.deployment,
-                        ip,
-                    ],
+                    "args": [PROBE_SHELL_FUNCTIONS + args[0], "probe", *args[1:]],
                 }
             ],
         },
@@ -1364,19 +1171,9 @@ def verify_go_policy_access(target: Target, pod: dict) -> None:
         logs = target.kubectl("logs", name)
         require(
             actual.get("status", {}).get("phase") == "Succeeded",
-            f"Pricing Go Policy probe failed: {logs}",
+            f"Pricing {description} probe failed: {logs}",
         )
-        observed = logs.splitlines()
-        require(
-            observed
-            == [
-                "Pricing Go Policy gRPC access passed",
-                f"Pricing Go Policy {target.deployment}:{PORTS['http']} denied",
-                f"Pricing Go Policy {ip}:{PORTS['management']} denied",
-            ],
-            "Pricing Go Policy access result differs",
-        )
-        print("\n".join(observed))
+        return logs.splitlines()
     finally:
         primary_failure = sys.exception()
         try:
@@ -1384,16 +1181,104 @@ def verify_go_policy_access(target: Target, pod: dict) -> None:
             if actual:
                 require(
                     actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
-                    "Pricing Go Policy probe ownership differs",
+                    f"Pricing {description} probe ownership differs",
                 )
                 target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
         except Exception as cleanup_error:
             if primary_failure is None:
                 raise
             print(
-                f"pricing-deployment: Go Policy probe cleanup failed: {cleanup_error}",
+                f"pricing-deployment: {description} probe cleanup failed: {cleanup_error}",
                 file=sys.stderr,
             )
+
+
+def verify_denial(target: Target, pod: dict) -> None:
+    ip = str(IPv4Address(pod["status"]["podIP"]))
+    observed = run_probe(
+        target,
+        "pricing-access-denied",
+        "denial",
+        {},
+        [
+            'address=$1; shift; for port do denied "$address:$port" || exit 1; '
+            'echo "Pricing port $port denied"; done',
+            ip,
+            *(str(port) for port in PORTS.values()),
+        ],
+    )
+    require(
+        observed == [f"Pricing port {port} denied" for port in PORTS.values()],
+        "Pricing workload denial result differs",
+    )
+    print("\n".join(observed))
+
+
+def verify_policy_access(target: Target, pod: dict) -> None:
+    ip = str(IPv4Address(pod["status"]["podIP"]))
+    observed = run_probe(
+        target,
+        "pricing-policy-access",
+        "Policy",
+        LEGACY_POLICY_SELECTOR,
+        [
+            "service=$1; address=$2; request=$3; expected=$4; shift 4; "
+            "response=$(curl --silent --show-error --fail --connect-timeout 2 "
+            "--max-time 5 -H 'Content-Type: application/json' --data \"$request\" "
+            '"http://$service:8080/pricing/calculate"); '
+            '[ "$response" = "$expected" ]; echo "Pricing Policy HTTP access passed"; '
+            'for port do denied "$address:$port" || exit 1; '
+            'echo "Pricing Policy port $port denied"; done',
+            target.deployment,
+            ip,
+            TRI_HTTP_REQUEST.decode(),
+            TRI_HTTP_RESPONSE.decode(),
+            str(PORTS["grpc"]),
+            str(PORTS["management"]),
+        ],
+    )
+    require(
+        observed
+        == [
+            "Pricing Policy HTTP access passed",
+            f"Pricing Policy port {PORTS['grpc']} denied",
+            f"Pricing Policy port {PORTS['management']} denied",
+        ],
+        "Pricing Policy access result differs",
+    )
+    print("\n".join(observed))
+
+
+def verify_go_policy_access(target: Target, pod: dict) -> None:
+    ip = str(IPv4Address(pod["status"]["podIP"]))
+    observed = run_probe(
+        target,
+        "pricing-go-policy-access",
+        "Go Policy",
+        GO_POLICY_SELECTOR,
+        [
+            "service=$1; address=$2; "
+            "output=$(curl --verbose --connect-timeout 2 --max-time 3 "
+            '"telnet://$service:9090" 2>&1) || true; '
+            'connected "$output" || { '
+            'echo "Pricing Go Policy gRPC probe failed: $output" >&2; exit 1; }; '
+            'echo "Pricing Go Policy gRPC access passed"; '
+            'for endpoint in "$service:8080" "$address:8081"; do '
+            'denied "$endpoint" || exit 1; echo "Pricing Go Policy $endpoint denied"; done',
+            target.deployment,
+            ip,
+        ],
+    )
+    require(
+        observed
+        == [
+            "Pricing Go Policy gRPC access passed",
+            f"Pricing Go Policy {target.deployment}:{PORTS['http']} denied",
+            f"Pricing Go Policy {ip}:{PORTS['management']} denied",
+        ],
+        "Pricing Go Policy access result differs",
+    )
+    print("\n".join(observed))
 
 
 def main() -> int:
