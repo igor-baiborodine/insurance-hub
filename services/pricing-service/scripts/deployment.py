@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service.configuration import service_record, target_record
 from scripts.go.service.tooling_contracts import (
