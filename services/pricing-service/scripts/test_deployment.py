@@ -48,7 +48,10 @@ def test_disposable_workload_namespace_does_not_redirect_resource_inspection(
     assert pricing.resource_environment(target)["PRICING_RESOURCE_SVC_NS"] == "local-dev-all"
 
 
-@pytest.mark.parametrize("defect", ["legacy selector", "public service", "allow Pod ingress"])
+@pytest.mark.parametrize(
+    "defect",
+    ["legacy selector", "public service", "broad Policy ingress", "exposed management"],
+)
 def test_render_rejects_access_or_selector_defects(defect: str) -> None:
     # given
     items = pricing.validate_render("qa", pricing.render("qa"))
@@ -58,13 +61,154 @@ def test_render_rejects_access_or_selector_defects(defect: str) -> None:
             "app.kubernetes.io/component": "api",
         }
     elif defect == "public service":
-        items["Service"] = {"kind": "Service", "spec": {"type": "LoadBalancer"}}
-    else:
+        items["Service"]["spec"]["type"] = "LoadBalancer"
+    elif defect == "broad Policy ingress":
         items["NetworkPolicy"]["spec"]["ingress"] = [{}]
+    else:
+        items["Service"]["spec"]["ports"].append(
+            {
+                "name": "management",
+                "port": 8081,
+                "targetPort": "management",
+                "protocol": "TCP",
+            }
+        )
 
     # when / then
     with pytest.raises(DeploymentError):
         pricing.validate_render("qa", yaml.safe_dump_all(items.values()))
+
+
+def test_render_exposes_java_http_and_go_policy_grpc() -> None:
+    # when
+    items = pricing.validate_render("qa", pricing.render("qa"))
+
+    # then
+    assert items["ConfigMap"]["data"]["HTTP_ADDR"] == "0.0.0.0:8080"
+    assert items["ConfigMap"]["data"]["GRPC_ADDR"] == "0.0.0.0:9090"
+    assert items["Service"]["spec"] == {
+        "type": "ClusterIP",
+        "selector": pricing.SELECTOR,
+        "ports": [
+            {"name": "http", "port": 8080, "targetPort": "http", "protocol": "TCP"},
+            {"name": "grpc", "port": 9090, "targetPort": "grpc", "protocol": "TCP"},
+        ],
+    }
+    assert items["NetworkPolicy"]["spec"]["ingress"] == [
+        {
+            "from": [{"podSelector": {"matchLabels": pricing.LEGACY_POLICY_SELECTOR}}],
+            "ports": [{"port": 8080, "protocol": "TCP"}],
+        },
+        {
+            "from": [{"podSelector": {"matchLabels": pricing.GO_POLICY_SELECTOR}}],
+            "ports": [{"port": 9090, "protocol": "TCP"}],
+        },
+    ]
+
+
+def test_live_service_rejects_external_exposure() -> None:
+    # given
+    desired = pricing.validate_render("qa", pricing.render("qa"))["Service"]["spec"]
+    exposed = {**desired, "clusterIP": "10.96.0.10", "externalIPs": ["192.0.2.10"]}
+    private = {**desired, "clusterIP": "10.96.0.10"}
+
+    # when
+    exposed_matches = pricing.live_service_matches(exposed, desired)
+    private_matches = pricing.live_service_matches(private, desired)
+
+    # then
+    assert not exposed_matches
+    assert private_matches
+
+
+@pytest.mark.parametrize(
+    ("kind", "item"),
+    [
+        (
+            "ingresses.networking.k8s.io",
+            {
+                "metadata": {"namespace": "qa-svc"},
+                "spec": {
+                    "rules": [
+                        {"http": {"paths": [{"backend": {"service": {"name": "qa-pricing-api"}}}]}}
+                    ]
+                },
+            },
+        ),
+        (
+            "httproutes.gateway.networking.k8s.io",
+            {
+                "metadata": {"namespace": "qa-svc"},
+                "spec": {"rules": [{"backendRefs": [{"name": "qa-pricing-api"}]}]},
+            },
+        ),
+        (
+            "grpcroutes.gateway.networking.k8s.io",
+            {
+                "metadata": {"namespace": "qa-svc"},
+                "spec": {"rules": [{"backendRefs": [{"name": "qa-pricing-api"}]}]},
+            },
+        ),
+    ],
+)
+def test_public_route_reference_is_exact(kind: str, item: dict) -> None:
+    assert pricing.route_references_service(kind, item, "qa-pricing-api", "qa-svc")
+    assert not pricing.route_references_service(kind, item, "qa-pricing-api-shadow", "qa-svc")
+    assert not pricing.route_references_service(kind, item, "qa-pricing-api", "other-svc")
+
+
+def test_http_route_reference_honors_explicit_backend_namespace() -> None:
+    # given
+    route = {
+        "metadata": {"namespace": "gateway"},
+        "spec": {"rules": [{"backendRefs": [{"name": "qa-pricing-api", "namespace": "qa-svc"}]}]},
+    }
+
+    # when
+    referenced = pricing.route_references_service(
+        "httproutes.gateway.networking.k8s.io", route, "qa-pricing-api", "qa-svc"
+    )
+
+    # then
+    assert referenced
+
+
+def test_effective_route_scan_rejects_pricing_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    target = pricing.Target.__new__(pricing.Target)
+    target.context = "qa-insurance-hub"
+    target.namespace = "qa-svc"
+    target.deployment = "qa-pricing-api"
+    target.kubectl_binary = "kubectl"
+    target.template_labels = pricing.SELECTOR
+    target.json = lambda *_args, **_kwargs: {
+        "items": [
+            {
+                "metadata": {"name": target.deployment},
+                "spec": {"selector": pricing.SELECTOR},
+            }
+        ]
+    }
+
+    def run(argv: list[str], **_kwargs: object) -> str:
+        if "api-resources" in argv:
+            return "httproutes.gateway.networking.k8s.io\n"
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "metadata": {"namespace": target.namespace},
+                        "spec": {"rules": [{"backendRefs": [{"name": target.deployment}]}]},
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(pricing, "run", run)
+
+    # when / then
+    with pytest.raises(DeploymentError, match="public route references Pricing"):
+        pricing.check_requested_route(target)
 
 
 def test_local_egress_rejects_broad_dns() -> None:
@@ -384,6 +528,95 @@ def test_denial_cleanup_preserves_primary_error(
     with pytest.raises(DeploymentError, match="probe creation failed"):
         pricing.verify_denial(target, {"status": {"podIP": "192.0.2.10"}})
     assert "cleanup failed: Pricing denial probe ownership differs" in capsys.readouterr().err
+
+
+def test_policy_probe_allows_only_service_http() -> None:
+    # given
+    target = pricing.Target.__new__(pricing.Target)
+    target.namespace = "qa-svc"
+    target.deployment = "qa-pricing-api"
+    created: dict = {}
+    deleted: list[str] = []
+
+    def inspect(*_args: str, **_kwargs: object) -> dict:
+        if not created:
+            return {}
+        return created
+
+    def kubectl(*args: str, input_text: str | None = None, **_kwargs: object) -> str:
+        if args[0] == "create":
+            created.update(json.loads(input_text or "{}"))
+            created["status"] = {"phase": "Succeeded"}
+        elif args[0] == "logs":
+            return "\n".join(
+                (
+                    "Pricing Policy HTTP access passed",
+                    "Pricing Policy port 9090 denied",
+                    "Pricing Policy port 8081 denied",
+                )
+            )
+        elif args[0] == "delete":
+            deleted.append(args[2])
+        return ""
+
+    target.json = inspect
+    target.kubectl = kubectl
+
+    # when
+    pricing.verify_policy_access(target, {"status": {"podIP": "192.0.2.10"}})
+
+    # then
+    labels = created["metadata"]["labels"]
+    assert pricing.LEGACY_POLICY_SELECTOR.items() <= labels.items()
+    assert "Established connection" in created["spec"]["containers"][0]["args"][0]
+    assert created["spec"]["containers"][0]["args"][-2:] == ["9090", "8081"]
+    assert deleted == ["pricing-policy-access"]
+
+
+def test_go_policy_probe_allows_only_service_grpc() -> None:
+    # given
+    target = pricing.Target.__new__(pricing.Target)
+    target.namespace = "qa-svc"
+    target.deployment = "qa-pricing-api"
+    created: dict = {}
+    deleted: list[str] = []
+
+    def inspect(*_args: str, **_kwargs: object) -> dict:
+        if not created:
+            return {}
+        return created
+
+    def kubectl(*args: str, input_text: str | None = None, **_kwargs: object) -> str:
+        if args[0] == "create":
+            created.update(json.loads(input_text or "{}"))
+            created["status"] = {"phase": "Succeeded"}
+        elif args[0] == "logs":
+            return "\n".join(
+                (
+                    "Pricing Go Policy gRPC access passed",
+                    "Pricing Go Policy qa-pricing-api:8080 denied",
+                    "Pricing Go Policy 192.0.2.10:8081 denied",
+                )
+            )
+        elif args[0] == "delete":
+            deleted.append(args[2])
+        return ""
+
+    target.json = inspect
+    target.kubectl = kubectl
+
+    # when
+    pricing.verify_go_policy_access(target, {"status": {"podIP": "192.0.2.10"}})
+
+    # then
+    labels = created["metadata"]["labels"]
+    assert pricing.GO_POLICY_SELECTOR.items() <= labels.items()
+    assert "Established connection" in created["spec"]["containers"][0]["args"][0]
+    assert created["spec"]["containers"][0]["args"][-2:] == [
+        "qa-pricing-api",
+        "192.0.2.10",
+    ]
+    assert deleted == ["pricing-go-policy-access"]
 
 
 @pytest.mark.parametrize("error, status", [(KeyboardInterrupt, 130), (pricing.Terminated, 143)])

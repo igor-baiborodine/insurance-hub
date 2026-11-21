@@ -4,6 +4,7 @@
 - [Pricing service deployment](#pricing-service-deployment)
   - [Candidate checks](#candidate-checks)
   - [Direct local-dev](#direct-local-dev)
+    - [Fresh local-dev installation](#fresh-local-dev-installation)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke](#private-smoke)
   - [Stop conditions and recovery](#stop-conditions-and-recovery)
@@ -14,12 +15,15 @@
 # Pricing service deployment
 
 Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Go Pricing privately
-serves PostgreSQL-backed quotes. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081
-for kubelet health. Operators use a loopback-bound Kubernetes API port-forward. The workload has no
-Kubernetes Service, ingress route or workload token. The API receives only the Pricing reader
-Secret and its CA; migration and seed credentials are mounted only into the retained
-administration Job. For monitoring assets, signal investigation and their restoration, use the
-[observability runbook](observability-runbook.md).
+serves PostgreSQL-backed quotes. Its cluster-internal `<environment>-pricing-api` Service exposes
+HTTP port 8080 to Pods with the Java Policy API labels and gRPC port 9090 to Pods with the reserved
+Go Policy API labels in the same namespace. Each caller identity is limited to its own transport.
+Health remains available only on Pod port 8081 for kubelet probes. No Ingress, HTTPRoute or
+GRPCRoute may reference the Service. Operators use a loopback-bound Kubernetes API port-forward
+for direct verification. The workload has no service-account token. The API receives only the
+Pricing reader Secret and its CA; migration and seed credentials are mounted only into the
+retained administration Job. For monitoring assets, signal investigation and their restoration,
+use the [observability runbook](observability-runbook.md).
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
@@ -74,6 +78,69 @@ make go-svc-deploy-status SVC_NAME=pricing
 make go-svc-deploy-verify SVC_NAME=pricing
 ```
 
+### Fresh local-dev installation
+
+Issue 412 uses one authorized maintenance window to discard the shared local-dev Pricing database
+and reconstruct only the reviewed baseline. There is no backup. Java Pricing and Policy pricing
+are unavailable during this procedure. Keep Java Pricing quiesced until Go migration and seeding
+have completed. Do not use this procedure for QA.
+
+Before the window, record the exact workload, initialization Job, CNPG cluster, PVCs, database
+consumers, current Policy destination, image identities and a sanitized tariff summary. Confirm
+that only Java and Go Pricing consume `local-dev-postgres-pricing`. Stage the reviewed Go image and
+Policy configuration first. These inspection commands do not authorize the later deletions.
+
+```bash
+export DEPLOY_ENV=local-dev DEPLOY_CONTEXT=kind-local-dev-insurance-hub
+export DEPLOY_SVC_NS=local-dev-all DEPLOY_DATA_NS=local-dev-all
+kubectl config use-context "$DEPLOY_CONTEXT"
+make go-svc-deploy-preflight SVC_NAME=pricing
+make -C services/pricing-service resource-inspect
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get \
+  deployment/local-dev-pricing-api deployment/local-dev-pricing-api-legacy \
+  job/local-dev-pricing-init cluster.postgresql.cnpg.io/local-dev-postgres-pricing \
+  --ignore-not-found -o wide
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get pvc \
+  -l cnpg.io/cluster=local-dev-postgres-pricing -o wide
+```
+
+After authorization for the observed inventory and permanent data loss, quiesce Java Pricing,
+remove the old Go resources and initialization Job, then purge the old CNPG cluster and its
+bootstrap Secret. Wait until the old cluster and PVC identities are absent before provisioning.
+
+```bash
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all scale \
+  deployment/local-dev-pricing-api-legacy --replicas=0
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete \
+  -k k8s/overlays/local-dev/svc/pricing/administration --ignore-not-found
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete \
+  -k k8s/overlays/local-dev/svc/pricing --ignore-not-found
+make -C k8s postgres-svc-purge SVC_NAME=pricing
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get \
+  cluster.postgresql.cnpg.io/local-dev-postgres-pricing --ignore-not-found
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get pvc \
+  -l cnpg.io/cluster=local-dev-postgres-pricing
+```
+
+Create a new protected bootstrap-password file outside the repository, provision the CNPG cluster,
+and wait for a new cluster and storage identity. Remove the password file through the operator's
+normal protected-file procedure after the Secret owner has consumed it.
+
+```bash
+make -C k8s postgres-svc-secret-create SVC_NAME=pricing \
+  PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>
+make -C k8s postgres-svc-deploy SVC_NAME=pricing
+make -C k8s postgres-svc-status SVC_NAME=pricing
+```
+
+Set the local-dev resource variables from the table below. Run `resource-inspect`, then the
+explicitly confirmed `resource-ensure` and `resource-verify`. The fresh target must have a new CA,
+target marker and separate reader, migrator and seeder credentials before deployment. Continue
+with the guarded local image load and deployment above. Accept the installation only after the
+retained Job proves migration before seed, migration status is `version=1`, first seed reports
+`inserted=4 existing=0`, and TRI, HSI, FAI and CAR match the reviewed order. Preserve the first
+failed Job or command observation before an explicit retry.
+
 ## Flux-owned QA
 
 The [release workflow](../../.github/workflows/go-release-svc.yml) builds once, pushes the
@@ -84,6 +151,12 @@ target-guarded migrator first and seeder second with `backoffLimit: 0`, bounded 
 retained failure evidence. Inspect a failed Job and prepare an explicit next attempt; do not delete
 or automatically retry it. The stable API owner depends on that exact successful attempt. Keep
 image source and Flux configuration commits separate.
+
+The release workflow starts automatically only for a `main` push that changes Pricing build inputs.
+The QA bundle pins manifests to the release source commit, so a manifest-only change, such as the
+private Policy Service and NetworkPolicy from issue 412, reaches QA only through a new release
+whose source commit contains it. Start that release manually through the generic Go service
+release dispatch, delivered separately, then qualify it as below.
 
 From the checkout of the applied release configuration, set `DEPLOY_IMAGE_SOURCE_REVISION`
 and `DEPLOY_SOURCE_REVISION` to the full release source commit recorded in the bundle's
@@ -132,9 +205,11 @@ kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" port-forward --address 1
   "pod/$PRICING_POD" 18080:8080 19090:9090 18081:8081
 ```
 
-With explicit authorization for the temporary probe Pod, run
+With explicit authorization for the temporary probe Pods, run
 `make go-svc-deploy-verify SVC_NAME=pricing DEPLOY_DENIAL_PROBE=1`. It also checks that
-an ordinary workload cannot open any Pricing port and removes its own probe Pod.
+an ordinary workload cannot open any Pricing port, a Policy-labeled Pod can call the Service over
+HTTP but cannot open gRPC or management, and a reserved Go Policy-labeled Pod can open Service
+gRPC but cannot open HTTP or management. It removes all three probe Pods.
 
 In another terminal, use bounded requests against the loopback ports.
 
@@ -156,10 +231,12 @@ request returns `{"code":3,"message":"invalid request","details":[]}` followed b
 The generated direct client must receive exact strings `78`, `26` and `52`; the verifier
 requires one matching structured test run and pass event.
 
-Local-dev permits only TCP and UDP 53 to kube-dns and PostgreSQL 5432 to the selected local Pricing
-cluster. QA permits the same exact database path plus OTLP/gRPC to the selected Alloy Pods. The API
-mounts only `database-url` and `ca.crt` from the environment reader Secret. Inspect the six identity
-fields in the Pricing startup record and verify corresponding
+Both environments permit HTTP ingress only from the same-namespace Java Policy API labels
+`policy-api-legacy`/`api` and gRPC ingress only from the reserved same-namespace Go Policy labels
+`policy-api`/`api`. Local-dev permits only TCP and UDP 53 to kube-dns and PostgreSQL 5432 to the
+selected local Pricing cluster. QA permits the same exact database path plus OTLP/gRPC to the
+selected Alloy Pods. The API mounts only `database-url` and `ca.crt` from the environment reader
+Secret. Inspect the six identity fields in the Pricing startup record and verify corresponding
 telemetry by `service.name=pricing-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
