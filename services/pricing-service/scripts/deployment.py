@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service.configuration import service_record, target_record
 from scripts.go.service.tooling_contracts import (
@@ -29,6 +30,14 @@ from scripts.python.process_runner import CommandError, run_command
 
 ROOT = Path(os.environ.get("INSURANCE_HUB_ROOT", Path(__file__).resolve().parents[3])).resolve()
 SELECTOR = {"app.kubernetes.io/name": "pricing-api", "app.kubernetes.io/component": "api"}
+LEGACY_POLICY_SELECTOR = {
+    "app.kubernetes.io/name": "policy-api-legacy",
+    "app.kubernetes.io/component": "api",
+}
+GO_POLICY_SELECTOR = {
+    "app.kubernetes.io/name": "policy-api",
+    "app.kubernetes.io/component": "api",
+}
 VERSION_LABEL = "app.kubernetes.io/version"
 PLACEHOLDER = "git-000000000000"
 PORTS = {"http": 8080, "grpc": 9090, "management": 8081}
@@ -116,13 +125,38 @@ def expected_policy(environment: str) -> dict:
     return {
         "podSelector": {"matchLabels": SELECTOR},
         "policyTypes": ["Ingress", "Egress"],
-        "ingress": [],
+        "ingress": [
+            {
+                "from": [{"podSelector": {"matchLabels": LEGACY_POLICY_SELECTOR}}],
+                "ports": [{"port": PORTS["http"], "protocol": "TCP"}],
+            },
+            {
+                "from": [{"podSelector": {"matchLabels": GO_POLICY_SELECTOR}}],
+                "ports": [{"port": PORTS["grpc"], "protocol": "TCP"}],
+            },
+        ],
         "egress": egress,
     }
 
 
 def policy_spec(spec: dict) -> dict:
     return {"ingress": [], "egress": [], **spec}
+
+
+def live_service_matches(actual: dict, desired: dict) -> bool:
+    exposure_fields = (
+        "externalIPs",
+        "externalName",
+        "externalTrafficPolicy",
+        "healthCheckNodePort",
+        "loadBalancerIP",
+        "loadBalancerSourceRanges",
+    )
+    return (
+        {key: actual.get(key) for key in ("type", "selector", "ports")} == desired
+        and actual.get("clusterIP") not in {None, "", "None"}
+        and not any(actual.get(field) for field in exposure_fields)
+    )
 
 
 def render(environment: str) -> str:
@@ -150,12 +184,13 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         "ConfigMap": "pricing-config",
         "Deployment": "pricing-api",
         "NetworkPolicy": "pricing-api",
+        "Service": "pricing-api",
     }
     require(
         len(documents) == len(kinds)
         and all(isinstance(item, dict) for item in documents)
         and {item.get("kind") for item in documents} == kinds.keys(),
-        "Pricing render must contain exactly its Deployment, ConfigMap and NetworkPolicy",
+        "Pricing render must contain exactly its Deployment, ConfigMap, NetworkPolicy and Service",
     )
     items = {item["kind"]: item for item in documents}
     for kind, suffix in kinds.items():
@@ -286,8 +321,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     expected_data = {
         "SERVICE_NAME": "pricing-service",
         "DEPLOYMENT_ENVIRONMENT": environment,
-        "HTTP_ADDR": "127.0.0.1:8080",
-        "GRPC_ADDR": "127.0.0.1:9090",
+        "HTTP_ADDR": "0.0.0.0:8080",
+        "GRPC_ADDR": "0.0.0.0:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
         "DB_MAX_CONNS": "8",
         "DB_CONNECT_TIMEOUT": "3s",
@@ -340,7 +375,29 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         )
     require(
         policy_spec(items["NetworkPolicy"]["spec"]) == expected_policy(environment),
-        "Pricing NetworkPolicy must deny Pod ingress and allow only the accepted egress",
+        "Pricing NetworkPolicy must allow only Java Policy HTTP, Go Policy gRPC and accepted egress",
+    )
+    require(
+        items["Service"]["spec"]
+        == {
+            "type": "ClusterIP",
+            "selector": SELECTOR,
+            "ports": [
+                {
+                    "name": "http",
+                    "port": PORTS["http"],
+                    "targetPort": "http",
+                    "protocol": "TCP",
+                },
+                {
+                    "name": "grpc",
+                    "port": PORTS["grpc"],
+                    "targetPort": "grpc",
+                    "protocol": "TCP",
+                },
+            ],
+        },
+        "Pricing Service must expose only HTTP and gRPC to the selected Go Pods",
     )
     return items
 
@@ -572,7 +629,7 @@ class Target:
 
     def live(self, items: dict[str, dict], *, require_deployment: bool) -> dict:
         deployment = self.json("get", "deployment", self.deployment, "--ignore-not-found")
-        for kind in ("Deployment", "ConfigMap", "NetworkPolicy"):
+        for kind in ("Deployment", "ConfigMap", "NetworkPolicy", "Service"):
             desired = items[kind]
             actual = (
                 deployment
@@ -600,6 +657,11 @@ class Target:
             if require_deployment and kind == "NetworkPolicy":
                 require(
                     policy_spec(actual["spec"]) == desired["spec"], "live Pricing policy differs"
+                )
+            if require_deployment and kind == "Service":
+                require(
+                    live_service_matches(actual["spec"], desired["spec"]),
+                    "live Pricing Service differs",
                 )
         check_requested_route(self)
         for policy in self.json("get", "networkpolicies").get("items", []):
@@ -793,14 +855,80 @@ def initialization_complete(target: Target) -> None:
 
 
 def check_requested_route(target: Target) -> None:
-    # A namespaced Service is required for ordinary Ingress and Gateway routes.
     for service in target.json("get", "services").get("items", []):
         selector = service["spec"].get("selector") or {}
+        if service["metadata"]["name"] == target.deployment:
+            continue
         require(
-            not (selector and selector.items() <= target.template_labels.items())
-            and service["metadata"]["name"] != target.deployment,
+            not (selector and selector.items() <= target.template_labels.items()),
             "unexpected Service may expose Pricing",
         )
+
+    resources = set(
+        run(
+            [
+                target.kubectl_binary,
+                "--context",
+                target.context,
+                "api-resources",
+                "--verbs=list",
+                "-o",
+                "name",
+            ]
+        ).splitlines()
+    )
+    for kind in (
+        "ingresses.networking.k8s.io",
+        "httproutes.gateway.networking.k8s.io",
+        "grpcroutes.gateway.networking.k8s.io",
+    ):
+        if kind not in resources:
+            continue
+        listing = json.loads(
+            run(
+                [
+                    target.kubectl_binary,
+                    "--context",
+                    target.context,
+                    "get",
+                    kind,
+                    "--all-namespaces",
+                    "-o",
+                    "json",
+                ]
+            )
+            or "{}"
+        )
+        require(
+            not any(
+                route_references_service(kind, item, target.deployment, target.namespace)
+                for item in listing.get("items", [])
+            ),
+            "public route references Pricing",
+        )
+
+
+def route_references_service(kind: str, item: dict, service: str, namespace: str) -> bool:
+    spec = item.get("spec", {})
+    route_namespace = item.get("metadata", {}).get("namespace")
+    if kind == "ingresses.networking.k8s.io":
+        if route_namespace != namespace:
+            return False
+        backends = [spec.get("defaultBackend", {})]
+        backends.extend(
+            path.get("backend", {})
+            for rule in spec.get("rules", [])
+            for path in rule.get("http", {}).get("paths", [])
+        )
+        return any(backend.get("service", {}).get("name") == service for backend in backends)
+    return any(
+        reference.get("name") == service
+        and reference.get("kind", "Service") == "Service"
+        and reference.get("group", "") in {"", "core"}
+        and reference.get("namespace", route_namespace) == namespace
+        for rule in spec.get("rules", [])
+        for reference in rule.get("backendRefs", [])
+    )
 
 
 def rollout(target: Target) -> None:
@@ -976,6 +1104,8 @@ def verify(target: Target, items: dict[str, dict]) -> None:
     )
     if probe == "1":
         verify_denial(target, pod)
+        verify_policy_access(target, pod)
+        verify_go_policy_access(target, pod)
     after = resource_snapshot(target)
     record_snapshot("after verification", after)
     require(after == before, "Pricing protected state changed during verification")
@@ -1021,7 +1151,7 @@ def verify_denial(target: Target, pod: dict) -> None:
                         "address=$1; shift; for port do "
                         "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
                         '"telnet://$address:$port" 2>&1) || status=$?; '
-                        'case "$output" in *"Connected to"*) exit 1;; esac; '
+                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
                         '[ "$status" = 7 ] || [ "$status" = 28 ]; '
                         'echo "Pricing port $port denied"; done',
                         "probe",
@@ -1034,13 +1164,17 @@ def verify_denial(target: Target, pod: dict) -> None:
     }
     try:
         target.kubectl("create", "-f", "-", input_text=json.dumps(probe))
-        target.kubectl(
-            "wait",
-            "--for=jsonpath={.status.phase}=Succeeded",
-            f"pod/{name}",
-            "--timeout=90s",
-            timeout=100,
-        )
+        try:
+            target.kubectl(
+                "wait",
+                "--for=jsonpath={.status.phase}=Succeeded",
+                f"pod/{name}",
+                "--timeout=90s",
+                timeout=100,
+            )
+        except CommandError:
+            print(target.kubectl("logs", name), file=sys.stderr)
+            raise
         observed = target.kubectl("logs", name).splitlines()
         require(
             observed == [f"Pricing port {port} denied" for port in PORTS.values()],
@@ -1062,6 +1196,204 @@ def verify_denial(target: Target, pod: dict) -> None:
                 raise
             print(
                 f"pricing-deployment: denial probe cleanup failed: {cleanup_error}", file=sys.stderr
+            )
+
+
+def verify_policy_access(target: Target, pod: dict) -> None:
+    name = "pricing-policy-access"
+    token = uuid.uuid4().hex
+    require(
+        not target.json("get", "pod", name, "--ignore-not-found"), "Pricing probe name is occupied"
+    )
+    ip = str(IPv4Address(pod["status"]["podIP"]))
+    probe = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": target.namespace,
+            "labels": {**LEGACY_POLICY_SELECTOR, PROBE_OWNER_LABEL: token},
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "activeDeadlineSeconds": 90,
+            "automountServiceAccountToken": False,
+            "enableServiceLinks": False,
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 65532,
+                "runAsGroup": 65532,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "containers": [
+                {
+                    "name": "probe",
+                    "image": PROBE_IMAGE,
+                    "securityContext": {
+                        "allowPrivilegeEscalation": False,
+                        "readOnlyRootFilesystem": True,
+                        "capabilities": {"drop": ["ALL"]},
+                    },
+                    "command": ["sh", "-ec"],
+                    "args": [
+                        "service=$1; address=$2; request=$3; expected=$4; shift 4; "
+                        "response=$(curl --silent --show-error --fail --connect-timeout 2 "
+                        "--max-time 5 -H 'Content-Type: application/json' --data \"$request\" "
+                        '"http://$service:8080/pricing/calculate"); '
+                        '[ "$response" = "$expected" ]; echo "Pricing Policy HTTP access passed"; '
+                        "for port do status=0; output=$(curl --verbose --connect-timeout 2 "
+                        ' --max-time 3 "telnet://$address:$port" 2>&1) || status=$?; '
+                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
+                        '[ "$status" = 7 ] || [ "$status" = 28 ]; '
+                        'echo "Pricing Policy port $port denied"; done',
+                        "probe",
+                        target.deployment,
+                        ip,
+                        TRI_HTTP_REQUEST.decode(),
+                        TRI_HTTP_RESPONSE.decode(),
+                        str(PORTS["grpc"]),
+                        str(PORTS["management"]),
+                    ],
+                }
+            ],
+        },
+    }
+    try:
+        target.kubectl("create", "-f", "-", input_text=json.dumps(probe))
+        target.kubectl(
+            "wait",
+            "--for=jsonpath={.status.phase}=Succeeded",
+            f"pod/{name}",
+            "--timeout=90s",
+            timeout=100,
+        )
+        observed = target.kubectl("logs", name).splitlines()
+        require(
+            observed
+            == [
+                "Pricing Policy HTTP access passed",
+                f"Pricing Policy port {PORTS['grpc']} denied",
+                f"Pricing Policy port {PORTS['management']} denied",
+            ],
+            "Pricing Policy access result differs",
+        )
+        print("\n".join(observed))
+    finally:
+        primary_failure = sys.exception()
+        try:
+            actual = target.json("get", "pod", name, "--ignore-not-found")
+            if actual:
+                require(
+                    actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
+                    "Pricing Policy probe ownership differs",
+                )
+                target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
+        except Exception as cleanup_error:
+            if primary_failure is None:
+                raise
+            print(
+                f"pricing-deployment: Policy probe cleanup failed: {cleanup_error}", file=sys.stderr
+            )
+
+
+def verify_go_policy_access(target: Target, pod: dict) -> None:
+    name = "pricing-go-policy-access"
+    token = uuid.uuid4().hex
+    require(
+        not target.json("get", "pod", name, "--ignore-not-found"), "Pricing probe name is occupied"
+    )
+    ip = str(IPv4Address(pod["status"]["podIP"]))
+    probe = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": target.namespace,
+            "labels": {**GO_POLICY_SELECTOR, PROBE_OWNER_LABEL: token},
+        },
+        "spec": {
+            "restartPolicy": "Never",
+            "activeDeadlineSeconds": 90,
+            "automountServiceAccountToken": False,
+            "enableServiceLinks": False,
+            "securityContext": {
+                "runAsNonRoot": True,
+                "runAsUser": 65532,
+                "runAsGroup": 65532,
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "containers": [
+                {
+                    "name": "probe",
+                    "image": PROBE_IMAGE,
+                    "securityContext": {
+                        "allowPrivilegeEscalation": False,
+                        "readOnlyRootFilesystem": True,
+                        "capabilities": {"drop": ["ALL"]},
+                    },
+                    "command": ["sh", "-ec"],
+                    "args": [
+                        "service=$1; address=$2; "
+                        "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
+                        '"telnet://$service:9090" 2>&1) || status=$?; '
+                        'case "$output" in *"Connected to"*|*"Established connection"*) ;; *) '
+                        'echo "Pricing Go Policy gRPC probe failed: $output" >&2; exit 1;; esac; '
+                        'echo "Pricing Go Policy gRPC access passed"; '
+                        'for endpoint in "$service:8080" "$address:8081"; do '
+                        "status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
+                        '"telnet://$endpoint" 2>&1) || status=$?; '
+                        'case "$output" in *"Connected to"*|*"Established connection"*) exit 1;; esac; '
+                        '[ "$status" = 7 ] || [ "$status" = 28 ]; '
+                        'echo "Pricing Go Policy $endpoint denied"; done',
+                        "probe",
+                        target.deployment,
+                        ip,
+                    ],
+                }
+            ],
+        },
+    }
+    try:
+        target.kubectl("create", "-f", "-", input_text=json.dumps(probe))
+        deadline = time.monotonic() + 90
+        actual: dict = {}
+        while (remaining := deadline - time.monotonic()) > 0:
+            actual = target.json("get", "pod", name, timeout=min(30, remaining))
+            if actual.get("status", {}).get("phase") in {"Succeeded", "Failed"}:
+                break
+            time.sleep(max(0, min(1, deadline - time.monotonic())))
+        logs = target.kubectl("logs", name)
+        require(
+            actual.get("status", {}).get("phase") == "Succeeded",
+            f"Pricing Go Policy probe failed: {logs}",
+        )
+        observed = logs.splitlines()
+        require(
+            observed
+            == [
+                "Pricing Go Policy gRPC access passed",
+                f"Pricing Go Policy {target.deployment}:{PORTS['http']} denied",
+                f"Pricing Go Policy {ip}:{PORTS['management']} denied",
+            ],
+            "Pricing Go Policy access result differs",
+        )
+        print("\n".join(observed))
+    finally:
+        primary_failure = sys.exception()
+        try:
+            actual = target.json("get", "pod", name, "--ignore-not-found")
+            if actual:
+                require(
+                    actual["metadata"].get("labels", {}).get(PROBE_OWNER_LABEL) == token,
+                    "Pricing Go Policy probe ownership differs",
+                )
+                target.kubectl("delete", "pod", name, "--timeout=45s", timeout=55)
+        except Exception as cleanup_error:
+            if primary_failure is None:
+                raise
+            print(
+                f"pricing-deployment: Go Policy probe cleanup failed: {cleanup_error}",
+                file=sys.stderr,
             )
 
 

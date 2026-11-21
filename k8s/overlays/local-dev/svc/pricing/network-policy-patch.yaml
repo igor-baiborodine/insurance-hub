@@ -3,7 +3,23 @@ kind: NetworkPolicy
 metadata:
   name: pricing-api
 spec:
-  ingress: []
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: policy-api-legacy
+              app.kubernetes.io/component: api
+      ports:
+        - port: 8080
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: policy-api
+              app.kubernetes.io/component: api
+      ports:
+        - port: 9090
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
