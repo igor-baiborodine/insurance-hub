@@ -36,8 +36,6 @@ Run from the repository root with the pinned Python, Go, Docker, Kind and kubect
 
 ```bash
 make go-svc-deploy-check go-svc-deploy-test-tooling SVC_NAME=pricing
-make go-svc-release-test
-make -C services/pricing-service test TEST_PACKAGES=./internal/service
 make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=pricing DEPLOY_ENV=qa
 ```
@@ -52,12 +50,6 @@ build a local image as below, then run
 The smoke copies only the existing two-key reader Secret into one labeled Kind namespace, scopes
 all writes to that namespace, and removes the namespace afterward. A mode-`0600` temporary
 minimized kubeconfig selects the guarded Kind context without changing the user's current context.
-The Pricing module's Go manifest-contract test parses the base Service, listener settings and both
-environment policies. For this change, its direct use of the already pinned YAML module moves that
-module into the direct `go.mod` requirements. The unchanged shared release workflow and selector
-already treat Pricing's `go.mod` as a standard release input, so they select Pricing, build the
-source revision once and pin the QA bundle to that commit and image digest without a
-Pricing-specific workflow path or shared-classifier exception.
 
 ## Direct local-dev
 
@@ -159,6 +151,12 @@ target-guarded migrator first and seeder second with `backoffLimit: 0`, bounded 
 retained failure evidence. Inspect a failed Job and prepare an explicit next attempt; do not delete
 or automatically retry it. The stable API owner depends on that exact successful attempt. Keep
 image source and Flux configuration commits separate.
+
+The release workflow starts automatically only for a `main` push that changes Pricing build inputs.
+The QA bundle pins manifests to the release source commit, so a manifest-only change, such as the
+private Policy Service and NetworkPolicy from issue 412, reaches QA only through a new release
+whose source commit contains it. Start that release manually through the generic Go service
+release dispatch, delivered separately, then qualify it as below.
 
 From the checkout of the applied release configuration, set `DEPLOY_IMAGE_SOURCE_REVISION`
 and `DEPLOY_SOURCE_REVISION` to the full release source commit recorded in the bundle's
