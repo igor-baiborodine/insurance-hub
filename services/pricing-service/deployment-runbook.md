@@ -6,6 +6,7 @@
   - [Direct local-dev](#direct-local-dev)
     - [Fresh local-dev installation](#fresh-local-dev-installation)
   - [Flux-owned QA](#flux-owned-qa)
+    - [Advance a manifest-only QA source](#advance-a-manifest-only-qa-source)
   - [Private smoke](#private-smoke)
   - [Stop conditions and recovery](#stop-conditions-and-recovery)
   - [PostgreSQL resource administration](#postgresql-resource-administration)
@@ -153,10 +154,10 @@ or automatically retry it. The stable API owner depends on that exact successful
 image source and Flux configuration commits separate.
 
 The release workflow starts automatically only for a `main` push that changes Pricing build inputs.
-The QA bundle pins manifests to the release source commit, so a manifest-only change, such as the
-private Policy Service and NetworkPolicy from issue 412, reaches QA only through a new release
-whose source commit contains it. Start that release manually through the generic Go service
-release dispatch, delivered separately, then qualify it as below.
+Unlike services owned by the shared `qa-svc` Kustomization, which tracks `main`, every Pricing QA
+owner reads manifests from the release source commit. A manifest-only change, such as the private
+Policy Service and NetworkPolicy from issue 412, therefore reaches QA only when the bundle is
+advanced to a later source commit. See [Advance a manifest-only QA source](#advance-a-manifest-only-qa-source).
 
 From the checkout of the applied release configuration, set `DEPLOY_IMAGE_SOURCE_REVISION`
 and `DEPLOY_SOURCE_REVISION` to the full release source commit recorded in the bundle's
@@ -190,6 +191,78 @@ make go-svc-deploy-verify SVC_NAME=pricing
 Status checks the exact deployment, ready Pod, Pod UID, version and running image ID. Use a
 digest-qualified image reference for OCI revision and version checks. Status and verification
 inspect that pulled image and require the published digest to match the ready Pod image ID.
+
+### Advance a manifest-only QA source
+
+Use this when a reviewed change merged to `main` touches only Pricing manifests, initialization
+configuration or release assets, and the published image is still the intended executable. It
+generates a new release identity from the later source commit and keeps the published image
+digest. No image is built and no semantic version is published. This is the Pricing instance of
+the [Product procedure](../../docs/migration/phase-4/product-service/deployment-runbook.md#advance-a-manifest-only-qa-source).
+Follow that procedure's stop conditions and review checklist.
+
+Start from a clean checkout at the canonical commit that owns the desired manifests. Read the
+current image from the stable API owner in `k8s/flux/qa/releases/pricing/release.yaml`. Its source
+GitRepository, initialization owner and `qa-pricing-api` must agree on
+`insurance-hub.io/image-digest`. Take the semantic version that published that digest from the
+matching `chore(k8s): update pricing Go release to <version>` commit or GitHub release. Confirm
+that the registry still resolves that version to the digest, and record the image's own source
+commit from its OCI label:
+
+```bash
+git fetch origin main
+source_commit="$(git rev-parse 'origin/main^{commit}')"
+test "$(git rev-parse 'HEAD^{commit}')" = "$source_commit"
+test -z "$(git status --porcelain --untracked-files=no)"
+image=ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+release_version='<existing-published-1.x-version>'
+image_digest='sha256:<digest-from-the-current-bundle>'
+test "$(docker buildx imagetools inspect "$image:$release_version" \
+  --format '{{json .Manifest.Digest}}' | tr -d '"')" = "$image_digest"
+docker pull "$image@$image_digest"
+image_source="$(docker image inspect "$image@$image_digest" \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+```
+
+Stop if the owners disagree, the registry digest differs, or `origin/main` contains a Pricing
+build-input change. A build-input change needs the normal automatic release instead. Generate
+the bundle through the generic interface, then review it:
+
+```bash
+make go-svc-release-prepare \
+  RELEASE_SERVICE=pricing RELEASE_TARGET=qa \
+  RELEASE_REPOSITORY=igor-baiborodine/insurance-hub \
+  RELEASE_VERSION="$release_version" \
+  RELEASE_SOURCE_COMMIT="$source_commit" \
+  RELEASE_IMAGE_DIGEST="$image_digest" \
+  RELEASE_OUTPUT=/tmp/pricing-release-paths
+git diff --check -- k8s/flux/qa/releases/pricing/release.yaml
+git diff -- k8s/flux/qa/releases/pricing/release.yaml
+make go-svc-deploy-check SVC_NAME=pricing
+make go-svc-release-test
+```
+
+The new GitRepository `spec.ref.commit` and every new `insurance-hub.io/source-revision` must equal
+`source_commit`. The init and API images must keep `image_digest`. Asset hashes must match the
+files at `source_commit`. `PRICING_SERVICE_VERSION` must become `git-<first 12 hex of source_commit>`.
+`qa-pricing-api` must depend on the new initialization owner. Earlier sources and initialization
+owners must remain byte-equivalent. Commit only the emitted bundle path through a reviewed pull
+request. Merging it is a separately authorized QA activation.
+
+After Flux applies the bundle, the new initialization Job reruns against the existing QA database.
+The migration should report schema `version=1` with no new migration, and the first seed result
+should be `inserted=0 existing=4`. Then run the QA checks above with the split identity:
+
+```bash
+export DEPLOY_IMAGE_SOURCE_REVISION="$image_source"
+export DEPLOY_SOURCE_REVISION="$source_commit"
+export RELEASE_VERSION="$release_version" DEPLOY_IMAGE_DIGEST="$image_digest"
+```
+
+The OCI revision and version labels keep the image's source, while the workload version label,
+startup record and telemetry report `git-<first 12 hex of source_commit>`. Record both commits,
+the unchanged digest and the Flux-applied configuration commit as the release identity, with the
+retained digest named as a scoped exception.
 
 ## Private smoke
 
