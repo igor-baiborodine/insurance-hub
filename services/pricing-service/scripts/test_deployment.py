@@ -80,8 +80,10 @@ def test_render_rejects_access_or_selector_defects(defect: str) -> None:
 
 
 def test_render_exposes_java_http_and_go_policy_grpc() -> None:
+    # when
     items = pricing.validate_render("qa", pricing.render("qa"))
 
+    # then
     assert items["ConfigMap"]["data"]["HTTP_ADDR"] == "0.0.0.0:8080"
     assert items["ConfigMap"]["data"]["GRPC_ADDR"] == "0.0.0.0:9090"
     assert items["Service"]["spec"] == {
@@ -105,12 +107,18 @@ def test_render_exposes_java_http_and_go_policy_grpc() -> None:
 
 
 def test_live_service_rejects_external_exposure() -> None:
+    # given
     desired = pricing.validate_render("qa", pricing.render("qa"))["Service"]["spec"]
-    actual = {**desired, "clusterIP": "10.96.0.10", "externalIPs": ["192.0.2.10"]}
+    exposed = {**desired, "clusterIP": "10.96.0.10", "externalIPs": ["192.0.2.10"]}
+    private = {**desired, "clusterIP": "10.96.0.10"}
 
-    assert not pricing.live_service_matches(actual, desired)
-    del actual["externalIPs"]
-    assert pricing.live_service_matches(actual, desired)
+    # when
+    exposed_matches = pricing.live_service_matches(exposed, desired)
+    private_matches = pricing.live_service_matches(private, desired)
+
+    # then
+    assert not exposed_matches
+    assert private_matches
 
 
 @pytest.mark.parametrize(
@@ -150,17 +158,23 @@ def test_public_route_reference_is_exact(kind: str, item: dict) -> None:
 
 
 def test_http_route_reference_honors_explicit_backend_namespace() -> None:
+    # given
     route = {
         "metadata": {"namespace": "gateway"},
         "spec": {"rules": [{"backendRefs": [{"name": "qa-pricing-api", "namespace": "qa-svc"}]}]},
     }
 
-    assert pricing.route_references_service(
+    # when
+    referenced = pricing.route_references_service(
         "httproutes.gateway.networking.k8s.io", route, "qa-pricing-api", "qa-svc"
     )
 
+    # then
+    assert referenced
+
 
 def test_effective_route_scan_rejects_pricing_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
     target = pricing.Target.__new__(pricing.Target)
     target.context = "qa-insurance-hub"
     target.namespace = "qa-svc"
@@ -192,6 +206,7 @@ def test_effective_route_scan_rejects_pricing_backend(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(pricing, "run", run)
 
+    # when / then
     with pytest.raises(DeploymentError, match="public route references Pricing"):
         pricing.check_requested_route(target)
 
@@ -515,7 +530,8 @@ def test_denial_cleanup_preserves_primary_error(
     assert "cleanup failed: Pricing denial probe ownership differs" in capsys.readouterr().err
 
 
-def test_policy_probe_allows_only_service_http(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_policy_probe_allows_only_service_http() -> None:
+    # given
     target = pricing.Target.__new__(pricing.Target)
     target.namespace = "qa-svc"
     target.deployment = "qa-pricing-api"
@@ -545,8 +561,10 @@ def test_policy_probe_allows_only_service_http(monkeypatch: pytest.MonkeyPatch) 
     target.json = inspect
     target.kubectl = kubectl
 
+    # when
     pricing.verify_policy_access(target, {"status": {"podIP": "192.0.2.10"}})
 
+    # then
     labels = created["metadata"]["labels"]
     assert pricing.LEGACY_POLICY_SELECTOR.items() <= labels.items()
     assert "Established connection" in created["spec"]["containers"][0]["args"][0]
@@ -554,7 +572,8 @@ def test_policy_probe_allows_only_service_http(monkeypatch: pytest.MonkeyPatch) 
     assert deleted == ["pricing-policy-access"]
 
 
-def test_go_policy_probe_allows_only_service_grpc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_go_policy_probe_allows_only_service_grpc() -> None:
+    # given
     target = pricing.Target.__new__(pricing.Target)
     target.namespace = "qa-svc"
     target.deployment = "qa-pricing-api"
@@ -585,8 +604,10 @@ def test_go_policy_probe_allows_only_service_grpc(monkeypatch: pytest.MonkeyPatc
     target.json = inspect
     target.kubectl = kubectl
 
+    # when
     pricing.verify_go_policy_access(target, {"status": {"podIP": "192.0.2.10"}})
 
+    # then
     labels = created["metadata"]["labels"]
     assert pricing.GO_POLICY_SELECTOR.items() <= labels.items()
     assert "Established connection" in created["spec"]["containers"][0]["args"][0]
