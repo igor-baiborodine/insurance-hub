@@ -71,6 +71,7 @@ PROBE_IMAGE = (
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
 PROBE_OWNER_LABEL = "insurance-hub.io/pricing-denial-owner"
+NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 # curl reports a completed TCP handshake as either message, depending on its version.
 PROBE_SHELL_FUNCTIONS = (
     'connected() { case "$1" in *"Connected to"*|*"Established connection"*) return 0;; esac; '
@@ -1154,7 +1155,13 @@ def run_probe(
                         "capabilities": {"drop": ["ALL"]},
                     },
                     "command": ["sh", "-ec"],
-                    "args": [PROBE_SHELL_FUNCTIONS + args[0], "probe", *args[1:]],
+                    "args": [
+                        f"sleep {NETWORK_POLICY_CONVERGENCE_SECONDS}; "
+                        + PROBE_SHELL_FUNCTIONS
+                        + args[0],
+                        "probe",
+                        *args[1:],
+                    ],
                 }
             ],
         },
