@@ -10,7 +10,7 @@
     - [Missing telemetry or service failure](#missing-telemetry-or-service-failure)
     - [Reader symptoms](#reader-symptoms)
     - [Alert responses](#alert-responses)
-  - [Recovery, rollback and cleanup](#recovery-rollback-and-cleanup)
+  - [Recovery and cleanup](#recovery-and-cleanup)
   - [Evidence checklist](#evidence-checklist)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -37,17 +37,10 @@ Pricing workload. While following this procedure:
 
 - Do not edit the Grafana dashboard in the UI or patch the generated resources.
 - Do not suspend Flux.
-- Do not change another service's monitoring assets.
+- Do not change resources outside the recorded Pricing asset set.
 
 For deployment, private access and release recovery, use the
 [deployment runbook](deployment-runbook.md).
-
-For any troubleshooting, first check the matching reference service:
-
-- **Dashboard** for shared deployment, logging, tracing, metrics, alerts and Alloy delivery:
-  [Dashboard observability runbook](../dashboard-service/observability-runbook.md).
-- **Product** for PostgreSQL reader access and pool behavior:
-  [Product observability runbook](../../docs/migration/phase-4/product-service/observability-runbook.md).
 
 ## Signal and decision boundary
 
@@ -213,7 +206,7 @@ Also stop for:
 - a mutable Grafana provider;
 - an unbounded or sensitive query;
 - any operation that would alter shared monitoring releases, PVCs, Prometheus, Loki, Tempo,
-  PostgreSQL or another service's resources;
+  PostgreSQL or resources outside the recorded Pricing asset set;
 - an Alloy change that has not passed the separate shared-collector handoff below.
 
 The Pricing log registration is part of the shared Alloy release, not either service monitoring
@@ -254,10 +247,9 @@ cmp k8s/overlays/qa/infra/alloy/config.alloy \
   "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
 ```
 
-After an authorized Alloy rollout, require the Deployment to be ready and recheck the Dashboard
-and Product service signal paths before continuing. Stop and use their runbooks if an existing
-route, delivery counter or backend signal regresses. The dashboard/rule apply authorization does
-not authorize this shared rollout.
+After an authorized Alloy rollout, require the Deployment to be ready and recheck the shared
+collector's existing routes, delivery counters and backend signals before continuing. Stop if any
+regress. The dashboard/rule apply authorization does not authorize this shared rollout.
 
 For a first installation, when both `.absent` markers exist, run the read-only pre-provision
 verifier. It takes the Pricing release revision that Flux applies:
@@ -453,7 +445,8 @@ parsed fields; trace IDs are never metric labels.
 
 ### Missing telemetry or service failure
 
-Start with Dashboard's common checks. Then decide which case applies:
+First compare the Pricing release identity, Pod readiness, private quote and current runtime
+samples. Then decide which case applies:
 
 - **Telemetry loss.** The Deployment is available, `/livez` and `/readyz` pass, and a forwarded
   private quote succeeds, but Go runtime samples are absent for two minutes
@@ -476,7 +469,7 @@ outages only in the disposable harness.
 
 ### Reader symptoms
 
-Start with Product's PostgreSQL checks, then narrow the cause with **Database outcomes**:
+Narrow the cause with **Database outcomes** and the Pricing reader checks below:
 
 - **`storage_unavailable` (HTTP 503).** Check connectivity first:
   - `/readyz`, because readiness includes the read-access check;
@@ -518,12 +511,12 @@ either probe.
 
 Do not change thresholds or windows to hide missing or firing data.
 
-## Recovery, rollback and cleanup
+## Recovery and cleanup
 
 If a source, release, runtime or network mismatch appears, stop and use the
 [deployment runbook's recovery procedure](deployment-runbook.md#stop-conditions-and-recovery)
-before classifying it as an application defect. An application rollback does not restore
-monitoring assets, and a monitoring restore does not roll back the application.
+before classifying it as an application defect. Restoring a prior application release does not
+restore monitoring assets. Restoring monitoring assets does not change the application release.
 
 To restore prior monitoring assets, first verify that the captured UIDs still identify both
 objects:
@@ -586,8 +579,8 @@ kubectl --context qa-insurance-hub -n qa-monitoring delete \
 
 After any restore or retirement, verify:
 
-- **Assets.** The objects are exactly absent or restored, and other services' assets and the
-  shared releases are unchanged.
+- **Assets.** The objects are exactly absent or restored, and protected shared resources are
+  unchanged.
 - **Probes and quote.** `/livez`, `/readyz` and the private TRI quote, with the
   [deployment runbook's](deployment-runbook.md#private-smoke) checks.
 - **Signals.** Rerun `verify-service-observability` in the applicable mode.
@@ -595,9 +588,10 @@ After any restore or retirement, verify:
   ready Pod image ID matches the release digest.
 
 Do not delete the Grafana or Prometheus releases, PVCs, the Pricing workload, PostgreSQL resources
-or another service's resources from this runbook. Stop a foreground UI or port-forward with Ctrl+C
-and verify that the owning command removed its local process. After an interruption, inspect only
-the exact recorded name; never clean up with broad process or Kubernetes selectors.
+or resources outside the recorded Pricing asset set from this runbook. Stop a foreground UI or
+port-forward with Ctrl+C and verify that the owning command removed its local process. After an
+interruption, inspect only the exact recorded name; never clean up with broad process or Kubernetes
+selectors.
 
 ## Evidence checklist
 

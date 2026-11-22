@@ -41,7 +41,7 @@ Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, 
 ## 1. Copy only committed template files
 
 Run these commands from the Insurance Hub repository root. Set `destination` to a path that does not
-exist; the guard prevents silently overlaying another service.
+exist; the guard prevents silently overlaying an existing destination.
 
 ```sh
 source_revision=HEAD
