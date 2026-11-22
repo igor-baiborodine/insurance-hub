@@ -180,6 +180,15 @@ func TestRun_PostgreSQLMigrationAndSeed(t *testing.T) {
 
 		checkRefusal(t, "cannot assume Pricing database owner role")
 	})
+	t.Run("unmanaged tariff schema", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { execSQL(t, ctx, admin, dropUnmanagedTariffQuery) })
+		execSQL(t, ctx, admin, setupUnmanagedTariffQuery)
+		call(t, "status", "unmanaged")
+
+		// The failed first migration must roll back its schema and history together.
+		checkRefusal(t, "apply Pricing schema version 1 (SQLSTATE 42P07)")
+	})
 
 	// when
 	call(t, "migrate", "version=1")

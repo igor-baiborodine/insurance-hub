@@ -75,3 +75,9 @@ var verifyPriorInsertQuery string
 
 //go:embed testdata/sql/inspect-identity-catalog.sql
 var inspectIdentityCatalogQuery string
+
+//go:embed testdata/sql/setup-unmanaged-tariff.sql
+var setupUnmanagedTariffQuery string
+
+//go:embed testdata/sql/drop-unmanaged-tariff.sql
+var dropUnmanagedTariffQuery string
