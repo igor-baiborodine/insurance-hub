@@ -19,7 +19,6 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 import administration as reader
-
 from scripts.go.service.tooling_process import run_cli
 
 ROLES = ("go_pricing_reader", "go_pricing_migrator", "go_pricing_seeder")
