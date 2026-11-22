@@ -17,6 +17,7 @@ configMapGenerator:
   - name: policy-config-legacy
     behavior: merge
     literals:
+      - MICRONAUT_HTTP_SERVICES_PRICING_SERVICE_URLS=http://qa-pricing-api:8080
       - PG_HOST=qa-postgres-policy-rw.qa-data.svc.cluster.local
       - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true
