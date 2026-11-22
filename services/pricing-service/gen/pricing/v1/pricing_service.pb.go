@@ -327,13 +327,12 @@ const file_pricing_v1_pricing_service_proto_rawDesc = "" +
 	"\rcovers_prices\x18\x02 \x03(\v28.pricing.v1.CalculatePriceHTTPResponse.CoversPricesEntryR\fcoversPrices\x1a?\n" +
 	"\x11CoversPricesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x012\xec\v\n" +
-	"\x0ePricingService\x12\xd9\v\n" +
-	"\x0eCalculatePrice\x12!.pricing.v1.CalculatePriceRequest\x1a\".pricing.v1.CalculatePriceResponse\"\xff\n" +
-	"\x92A\xde\n" +
-	"2\x10application/json:\x10application/jsonJ\xa9\x01\n" +
-	"\x03200\x12\xa1\x01\n" +
-	"+The Java-compatible numeric quote envelope.\x12*\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x012\xef\v\n" +
+	"\x0ePricingService\x12\xdc\v\n" +
+	"\x0eCalculatePrice\x12!.pricing.v1.CalculatePriceRequest\x1a\".pricing.v1.CalculatePriceResponse\"\x82\v\x92A\xe1\n" +
+	"2\x10application/json:\x10application/jsonJ\xac\x01\n" +
+	"\x03200\x12\xa4\x01\n" +
+	".The quote with numeric total and cover prices.\x12*\n" +
 	"(\x1a&.pricing.v1.CalculatePriceHTTPResponse\"F\n" +
 	"\x10application/json\x122{\"totalPrice\":78,\"coversPrices\":{\"C1\":26,\"C2\":52}}J\x81\x01\n" +
 	"\x03400\x12z\n" +

@@ -66,8 +66,8 @@ func TestCalculatePrice_PreservesBindingPrecedenceAndFirstMatch(t *testing.T) {
 	assertQuote(t, quote, "12", map[string]string{"AREA": "2", "C1": "10"})
 }
 
-func TestCalculatePrice_MatchesJavaCallerVisibleScale(t *testing.T) {
-	// given: seeded formulas and wire values observed from the legacy Java Pricing JAR
+func TestCalculatePrice_PreservesCallerVisibleScale(t *testing.T) {
+	// given: seeded formulas and their accepted wire values
 	tri := domain.Tariff{
 		BaseRules: []domain.BaseRule{
 			{

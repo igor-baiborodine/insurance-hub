@@ -44,14 +44,6 @@ type SeedResult struct {
 	Existing int
 }
 
-type tariffAdoption struct {
-	tariff seedTariff
-	id     int64
-	exists bool
-	base   []positionUpdate
-	markup []positionUpdate
-}
-
 func decodeSeedCatalog(content []byte) (seedCatalog, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -74,7 +66,7 @@ func decodeSeedCatalog(content []byte) (seedCatalog, error) {
 	return catalog, nil
 }
 
-// Seed validates every existing tariff before it inserts or assigns any positions.
+// Seed validates every existing tariff before inserting missing tariffs.
 func Seed(ctx context.Context, db *sql.DB, target Target) (SeedResult, error) {
 	if target.SeedAllowed == nil || !*target.SeedAllowed {
 		return SeedResult{}, errors.New("seeding is disabled for the Pricing enrollment")
@@ -108,32 +100,29 @@ func Seed(ctx context.Context, db *sql.DB, target Target) (SeedResult, error) {
 	}
 
 	// The relation locks allow reads and keep concurrent writes from changing
-	// the rows used to determine positions.
+	// the tariff definitions during verification.
 	if _, err := tx.ExecContext(ctx, lockTariffsQuery); err != nil {
-		return SeedResult{}, databaseError("lock Pricing tariffs for adoption", err)
+		return SeedResult{}, databaseError("lock Pricing tariffs", err)
 	}
 
-	plans := make([]tariffAdoption, 0, len(catalog.Tariffs))
+	var result SeedResult
+	var missing []seedTariff
 	for _, tariff := range catalog.Tariffs {
-		plan, err := inspectTariff(ctx, tx, tariff)
+		exists, err := inspectTariff(ctx, tx, tariff)
 		if err != nil {
 			return SeedResult{}, err
 		}
-		plans = append(plans, plan)
-	}
-	var result SeedResult
-	for _, plan := range plans {
-		if plan.exists {
-			if err := assignPositions(ctx, tx, plan); err != nil {
-				return SeedResult{}, err
-			}
+		if exists {
 			result.Existing++
 		} else {
-			if err := insertTariff(ctx, tx, plan.tariff); err != nil {
-				return SeedResult{}, err
-			}
-			result.Inserted++
+			missing = append(missing, tariff)
 		}
+	}
+	for _, tariff := range missing {
+		if err := insertTariff(ctx, tx, tariff); err != nil {
+			return SeedResult{}, err
+		}
+		result.Inserted++
 	}
 	if err := tx.Commit(); err != nil {
 		return SeedResult{}, databaseError(
@@ -149,25 +138,19 @@ type ruleValue struct {
 	condition  sql.NullString
 }
 
-type positionUpdate struct {
-	row      string
-	position int
-}
-
-func inspectTariff(ctx context.Context, tx *sql.Tx, tariff seedTariff) (tariffAdoption, error) {
-	plan := tariffAdoption{tariff: tariff}
+func inspectTariff(ctx context.Context, tx *sql.Tx, tariff seedTariff) (bool, error) {
+	var id int64
 	var count int
 	if err := tx.QueryRowContext(ctx, findTariffQuery, tariff.Code).
-		Scan(&count, &plan.id); err != nil {
-		return plan, databaseError("inspect Pricing tariff", err)
+		Scan(&count, &id); err != nil {
+		return false, databaseError("inspect Pricing tariff", err)
 	}
 	if count == 0 {
-		return plan, nil
+		return false, nil
 	}
 	if count != 1 {
-		return plan, seedConflict(tariff.Code, "multiple matching tariffs")
+		return false, seedConflict(tariff.Code, "multiple matching tariffs")
 	}
-	plan.exists = true
 	base := make([]ruleValue, 0, len(tariff.Base))
 	for _, rule := range tariff.Base {
 		base = append(base, seedRuleValue(rule.Cover, rule.Condition, rule.Formula))
@@ -181,13 +164,11 @@ func inspectTariff(ctx context.Context, tx *sql.Tx, tariff seedTariff) (tariffAd
 		}
 		markup = append(markup, seedRuleValue(rule.Kind, rule.Condition, factor))
 	}
-	var err error
-	plan.base, err = matchRules(ctx, tx, readBaseRulesQuery, tariff.Code, plan.id, base)
-	if err != nil {
-		return plan, err
+	if err := matchRules(ctx, tx, readBaseRulesQuery, tariff.Code, id, base); err != nil {
+		return false, err
 	}
-	plan.markup, err = matchRules(ctx, tx, readMarkupRulesQuery, tariff.Code, plan.id, markup)
-	return plan, err
+	err := matchRules(ctx, tx, readMarkupRulesQuery, tariff.Code, id, markup)
+	return err == nil, err
 }
 
 func seedRuleValue(key string, condition *string, value string) ruleValue {
@@ -207,73 +188,35 @@ func seedConflict(code, detail string) error {
 
 func matchRules(
 	ctx context.Context, tx *sql.Tx, query, code string, tariffID int64, expected []ruleValue,
-) ([]positionUpdate, error) {
+) error {
 	rows, err := tx.QueryContext(ctx, query, tariffID)
 	if err != nil {
-		return nil, databaseError("read Pricing rules", err)
+		return databaseError("read Pricing rules", err)
 	}
 	defer func() { _ = rows.Close() }()
-	updates := make([]positionUpdate, 0, len(expected))
-	positions := make(map[ruleValue]int, len(expected))
-	for index, definition := range expected {
-		positions[definition] = index + 1
-	}
-	if len(positions) != len(expected) {
-		return nil, seedConflict(code, "seed definitions are ambiguous")
-	}
+	count := 0
 	for rows.Next() {
-		var row string
 		var rule ruleValue
 		var position sql.NullInt64
 		if err := rows.Scan(
-			&row,
 			&rule.key,
 			&rule.condition,
 			&rule.value,
 			&position,
 		); err != nil {
-			return nil, databaseError("scan Pricing rule", err)
+			return databaseError("scan Pricing rule", err)
 		}
-		want, found := positions[rule]
-		if !found || (position.Valid && position.Int64 != int64(want)) {
-			return nil, seedConflict(code, "rule definition or position differs")
+		if count >= len(expected) || !position.Valid || position.Int64 != int64(count+1) ||
+			rule != expected[count] {
+			return seedConflict(code, "rule definition or position differs")
 		}
-		delete(positions, rule)
-		if !position.Valid {
-			updates = append(updates, positionUpdate{row, want})
-		}
+		count++
 	}
 	if err := rows.Err(); err != nil {
-		return nil, databaseError("read Pricing rules to completion", err)
+		return databaseError("read Pricing rules to completion", err)
 	}
-	if len(positions) != 0 {
-		return nil, seedConflict(code, "expected rule is missing")
-	}
-	return updates, nil
-}
-
-func assignPositions(ctx context.Context, tx *sql.Tx, plan tariffAdoption) error {
-	// The base rules have no row ID. The ctid is transaction-local,
-	// protected by the table lock and consumed once per matched row.
-	for _, update := range plan.base {
-		if _, err := tx.ExecContext(
-			ctx,
-			positionBaseRuleQuery,
-			update.position,
-			update.row,
-		); err != nil {
-			return databaseError("position existing Pricing base rule", err)
-		}
-	}
-	for _, update := range plan.markup {
-		if _, err := tx.ExecContext(
-			ctx,
-			positionMarkupRuleQuery,
-			update.position,
-			update.row,
-		); err != nil {
-			return databaseError("position existing Pricing markup", err)
-		}
+	if count != len(expected) {
+		return seedConflict(code, "expected rule is missing")
 	}
 	return nil
 }

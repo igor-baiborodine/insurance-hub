@@ -93,13 +93,13 @@ func TestRun_ProductionCompositionServesCompatibleQuotesAndSafeFailures(t *testi
 	}
 
 	// when
-	javaPolicyHTTP := postPrice(t, httpClient, httpAddress, strings.NewReplacer(
+	dateArrayHTTP := postPrice(t, httpClient, httpAddress, strings.NewReplacer(
 		`"2017-04-16"`, `[2017,4,16]`,
 		`"2018-04-15"`, `[2018,4,15]`,
 	).Replace(triHTTPBody))
 
 	// then
-	assertResponse(t, javaPolicyHTTP, 200, `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`)
+	assertResponse(t, dateArrayHTTP, 200, `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`)
 
 	// when
 	hsiHTTP := postPrice(t, httpClient, httpAddress, hsiHTTPBody())

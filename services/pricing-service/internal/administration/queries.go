@@ -29,12 +29,6 @@ var readBaseRulesQuery string
 //go:embed queries/read-discount-markup-rule.sql
 var readMarkupRulesQuery string
 
-//go:embed queries/update-base-price-rules-position.sql
-var positionBaseRuleQuery string
-
-//go:embed queries/update-discount-markup-rule-position.sql
-var positionMarkupRuleQuery string
-
 //go:embed queries/insert-tariff.sql
 var insertTariffQuery string
 

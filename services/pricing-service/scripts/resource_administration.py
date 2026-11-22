@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 import administration as reader
+
 from scripts.go.service.tooling_process import run_cli
 
 ROLES = ("go_pricing_reader", "go_pricing_migrator", "go_pricing_seeder")
@@ -392,7 +393,8 @@ SELECT current_database() = 'pricing'
   AND NOT EXISTS (
       SELECT FROM pg_class WHERE oid IN (to_regclass('public.tariff'),
           to_regclass('public.base_price_rules'), to_regclass('public.discount_markup_rule'),
-          to_regclass('public.hibernate_sequence'), to_regclass('public.pricing_schema_version'))
+          to_regclass('public.tariff_id_seq'), to_regclass('public.discount_markup_rule_id_seq'),
+          to_regclass('public.pricing_schema_version'))
       AND relowner <> 'pricing'::regrole
   );
 """
@@ -509,9 +511,7 @@ def verify(manager: AdministrationKubernetes) -> None:
                 deny(connection, "UPDATE public.tariff SET code=code WHERE false")
                 deny(connection, "DELETE FROM public.tariff WHERE false")
                 if role == READER:
-                    deny(
-                        connection, "INSERT INTO public.tariff (id, code) SELECT 0, '' WHERE false"
-                    )
+                    deny(connection, "INSERT INTO public.tariff (code) SELECT '' WHERE false")
                 else:
                     connection("SELECT count(*) FROM public.pricing_schema_version;")
     print(f"pricing-resources: verified {manager.environment} roles, Secrets and SQL denials")

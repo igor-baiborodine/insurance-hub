@@ -1,8 +1,8 @@
 WITH definition AS (
     SELECT $1::jsonb AS data
 ), tariff AS (
-    INSERT INTO public.tariff (id, code)
-    SELECT nextval('public.hibernate_sequence'), data->>'code' FROM definition
+    INSERT INTO public.tariff (code)
+    SELECT data->>'code' FROM definition
     RETURNING id
 ), base_rules AS (
     INSERT INTO public.base_price_rules
@@ -12,8 +12,8 @@ WITH definition AS (
     CROSS JOIN LATERAL jsonb_array_elements(data->'base') WITH ORDINALITY AS rules(rule, position)
 )
 INSERT INTO public.discount_markup_rule
-    (id, tariff_id, type, apply_if_formula, param_value, position)
-SELECT nextval('public.hibernate_sequence'), tariff.id, rule->>'kind', rule->>'condition',
+    (tariff_id, type, apply_if_formula, param_value, position)
+SELECT tariff.id, rule->>'kind', rule->>'condition',
     (rule->>'factor')::numeric, position
 FROM tariff CROSS JOIN definition
 CROSS JOIN LATERAL jsonb_array_elements(data->'markup') WITH ORDINALITY AS rules(rule, position)

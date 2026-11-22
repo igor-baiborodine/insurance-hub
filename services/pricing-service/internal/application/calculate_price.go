@@ -205,7 +205,7 @@ func calculateBase(
 		if err != nil {
 			return domain.Decimal{}, err
 		}
-		// Java evaluates base formulas in binary floating point, so its exact results carry no
+		// Exact base prices are returned without
 		// trailing fractional zeros: 1 * 26.00B is 26 and 100 * 1.25B is 125.
 		return price.TrimTrailingZeros(), nil
 	}
