@@ -19,6 +19,10 @@ Use catalog key `pricing`. The Go workload is `<environment>-pricing-api`. Go Pr
 serves PostgreSQL-backed quotes. Its cluster-internal `<environment>-pricing-api` Service exposes
 HTTP port 8080 to Pods with the Java Policy API labels and gRPC port 9090 to Pods with the reserved
 Go Policy API labels in the same namespace. Each caller identity is limited to its own transport.
+Since issue 412, Java Policy calls this Service in both environments. Its legacy overlay sets
+`MICRONAUT_HTTP_SERVICES_PRICING_SERVICE_URLS=http://<environment>-pricing-api:8080` for its
+existing `pricing-service` client. Java Policy sends dates as Jackson `[year, month, day]` arrays,
+which the HTTP gateway accepts alongside `YYYY-MM-DD` text.
 Health remains available only on Pod port 8081 for kubelet probes. No Ingress, HTTPRoute or
 GRPCRoute may reference the Service. Operators use a loopback-bound Kubernetes API port-forward
 for direct verification. The workload has no service-account token. The API receives only the
@@ -99,24 +103,34 @@ make go-svc-deploy-preflight SVC_NAME=pricing
 make -C services/pricing-service resource-inspect
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get \
   deployment/local-dev-pricing-api deployment/local-dev-pricing-api-legacy \
-  job/local-dev-pricing-init cluster.postgresql.cnpg.io/local-dev-postgres-pricing \
-  --ignore-not-found -o wide
+  cluster.postgresql.cnpg.io/local-dev-postgres-pricing --ignore-not-found -o wide
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get jobs \
+  -l app.kubernetes.io/name=pricing-init -o wide
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get secrets -o name \
+  | grep '^secret/local-dev-postgres-pricing-'
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get pvc \
   -l cnpg.io/cluster=local-dev-postgres-pricing -o wide
 ```
 
 After authorization for the observed inventory and permanent data loss, quiesce Java Pricing,
-remove the old Go resources and initialization Job, then purge the old CNPG cluster and its
-bootstrap Secret. Wait until the old cluster and PVC identities are absent before provisioning.
+remove the old Go resources and initialization Jobs, then purge the old CNPG cluster and its
+bootstrap Secret. Each deployment creates a release-specific Job named
+`local-dev-pricing-init-<release-id>-a<attempt>`, so delete Jobs by label. The purge does not
+remove the four unowned Go enrollment Secrets. They stay bound to the discarded cluster and CA,
+and `resource-ensure` rejects them, so delete them too. Wait until the old cluster and PVC
+identities are absent before provisioning.
 
 ```bash
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all scale \
   deployment/local-dev-pricing-api-legacy --replicas=0
-kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete \
-  -k k8s/overlays/local-dev/svc/pricing/administration --ignore-not-found
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete jobs \
+  -l app.kubernetes.io/name=pricing-init --ignore-not-found
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete \
   -k k8s/overlays/local-dev/svc/pricing --ignore-not-found
 make -C k8s postgres-svc-purge SVC_NAME=pricing
+kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all delete secret --ignore-not-found \
+  local-dev-postgres-pricing-admin-target local-dev-postgres-pricing-reader-creds \
+  local-dev-postgres-pricing-migrator-creds local-dev-postgres-pricing-seeder-creds
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get \
   cluster.postgresql.cnpg.io/local-dev-postgres-pricing --ignore-not-found
 kubectl --context "$DEPLOY_CONTEXT" -n local-dev-all get pvc \
@@ -380,6 +394,13 @@ After recovery, verify:
 
 Restoring the application does not restore monitoring assets; use the observability runbook for
 those.
+
+To move Java Policy back to Java Pricing while Java Pricing is still deployed, remove the
+`MICRONAUT_HTTP_SERVICES_PRICING_SERVICE_URLS` literal from the Policy legacy overlay. In local-dev,
+re-apply it with `make -C k8s svc-deploy ENV_NAME=local-dev SVC_NAME=policy` after scaling
+`local-dev-pricing-api-legacy` back up. In QA, revert the reviewed change on `main` and let the
+`qa-svc` owner apply it. Policy then uses the URL from its image's `application-<env>.yml`. After
+Java Pricing is retired (#413), recover Go Pricing instead.
 
 ## PostgreSQL resource administration
 
