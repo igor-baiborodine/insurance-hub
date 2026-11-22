@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -312,9 +313,9 @@ func normalizeRequestJSON(data []byte) ([]byte, bool) {
 		case "productCode":
 			err = decoder.Decode(&request.ProductCode)
 		case "policyFrom":
-			err = decoder.Decode(&request.PolicyFrom)
+			request.PolicyFrom, err = decodeHTTPDate(decoder)
 		case "policyTo":
-			err = decoder.Decode(&request.PolicyTo)
+			request.PolicyTo, err = decodeHTTPDate(decoder)
 		case "selectedCovers":
 			err = decoder.Decode(&request.SelectedCovers)
 		case "answers":
@@ -345,6 +346,37 @@ func normalizeRequestJSON(data []byte) ([]byte, bool) {
 	}
 	normalized, err := protojson.Marshal(request)
 	return normalized, err == nil
+}
+
+// decodeHTTPDate accepts a date string or Jackson's default [year, month, day] LocalDate array,
+// which Java Policy sends, and returns the RPC date-only text. The RPC boundary validates both.
+func decodeHTTPDate(decoder *json.Decoder) (string, error) {
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		return "", err
+	}
+	if !bytes.HasPrefix(raw, []byte("[")) {
+		var text string
+		err := json.Unmarshal(raw, &text)
+		return text, err
+	}
+	var parts []any
+	arrayDecoder := json.NewDecoder(bytes.NewReader(raw))
+	arrayDecoder.UseNumber()
+	if err := arrayDecoder.Decode(&parts); err != nil || len(parts) != 3 {
+		return "", errors.New("invalid date array")
+	}
+	var values [3]int
+	limits := [3][2]int{{0, 9999}, {1, 12}, {1, 31}}
+	for index, part := range parts {
+		number, isNumber := part.(json.Number)
+		value, err := strconv.Atoi(number.String())
+		if !isNumber || err != nil || value < limits[index][0] || value > limits[index][1] {
+			return "", errors.New("invalid date array")
+		}
+		values[index] = value
+	}
+	return fmt.Sprintf("%04d-%02d-%02d", values[0], values[1], values[2]), nil
 }
 
 func decodeHTTPAnswer(data []byte) (*pricingv1.Answer, bool) {

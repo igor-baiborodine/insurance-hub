@@ -320,7 +320,10 @@ curl --fail-with-body \
   http://127.0.0.1:8080/pricing/calculate
 ```
 
-The response is `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. An invalid date returns
+The response is `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. Each HTTP date may also be
+Jackson's default `LocalDate` array, such as `[2017,4,16]`, which Java Policy sends. The gateway
+converts it to the RPC's `YYYY-MM-DD` text before calling gRPC, so both transports share one date
+validation and the RPC contract is unchanged. An invalid date returns
 HTTP 400 and `{"code":3,"message":"invalid request","details":[]}`. Malformed, duplicate or
 unknown JSON members, a nonempty query, unsupported media, an unknown route and a wrong method
 receive fixed JSON error envelopes. The generated Swagger 2.0 document is
