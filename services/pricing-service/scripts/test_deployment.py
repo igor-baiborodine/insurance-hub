@@ -568,6 +568,9 @@ def test_policy_probe_allows_only_service_http() -> None:
     # then
     labels = created["metadata"]["labels"]
     assert pricing.LEGACY_POLICY_SELECTOR.items() <= labels.items()
+    assert created["spec"]["containers"][0]["args"][0].startswith(
+        f"sleep {pricing.NETWORK_POLICY_CONVERGENCE_SECONDS}; "
+    )
     assert "Established connection" in created["spec"]["containers"][0]["args"][0]
     assert created["spec"]["containers"][0]["args"][-2:] == ["9090", "8081"]
     assert deleted == ["pricing-policy-access"]
