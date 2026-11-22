@@ -499,7 +499,7 @@
             "migrationTimeout": "120s",
             "targetRevision": "1",
             "credentialRevision": "1",
-            "attempt": 2,
+            "attempt": 3,
             "waitSeconds": 420
           },
           "flux": {
