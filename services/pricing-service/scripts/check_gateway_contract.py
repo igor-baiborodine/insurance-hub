@@ -154,6 +154,14 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
         "RPC answer members differ",
     )
     require(
+        request_contract.get("date_representation")
+        == {
+            "http": ["YYYY-MM-DD string", "[year, month, day] integer array"],
+            "rpc": "YYYY-MM-DD string",
+        },
+        "HTTP and RPC date representations differ",
+    )
+    require(
         request_contract.get("price_representation")
         == {"http": "number", "rpc": "exact decimal string"},
         "HTTP and RPC price representations differ",

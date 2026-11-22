@@ -46,6 +46,13 @@
       "application/json",
       "*/*"
     ],
+    "date_representation": {
+      "http": [
+        "YYYY-MM-DD string",
+        "[year, month, day] integer array"
+      ],
+      "rpc": "YYYY-MM-DD string"
+    },
     "price_representation": {
       "http": "number",
       "rpc": "exact decimal string"

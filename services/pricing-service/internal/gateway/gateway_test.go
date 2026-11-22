@@ -61,6 +61,38 @@ func TestHandler_MapsJavaRequestAndNumericResponse(t *testing.T) {
 	}
 }
 
+func TestHandler_MapsJacksonDateArraysToRPCDates(t *testing.T) {
+	// given
+	client := &fakeClient{response: &pricingv1.CalculatePriceResponse{
+		TotalPrice:   "78",
+		CoversPrices: map[string]string{"C1": "26", "C2": "52"},
+	}}
+	handler := newTestHandler(t, client, 4096)
+	body := strings.NewReplacer(
+		`"2017-04-16"`, `[2017,4,16]`,
+		`"2018-04-15"`, `[2018,4,15]`,
+	).Replace(validHTTPBody)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/pricing/calculate",
+		strings.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	// when
+	handler.ServeHTTP(recorder, request)
+
+	// then
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = (%d, %s)", recorder.Code, recorder.Body.String())
+	}
+	mapped := client.lastRequest()
+	if mapped.GetPolicyFrom() != "2017-04-16" || mapped.GetPolicyTo() != "2018-04-15" {
+		t.Errorf("mapped dates = (%q, %q)", mapped.GetPolicyFrom(), mapped.GetPolicyTo())
+	}
+}
+
 func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 	// given
 	tests := []struct {
@@ -113,6 +145,61 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 			method:      http.MethodPost,
 			path:        "/pricing/calculate",
 			body:        `{"answers":[{"questionCode":"Q","answer":true}]}`,
+			contentType: "application/json",
+			maximum:     4096,
+			status:      400,
+			response:    errorBody(3, "invalid request"),
+		},
+		{
+			name:        "short date array",
+			method:      http.MethodPost,
+			path:        "/pricing/calculate",
+			body:        strings.Replace(validHTTPBody, `"2017-04-16"`, `[2017,4]`, 1),
+			contentType: "application/json",
+			maximum:     4096,
+			status:      400,
+			response:    errorBody(3, "invalid request"),
+		},
+		{
+			name:   "fractional date array",
+			method: http.MethodPost,
+			path:   "/pricing/calculate",
+			body: strings.Replace(
+				validHTTPBody,
+				`"2017-04-16"`,
+				`[2017,4,16.0]`,
+				1,
+			),
+			contentType: "application/json",
+			maximum:     4096,
+			status:      400,
+			response:    errorBody(3, "invalid request"),
+		},
+		{
+			name:   "out-of-range date array",
+			method: http.MethodPost,
+			path:   "/pricing/calculate",
+			body: strings.Replace(
+				validHTTPBody,
+				`"2017-04-16"`,
+				`[2017,13,1]`,
+				1,
+			),
+			contentType: "application/json",
+			maximum:     4096,
+			status:      400,
+			response:    errorBody(3, "invalid request"),
+		},
+		{
+			name:   "text date array",
+			method: http.MethodPost,
+			path:   "/pricing/calculate",
+			body: strings.Replace(
+				validHTTPBody,
+				`"2017-04-16"`,
+				`["2017",4,16]`,
+				1,
+			),
 			contentType: "application/json",
 			maximum:     4096,
 			status:      400,
