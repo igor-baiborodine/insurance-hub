@@ -319,6 +319,9 @@ cannot be combined with its `*_FILE` variable.
   5. **pricing** service:
   - `make postgres-svc-secret-create SVC_NAME=pricing PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
   - `make postgres-svc-deploy SVC_NAME=pricing`, wait at least one minute for the cluster to be ready.
+  - `make postgres-svc-status SVC_NAME=pricing`
+  - Enroll and verify the separate reader, migrator and seeder roles with the exact target variables
+    in the [Pricing resource administration guide](../services/pricing-service/deployment-runbook.md#postgresql-resource-administration).
 
   6. **product** service: 
   - `make postgres-svc-secret-create SVC_NAME=product PG_SVC_USER_PWD_FILE=</absolute/mode-0600-file>`
@@ -503,7 +506,11 @@ digest only after verifying the reported MinIO version and these runtime tools.
 
 **11. pricing**
 
-- `make svc-deploy SVC_NAME=pricing`
+- Pricing uses the cataloged Go deployment interface. Set the target and source-matched image
+  variables documented in the [Pricing deployment runbook](../services/pricing-service/deployment-runbook.md),
+  then run `make go-svc-deploy-preflight SVC_NAME=pricing`, `make go-svc-image-load SVC_NAME=pricing`,
+  `make go-svc-deploy SVC_NAME=pricing`, `make go-svc-deploy-status SVC_NAME=pricing` and
+  `make go-svc-deploy-verify SVC_NAME=pricing` in that order.
 
 **12. chat**
 

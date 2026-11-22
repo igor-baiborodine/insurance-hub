@@ -26,7 +26,7 @@ import (
 
 const validHTTPBody = `{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15","selectedCovers":["C1","C2"],"answers":[{"questionCode":"NUM_OF_ADULTS","answer":1.00},{"questionCode":"DESTINATION","answer":"1.00"}]}`
 
-func TestHandler_MapsJavaRequestAndNumericResponse(t *testing.T) {
+func TestHandler_MapsHTTPRequestAndNumericResponse(t *testing.T) {
 	// given
 	client := &fakeClient{response: &pricingv1.CalculatePriceResponse{
 		TotalPrice:   "172.50",
@@ -61,7 +61,7 @@ func TestHandler_MapsJavaRequestAndNumericResponse(t *testing.T) {
 	}
 }
 
-func TestHandler_MapsJacksonDateArraysToRPCDates(t *testing.T) {
+func TestHandler_MapsDateArraysToRPCDates(t *testing.T) {
 	// given
 	client := &fakeClient{response: &pricingv1.CalculatePriceResponse{
 		TotalPrice:   "78",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify generated Pricing Swagger and its Java-compatible HTTP contract fixture."""
+"""Verify generated Pricing Swagger and its HTTP contract fixture."""
 
 from __future__ import annotations
 
@@ -139,15 +139,15 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
 
     require(
         request_contract.get("json_members") == list(schemas_contract["v1CalculatePriceRequest"]),
-        "Java-compatible request members differ from the RPC request schema",
+        "HTTP request members differ from the RPC request schema",
     )
     require(
         request_contract.get("answer_members") == ["questionCode", "answer"],
-        "Java-compatible answer members differ",
+        "HTTP answer members differ",
     )
     require(
         request_contract.get("answer_value_types") == ["string", "number"],
-        "Java-compatible answer value types differ",
+        "HTTP answer value types differ",
     )
     require(
         request_contract.get("rpc_answer_members") == list(schemas_contract["v1Answer"]),

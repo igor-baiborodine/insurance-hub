@@ -22,7 +22,7 @@ service PricingService {
       responses: {
         key: "200"
         value: {
-          description: "The Java-compatible numeric quote envelope."
+          description: "The quote with numeric total and cover prices."
           schema: {
             json_schema: {ref: ".pricing.v1.CalculatePriceHTTPResponse"}
           }

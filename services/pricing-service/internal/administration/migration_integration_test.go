@@ -180,6 +180,15 @@ func TestRun_PostgreSQLMigrationAndSeed(t *testing.T) {
 
 		checkRefusal(t, "cannot assume Pricing database owner role")
 	})
+	t.Run("unmanaged tariff schema", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { execSQL(t, ctx, admin, dropUnmanagedTariffQuery) })
+		execSQL(t, ctx, admin, setupUnmanagedTariffQuery)
+		call(t, "status", "unmanaged")
+
+		// The failed first migration must roll back its schema and history together.
+		checkRefusal(t, "apply Pricing schema version 1 (SQLSTATE 42P07)")
+	})
 
 	// when
 	call(t, "migrate", "version=1")
@@ -226,40 +235,18 @@ func TestRun_PostgreSQLMigrationAndSeed(t *testing.T) {
 		t.Fatal("replay changed the schema or recorded migration")
 	}
 
-	// given
-	// An existing populated schema has a conflicting column in the second rule table.
-	// The first schema change and history creation must roll back together.
-	execSQL(t, ctx, admin, truncateTariffsQuery)
-	execSQL(t, ctx, admin, setupIncompatibleSchemaQuery)
-	call(t, "status", "unmanaged")
-	call(t, "version", "uninitialized")
-	// when
-	call(t, "migrate", "", "SQLSTATE 42701")
-	// then
-	if got := queryString(
-		t,
-		ctx,
-		admin,
-		verifyMigrationRollbackQuery,
-	); got != "true" {
-		t.Fatal("failed migration left partially applied schema or history")
-	}
-	execSQL(t, ctx, admin, removeConflictingColumnQuery)
-	// when
-	call(t, "migrate", "version=1")
-	// then
-	execSQL(t, ctx, admin, assumePricingOwnerQuery)
-	got := queryString(t, ctx, admin, readLegacyTariffQuery)
-	if got != `11|HSI|C2|0.25|t|32|perc_markup|FLOOD == "YES"|1.50` {
-		t.Fatalf("migration changed existing tariff rows: %q", got)
-	}
-	execSQL(
-		t,
-		ctx,
-		admin,
-		insertUnpositionedRuleQuery,
-	)
-	execSQL(t, ctx, admin, resetRoleQuery)
+	t.Run("managed version one compatibility", func(t *testing.T) {
+		verifyPriorSchema(
+			t,
+			ctx,
+			admin,
+			address,
+			ca,
+			targetPath,
+			credentialPath,
+			seederPassword,
+		)
+	})
 }
 
 func disposablePostgres(t *testing.T, ctx context.Context) (*pgx.Conn, *url.URL, string) {

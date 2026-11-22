@@ -1,4 +1,4 @@
-INSERT INTO public.tariff (id, code) VALUES
+INSERT INTO public.tariff (id, code) OVERRIDING SYSTEM VALUE VALUES
     (9001, 'ORDERED'),
     (9002, 'AMBIGUOUS'),
     (9003, 'AMBIGUOUS'),
@@ -17,7 +17,7 @@ INSERT INTO public.base_price_rules
     (9006, 'C1', NULL, '10.00', 1);
 
 INSERT INTO public.discount_markup_rule
-    (id, type, tariff_id, apply_if_formula, param_value, position) VALUES
+    (id, type, tariff_id, apply_if_formula, param_value, position) OVERRIDING SYSTEM VALUE VALUES
     (9902, 'perc_markup', 9001, 'NUM_OF_CLAIM > 2', 1.25, 2),
     (9901, 'perc_markup', 9001, NULL, 1.50, 1),
     (9903, 'perc_markup', 9002, NULL, 1.00, 1),

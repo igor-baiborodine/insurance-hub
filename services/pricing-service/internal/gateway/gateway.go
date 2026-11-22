@@ -348,8 +348,7 @@ func normalizeRequestJSON(data []byte) ([]byte, bool) {
 	return normalized, err == nil
 }
 
-// decodeHTTPDate accepts a date string or Jackson's default [year, month, day] LocalDate array,
-// which Java Policy sends, and returns the RPC date-only text. The RPC boundary validates both.
+// decodeHTTPDate converts an ISO date or [year, month, day] array to RPC date text.
 func decodeHTTPDate(decoder *json.Decoder) (string, error) {
 	var raw json.RawMessage
 	if err := decoder.Decode(&raw); err != nil {

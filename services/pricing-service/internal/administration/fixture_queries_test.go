@@ -19,27 +19,6 @@ var grantMigratorQuery string
 //go:embed testdata/sql/read-pricing-schema-version-timestamp.sql
 var readMigrationTimestampQuery string
 
-//go:embed testdata/sql/setup-incompatible-tariff-schema.sql
-var setupIncompatibleSchemaQuery string
-
-//go:embed testdata/sql/verify-pricing-schema-version-rollback.sql
-var verifyMigrationRollbackQuery string
-
-//go:embed testdata/sql/remove-discount-markup-rule-conflicting-column.sql
-var removeConflictingColumnQuery string
-
-//go:embed testdata/sql/assume-pricing-owner.sql
-var assumePricingOwnerQuery string
-
-//go:embed testdata/sql/read-legacy-tariff.sql
-var readLegacyTariffQuery string
-
-//go:embed testdata/sql/insert-unpositioned-base-price-rules.sql
-var insertUnpositionedRuleQuery string
-
-//go:embed testdata/sql/reset-role.sql
-var resetRoleQuery string
-
 //go:embed testdata/sql/truncate-tariff-tables.sql
 var truncateTariffsQuery string
 
@@ -55,23 +34,11 @@ var contradictCarPositionQuery string
 //go:embed testdata/sql/update-discount-markup-rule-hsi-factor.sql
 var changeHSIMarkupFactorQuery string
 
-//go:embed testdata/sql/insert-legacy-tariff.sql
-var insertLegacyTariffQuery string
-
-//go:embed testdata/sql/insert-legacy-base-price-rules.sql
-var insertLegacyBaseRuleQuery string
-
-//go:embed testdata/sql/insert-legacy-discount-markup-rule.sql
-var insertLegacyMarkupRuleQuery string
-
 //go:embed testdata/sql/count-tariff.sql
 var countTariffsQuery string
 
 //go:embed testdata/sql/read-ordered-tariff.sql
 var readOrderedTariffQuery string
-
-//go:embed testdata/sql/snapshot-legacy-tariff-identity.sql
-var snapshotLegacyIdentityQuery string
 
 //go:embed testdata/sql/snapshot-tariff-seed-state.sql
 var snapshotSeedStateQuery string
@@ -99,3 +66,18 @@ var setupReaderScenariosQuery string
 
 //go:embed testdata/sql/delete-reader-scenarios.sql
 var deleteReaderScenariosQuery string
+
+//go:embed testdata/sql/setup-prior-managed-tariffs.sql
+var setupPriorSchemaQuery string
+
+//go:embed testdata/sql/verify-prior-id-inserts.sql
+var verifyPriorInsertQuery string
+
+//go:embed testdata/sql/inspect-identity-catalog.sql
+var inspectIdentityCatalogQuery string
+
+//go:embed testdata/sql/setup-unmanaged-tariff.sql
+var setupUnmanagedTariffQuery string
+
+//go:embed testdata/sql/drop-unmanaged-tariff.sql
+var dropUnmanagedTariffQuery string

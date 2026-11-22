@@ -48,7 +48,7 @@ func (value Decimal) TrimTrailingZeros() Decimal {
 	return Decimal{value: shopdecimal.NewFromBigInt(coefficient, exponent)}
 }
 
-// RoundHalfUp rounds ties away from zero, matching Java RoundingMode.HALF_UP.
+// RoundHalfUp rounds ties away from zero.
 func (value Decimal) RoundHalfUp(scale int32) Decimal {
 	return Decimal{value: value.value.Round(scale)}
 }

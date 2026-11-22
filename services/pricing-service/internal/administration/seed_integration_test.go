@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -53,11 +52,7 @@ func verifyOrderedSeed(
 	ca, targetPath, migrationCredential, password string,
 ) {
 	t.Helper()
-	credential := filepath.Join(t.TempDir(), "seed-url")
-	seederURL := *address
-	seederURL.User = url.UserPassword("go_pricing_seeder", password)
-	seederURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {ca}}.Encode()
-	writeFixture(t, credential, []byte(seederURL.String()))
+	credential := seedCredential(t, address, ca, password)
 	run := func(credential string) (administration.SeedResult, error) {
 		return service.RunSeed(
 			ctx,
@@ -100,6 +95,11 @@ func verifyOrderedSeed(
 		// when
 		seed(t, 4, 0)
 		// then
+		if queryString(t, ctx, admin, inspectIdentityCatalogQuery) != "true" {
+			t.Fatal(
+				"expected exactly the two bigint identity sequences in the fresh public schema",
+			)
+		}
 		assertOrderedTariffs(t, ctx, admin, want)
 		fresh := seedSnapshot(t, ctx, admin)
 
@@ -145,43 +145,6 @@ func verifyOrderedSeed(
 		}
 	})
 
-	t.Run("populated tariffs and replay", func(t *testing.T) {
-		// given
-		execSQL(t, ctx, admin, truncateTariffsQuery)
-		insertUnpositionedTariffs(t, ctx, admin, want)
-		identity := tariffIdentity(t, ctx, admin)
-
-		// when
-		seed(t, 0, 4)
-
-		// then
-		if tariffIdentity(t, ctx, admin) != identity {
-			t.Fatal(
-				"seeding changed existing tariff identifiers, associations, or rule values",
-			)
-		}
-		assertOrderedTariffs(t, ctx, admin, want)
-		adopted := seedSnapshot(t, ctx, admin)
-
-		// when
-		result, err := service.RunMigration(ctx, "migrate", "disposable", "pricing-smoke",
-			targetPath, migrationCredential, ca)
-		// then
-		if err != nil || result != "version=1" {
-			t.Fatalf(
-				"migration replay on populated tariffs failed: %q (%v)",
-				result,
-				err,
-			)
-		}
-		// when
-		seed(t, 0, 4)
-		// then
-		if seedSnapshot(t, ctx, admin) != adopted {
-			t.Fatal("migration and seed replay changed adopted state")
-		}
-	})
-
 	for _, conflict := range []struct{ name, change, code string }{
 		{"changed expression", changeCarFormulaQuery, "CAR"},
 		{"duplicate rule", duplicateCarRuleQuery, "CAR"},
@@ -191,7 +154,7 @@ func verifyOrderedSeed(
 		t.Run(conflict.name, func(t *testing.T) {
 			// given
 			execSQL(t, ctx, admin, truncateTariffsQuery)
-			insertUnpositionedTariffs(t, ctx, admin, want)
+			seed(t, 4, 0)
 			execSQL(t, ctx, admin, conflict.change)
 			before := seedSnapshot(t, ctx, admin)
 
@@ -201,7 +164,7 @@ func verifyOrderedSeed(
 			// then
 			if seedSnapshot(t, ctx, admin) != before {
 				t.Fatal(
-					"seed conflict changed rows, positions, sequence, or history",
+					"seed conflict changed rows, positions, or history",
 				)
 			}
 		})
@@ -214,43 +177,6 @@ func verifyOrderedSeed(
 		// then
 		assertOrderedTariffs(t, ctx, admin, want)
 	})
-}
-
-func insertUnpositionedTariffs(
-	t *testing.T,
-	ctx context.Context,
-	admin *pgx.Conn,
-	tariffs []expectedTariff,
-) {
-	t.Helper()
-	execSQL(t, ctx, admin, assumePricingOwnerQuery)
-	for index, tariff := range tariffs {
-		id := 101 + index
-		_, err := admin.Exec(
-			ctx,
-			insertLegacyTariffQuery,
-			id,
-			tariff.Code,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, rule := range slices.Backward(tariff.Base) {
-			_, err := admin.Exec(ctx, insertLegacyBaseRuleQuery,
-				id, rule.Cover, rule.Condition, rule.Formula)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		for position, rule := range slices.Backward(tariff.Markup) {
-			_, err := admin.Exec(ctx, insertLegacyMarkupRuleQuery,
-				id*10+position, rule.Kind, id, rule.Condition, rule.Factor)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	execSQL(t, ctx, admin, resetRoleQuery)
 }
 
 func assertOrderedTariffs(
@@ -288,12 +214,51 @@ func assertOrderedTariffs(
 	}
 }
 
-func tariffIdentity(t *testing.T, ctx context.Context, admin *pgx.Conn) string {
-	t.Helper()
-	return queryString(t, ctx, admin, snapshotLegacyIdentityQuery)
-}
-
 func seedSnapshot(t *testing.T, ctx context.Context, admin *pgx.Conn) string {
 	t.Helper()
 	return queryString(t, ctx, admin, snapshotSeedStateQuery)
+}
+
+func seedCredential(t *testing.T, address *url.URL, ca, password string) string {
+	t.Helper()
+	credential := filepath.Join(t.TempDir(), "seed-url")
+	seederURL := *address
+	seederURL.User = url.UserPassword("go_pricing_seeder", password)
+	seederURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {ca}}.Encode()
+	writeFixture(t, credential, []byte(seederURL.String()))
+	return credential
+}
+
+func verifyPriorSchema(t *testing.T, ctx context.Context, admin *pgx.Conn, address *url.URL,
+	ca, targetPath, migrationCredential, password string,
+) {
+	t.Helper()
+	// given
+	execSQL(t, ctx, admin, setupPriorSchemaQuery)
+	before := seedSnapshot(t, ctx, admin)
+
+	// when
+	status, err := service.RunMigration(ctx, "status", "disposable", "pricing-smoke",
+		targetPath, migrationCredential, ca)
+	if err != nil || status != "version=1" {
+		t.Fatalf("prior schema status = %q (%v)", status, err)
+	}
+	result, err := service.RunSeed(
+		ctx,
+		"disposable",
+		"pricing-smoke",
+		targetPath,
+		seedCredential(t, address, ca, password),
+		ca,
+	)
+	if err != nil || result != (administration.SeedResult{Existing: 4}) {
+		t.Fatalf("prior schema seed replay = %+v (%v)", result, err)
+	}
+
+	// then
+	assertOrderedTariffs(t, ctx, admin, acceptedTariffs(t))
+	if seedSnapshot(t, ctx, admin) != before {
+		t.Fatal("managed seed replay changed prior tariff data or history")
+	}
+	execSQL(t, ctx, admin, verifyPriorInsertQuery)
 }

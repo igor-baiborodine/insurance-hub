@@ -21,7 +21,7 @@
 
 The Go Pricing service reads the ordered tariff catalog from PostgreSQL and exposes private quote
 calculation over direct gRPC and an HTTP gateway. Its separate management listener serves liveness
-and readiness. Java Pricing continues to serve Policy's pricing requests until the upstream switch.
+and readiness.
 
 ## Prerequisites
 
@@ -158,7 +158,6 @@ make test-tooling
 The [Go module topology guide](../../docs/go-module-topology.md) describes
 inventory and CI ownership. Pricing is registered as a standalone module and Servicekit consumer.
 The [copy procedure](COPYING.md) records how the foundation was derived from the committed template.
-Use [Dashboard](../dashboard-service/README.md) as the reference for common runtime behavior.
 
 ## Runtime configuration
 
@@ -282,24 +281,24 @@ login, `sslmode=verify-full`, and `sslrootcert` set to the selected CA file.
 
 `internal/service` owns the migration connection lifecycle, and `internal/postgres` opens and
 configures the database connection. `internal/administration` verifies the database marker and
-roles and applies the migration. Status reports `uninitialized` for a fresh database,
-`unmanaged` when legacy schema exists without Pricing migration history, and `version=1`
-after migration. The version operation reports `uninitialized` or `1`.
-Both inspect PostgreSQL in a read-only transaction. Goose commits the schema and its history
-together under an advisory lock. Existing Java tariff rows retain their IDs and relationships.
-Rule positions stay nullable until the seeder can match each tariff to the reviewed rule order.
+roles and applies the migration. Status reports `uninitialized` for a fresh database, `unmanaged`
+when tariff objects exist without Pricing migration history, and `version=1` after migration. The
+version operation reports `uninitialized` or `1`. Both inspect PostgreSQL in a read-only
+transaction. Goose commits the schema and its history together under an advisory lock. The
+installed schema uses PostgreSQL identity columns for tariff and markup-rule IDs and requires an
+explicit position for every ordered rule.
 
 `cmd/seed` accepts the same target and credential file flags with the dedicated seeder login.
 It loads the embedded version-1 tariff catalog, checks the target seed policy and migration
 version, and applies the complete corpus in one transaction. It inserts missing tariffs,
-assigns positions to uniquely matched Java rows, and reports inserted and existing counts.
+validates existing tariffs and their ordered rules, and reports inserted and existing counts.
 Replay preserves IDs and positions. A mismatch in any of the four tariffs aborts the transaction.
 
 Deployment packages all three commands in the same reviewed image. The retained initialization
 Job runs `/pricing-migrate` as its only init container and `/pricing-seed` as its only application
 container, with separate target, migrator and seeder Secret mounts. It has no automatic retry;
 operators inspect a retained failure before preparing an explicit next attempt. The API Deployment
-mounts only the reader Secret and CA, matching Product's common database boundary.
+mounts only the Pricing reader Secret and CA.
 
 ## Quote RPC and HTTP gateway
 
@@ -311,7 +310,7 @@ evaluation failures return `Internal` with `internal error`, and unavailable Pos
 `Unavailable` with `service unavailable`.
 
 The generated gateway exposes the same use case as `POST /pricing/calculate` and converts exact
-prices to JSON numbers for Java compatibility:
+prices to JSON numbers for HTTP callers:
 
 ```sh
 curl --fail-with-body \
@@ -321,9 +320,9 @@ curl --fail-with-body \
 ```
 
 The response is `{"totalPrice":78,"coversPrices":{"C1":26,"C2":52}}`. Each HTTP date may also be
-Jackson's default `LocalDate` array, such as `[2017,4,16]`, which Java Policy sends. The gateway
-converts it to the RPC's `YYYY-MM-DD` text before calling gRPC, so both transports share one date
-validation and the RPC contract is unchanged. An invalid date returns
+a three-element year, month and day array, such as `[2017,4,16]`. The gateway converts it to the
+RPC's `YYYY-MM-DD` text before calling gRPC, so both transports share one date validation and the
+RPC contract is unchanged. An invalid date returns
 HTTP 400 and `{"code":3,"message":"invalid request","details":[]}`. Malformed, duplicate or
 unknown JSON members, a nonempty query, unsupported media, an unknown route and a wrong method
 receive fixed JSON error envelopes. The generated Swagger 2.0 document is
@@ -331,7 +330,7 @@ receive fixed JSON error envelopes. The generated Swagger 2.0 document is
 independent contract fixture checked by `make check-gateway-contract`.
 
 Against the seeded TRI tariff, the generated gRPC client receives exact decimal text:
-`total_price = "78"`, `C1 = "26"`, and `C2 = "52"`. Amounts keep Java's caller-visible scale:
+`total_price = "78"`, `C1 = "26"`, and `C2 = "52"`. Amounts keep the caller-visible scale:
 a base formula result carries no trailing fractional zeros, each applied markup rounds to two
 places, and the total keeps the widest cover scale. The deployment verifier uses
 structured `go test -json` events to prove that this named direct-RPC smoke ran and passed once.
@@ -344,31 +343,18 @@ debug endpoints and production exposure are not enabled by this foundation.
 
 ## Reusable baseline and ownership
 
-Product is the reference for operational foundations, not a runtime dependency. Both modules own
-independent runtime code and use the repository's shared non-runtime Go Make tooling. New copies
-must define their own contracts, persistence, authorization, exposure and deployment requirements.
-
-| Foundation | Product reference | Pricing foundation |
-| --- | --- | --- |
-| Go and shared libraries/tools | `go.mod`, `Makefile` | Exact matching shared pins; independent manifests and tool caches. |
-| Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
-| Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
-| Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed quote operation, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Pricing owns its calculation use case and tariff-reader port; PostgreSQL remains behind an injected reader adapter. |
-
-
-Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
-fixes with behavior tests, update intentional differences explicitly, and run the renamed copy
-proof. Existing services adopt later fixes through their own reviewed changes.
+Pricing owns its contracts, runtime wiring, persistence behavior, authorization boundary,
+deployment manifests and monitoring assets. It consumes the published `libs/servicekit` module and
+the repository's shared non-runtime Go tooling without importing a sibling application module.
+The [copy procedure](COPYING.md) explains how to derive a new independent module from the committed
+scaffold. A copy must define its own business contract and operational boundaries.
 
 ### Package map and request walkthrough
 
 | Package | Responsibility |
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
-| `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
+| `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start cleanup and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Pricing registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Pricing identity and cross-setting policy. |

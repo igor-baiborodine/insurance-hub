@@ -23,7 +23,7 @@
         "operationId": "PricingService_CalculatePrice",
         "responses": {
           "200": {
-            "description": "The Java-compatible numeric quote envelope.",
+            "description": "The quote with numeric total and cover prices.",
             "schema": {
               "$ref": "#/definitions/v1CalculatePriceHTTPResponse"
             },
