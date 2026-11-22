@@ -385,17 +385,76 @@ spec:
     name: qa-pricing-init-491faf8b000b0cba-a2
     namespace: qa-svc
 ---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: qa-pricing-release-11734b8d0bb04d73
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 11734b8d0bb04d73245992e651c32ae2493efaec5acf6b44586dc3e9c9ca8b1f
+    insurance-hub.io/source-revision: 8326a63e5a1c6162fcb158b7ee7cbcb5edad0229
+    insurance-hub.io/image-digest: sha256:e5c9ae445ef3c0824807bacd75592edc212ad24ac7620bcf8e6a1ffc00b316eb
+    insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
+      "migration": "fc3f560b7b821487ebee4e035a5843f83ef277c21caa71c0616b088e5a7525a5"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  url: https://github.com/igor-baiborodine/insurance-hub
+  ref:
+    commit: 8326a63e5a1c6162fcb158b7ee7cbcb5edad0229
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qa-pricing-init-11734b8d0bb04d73-a2
+  namespace: flux-system
+  annotations:
+    insurance-hub.io/release-identity: 11734b8d0bb04d73245992e651c32ae2493efaec5acf6b44586dc3e9c9ca8b1f
+    insurance-hub.io/source-revision: 8326a63e5a1c6162fcb158b7ee7cbcb5edad0229
+    insurance-hub.io/image-digest: sha256:e5c9ae445ef3c0824807bacd75592edc212ad24ac7620bcf8e6a1ffc00b316eb
+    insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
+      "migration": "fc3f560b7b821487ebee4e035a5843f83ef277c21caa71c0616b088e5a7525a5"}'
+    insurance-hub.io/target-revision: '1'
+    insurance-hub.io/credential-revision: '1'
+    insurance-hub.io/migration-timeout: 120s
+spec:
+  interval: 5m
+  timeout: 6m
+  prune: true
+  wait: true
+  force: false
+  sourceRef:
+    kind: GitRepository
+    name: qa-pricing-release-11734b8d0bb04d73
+  path: ./k8s/overlays/qa/svc/pricing/administration
+  images:
+  - name: insurance-hub-pricing-api
+    newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
+    digest: sha256:e5c9ae445ef3c0824807bacd75592edc212ad24ac7620bcf8e6a1ffc00b316eb
+  retryInterval: 1m
+  nameSuffix: -11734b8d0bb04d73-a2
+  postBuild:
+    substitute:
+      MIGRATION_TIMEOUT: 120s
+  healthChecks:
+  - apiVersion: batch/v1
+    kind: Job
+    name: qa-pricing-init-11734b8d0bb04d73-a2
+    namespace: qa-svc
+---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: qa-pricing-api
   namespace: flux-system
   annotations:
-    insurance-hub.io/release-identity: 491faf8b000b0cbabd6cd7dcc7d6bfc8e0dd593d8bd87fb949257a9caf7aa8eb
-    insurance-hub.io/source-revision: c110c417b9362053ab1c26a44f52d2c4c485b152
-    insurance-hub.io/image-digest: sha256:08b8b33a4ea147fb95318f0de49f3b61a60a4d2a56ffdb44e17e1d90090c1dc2
+    insurance-hub.io/release-identity: 11734b8d0bb04d73245992e651c32ae2493efaec5acf6b44586dc3e9c9ca8b1f
+    insurance-hub.io/source-revision: 8326a63e5a1c6162fcb158b7ee7cbcb5edad0229
+    insurance-hub.io/image-digest: sha256:e5c9ae445ef3c0824807bacd75592edc212ad24ac7620bcf8e6a1ffc00b316eb
     insurance-hub.io/asset-hashes: '{"catalog": "6b0ccb0c732eaa238e874782479e7b288ef37cfeaa1456176b93ae50325bddd6",
-      "migration": "5544ed4280ab8ed8ceb01ff6a6e2640ebcda1d2c4b0fa2934f8756be80abe26c"}'
+      "migration": "fc3f560b7b821487ebee4e035a5843f83ef277c21caa71c0616b088e5a7525a5"}'
     insurance-hub.io/target-revision: '1'
     insurance-hub.io/credential-revision: '1'
     insurance-hub.io/migration-timeout: 120s
@@ -407,14 +466,14 @@ spec:
   force: false
   sourceRef:
     kind: GitRepository
-    name: qa-pricing-release-491faf8b000b0cba
+    name: qa-pricing-release-11734b8d0bb04d73
   path: ./k8s/overlays/qa/svc/pricing
   images:
   - name: insurance-hub-pricing-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/pricing-api
-    digest: sha256:08b8b33a4ea147fb95318f0de49f3b61a60a4d2a56ffdb44e17e1d90090c1dc2
+    digest: sha256:e5c9ae445ef3c0824807bacd75592edc212ad24ac7620bcf8e6a1ffc00b316eb
   dependsOn:
-  - name: qa-pricing-init-491faf8b000b0cba-a2
+  - name: qa-pricing-init-11734b8d0bb04d73-a2
   postBuild:
     substitute:
-      PRICING_SERVICE_VERSION: git-c110c417b936
+      PRICING_SERVICE_VERSION: git-8326a63e5a1c
