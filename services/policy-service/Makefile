@@ -9,8 +9,10 @@ export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
 	scripts/test_check_gateway_contract.py scripts/test_tooling.py \
-	scripts/deployment.py scripts/test_deployment.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py)
+	scripts/deployment.py scripts/test_deployment.py \
+	scripts/resource_administration.py scripts/test_resource_administration.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py \
+	scripts/test_resource_administration.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -193,12 +195,12 @@ check: check-go-pr
 # Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration smoke tests (Docker required)
+test-integration: ## Run the service composition and disposable PostgreSQL migration/access smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData)$$' \
+		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyRuntimeAccess)$$' \
 		./internal/service ./internal/administration \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
@@ -282,7 +284,10 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make run              Start the service with environment configuration' \
 		'  make build            Compile the server and migrator' \
 		'  make test-integration Run service composition and disposable PostgreSQL migration smoke tests' \
-		'  make migration        Run migrate/status with explicit protected inputs'
+		'  make migration        Run migrate/status with explicit protected inputs' \
+		'  make resource-inspect Inspect Policy PostgreSQL resources without mutation' \
+		'  make resource-ensure  Confirmed role, grant, enrollment and Secret setup' \
+		'  make resource-verify  Verify effective grants and SQL denials'
 
 .PHONY: migration
 
@@ -299,3 +304,17 @@ migration: ## Run migrate/status against the explicitly enrolled Policy database
 		-context "$(POLICY_MIGRATION_CONTEXT)" -target-file "$(POLICY_MIGRATION_TARGET_FILE)" \
 		-database-url-file "$(POLICY_MIGRATION_DATABASE_URL_FILE)" \
 		-ca-file "$(POLICY_MIGRATION_CA_FILE)"
+
+.PHONY: resource-inspect resource-ensure resource-verify resource-test-fast
+
+resource-inspect: ## Inspect Policy PostgreSQL roles, grants, enrollment and Secrets without mutation
+resource-ensure: ## Ensure Policy PostgreSQL roles, grants, enrollment and workload Secrets (confirmed)
+resource-verify: ## Verify Policy resources, effective grants and SQL denials
+resource-inspect resource-ensure resource-verify: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
+
+resource-test-fast: python-toolchain-check ## Exercise Policy resource guards with fake adapters
+	@cd "$(CURDIR)" && PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q \
+		-p no:cacheprovider -c "$(PYTHON_REPOSITORY_ROOT)/pyproject.toml" --rootdir "$(CURDIR)" \
+		-m 'not integration and not acceptance' scripts/test_resource_administration.py

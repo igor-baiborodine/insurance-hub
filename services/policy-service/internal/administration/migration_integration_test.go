@@ -192,12 +192,13 @@ func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
 }
 
 type migrationFixture struct {
-	admin      *pgx.Conn
-	address    *url.URL
-	ca         string
-	targetPath string
-	urlPath    string
-	password   string
+	admin           *pgx.Conn
+	address         *url.URL
+	ca              string
+	targetPath      string
+	urlPath         string
+	password        string
+	runtimePassword string
 }
 
 func newFixture(t *testing.T, ctx context.Context) *migrationFixture {
@@ -205,11 +206,14 @@ func newFixture(t *testing.T, ctx context.Context) *migrationFixture {
 	admin, address, ca := disposablePostgres(t, ctx)
 	fixture := &migrationFixture{
 		admin: admin, address: address, ca: ca, password: rand.Text(),
-		targetPath: filepath.Join(t.TempDir(), "target.json"),
-		urlPath:    filepath.Join(t.TempDir(), "database-url"),
+		runtimePassword: rand.Text(),
+		targetPath:      filepath.Join(t.TempDir(), "target.json"),
+		urlPath:         filepath.Join(t.TempDir(), "database-url"),
 	}
 	fixture.exec(t, ctx, fmt.Sprintf(setupTargetIdentityQuery,
-		fixture.password, rand.Text(), instanceID, clusterUID))
+		fixture.password, fixture.runtimePassword, instanceID, clusterUID))
+	// Provision with the same SQL that resource-ensure runs against CNPG.
+	fixture.exec(t, ctx, provisionAccessQuery)
 	fixture.writeTarget(t, instanceID)
 	migratorURL := *address
 	migratorURL.User = url.UserPassword("go_policy_migrator", fixture.password)
