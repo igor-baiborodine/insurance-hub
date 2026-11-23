@@ -58,6 +58,7 @@ def test_source_policy_registers_each_active_go_service_log_stream() -> None:
     assert 'service_json_logs "document"' in config
     assert 'service_json_logs "product"' in config
     assert 'service_json_logs "policy_search"' in config
+    assert 'service_json_logs "policy"' in config
 
 
 def test_service_log_registrations_match_their_owning_deployments() -> None:
