@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: policy-api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: policy-api
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []

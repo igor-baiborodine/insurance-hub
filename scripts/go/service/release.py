@@ -205,6 +205,7 @@ def overlay_tag(
     target: dict,
     version: str,
     source_commit: str,
+    image_digest: str,
 ) -> tuple[Path, str]:
     require(bool(VERSION.fullmatch(version)), "release version must be a 1.x semantic version")
     path = checkout_path(root, target["overlay"]) / "kustomization.yaml"
@@ -213,6 +214,14 @@ def overlay_tag(
     tag_index = image_entry(lines, record)
     newline = "\n" if lines[tag_index].endswith("\n") else ""
     lines[tag_index] = f"    newTag: {version}{newline}"
+    end = tag_index + 1
+    while end < len(lines) and lines[end].startswith("    "):
+        end += 1
+    entry = [line for line in lines[tag_index + 1 : end] if not line.startswith("    digest: ")]
+    if target.get("flux", {}).get("pinDigest") is True:
+        # Keep the semantic tag for identification and pin the published content by digest.
+        entry.insert(0, f"    digest: {image_digest}\n")
+    lines[tag_index + 1 : end] = entry
     version_indices = [
         index
         for index, line in enumerate(lines)
@@ -598,7 +607,7 @@ def prepare_release(
         target = target_record(root, record, name)
         require(target["mode"] == "flux", "release target must be Flux owned")
         if target.get("initialization") is None:
-            path, content = overlay_tag(root, record, target, version, source_commit)
+            path, content = overlay_tag(root, record, target, version, source_commit, image_digest)
             activation = activated_kustomization(root, target.get("flux", {}))
             if activation is not None:
                 activation_path, activation_content = activation

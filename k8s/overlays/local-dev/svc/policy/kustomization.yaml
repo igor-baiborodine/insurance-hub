@@ -1,0 +1,40 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../apps/svc/policy/base
+images:
+  - name: insurance-hub-policy-api
+    newName: insurance-hub-policy-api
+    newTag: 1.0.0-local.000000000000
+configMapGenerator:
+  - name: policy-config
+    behavior: merge
+    literals:
+      - DEPLOYMENT_ENVIRONMENT=local-dev
+      - SERVICE_VERSION=git-000000000000
+patches:
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: policy-api
+replacements:
+  - source:
+      kind: ConfigMap
+      name: policy-config
+      fieldPath: data.SERVICE_VERSION
+    targets:
+      - select:
+          kind: Deployment
+          name: policy-api
+        fieldPaths:
+          - metadata.labels.app\.kubernetes\.io/version
+          - spec.template.metadata.labels.app\.kubernetes\.io/version
+        options:
+          create: true

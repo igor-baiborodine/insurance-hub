@@ -415,6 +415,7 @@ def test_root_tooling_conservatively_selects_all_modules(tmp_path: Path) -> None
         "services/document-service",
         "services/chat-service",
         "services/pricing-service",
+        "services/policy-service",
     }
 
 
