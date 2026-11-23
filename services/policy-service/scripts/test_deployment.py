@@ -422,7 +422,11 @@ def test_workload_verification_does_not_depend_on_java_policy(
     monkeypatch.setattr(policy, "response", answer)
     monkeypatch.setattr(policy, "verify_direct_rpc", lambda *_args: None)
     java: list[dict] = []
+    gateway: list[str] = []
     monkeypatch.setattr(policy, "verify_java_route", lambda _target, value: java.append(value))
+    monkeypatch.setattr(
+        policy, "verify_gateway_route", lambda value: gateway.append(value.environment)
+    )
 
     # when
     workload = policy.verify_workload(target, items)
@@ -431,6 +435,78 @@ def test_workload_verification_does_not_depend_on_java_policy(
     # then
     assert workload == pod
     assert java == [pod]
+    assert gateway == ["local-dev"]
+
+
+@pytest.mark.parametrize("routing", ["java", "config-file", "environment", "profile"])
+def test_gateway_route_observes_effective_destination_beside_healthy_java(
+    monkeypatch: pytest.MonkeyPatch, routing: str
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    target = policy.Target()
+    services = {"product-service": {"urls": ["http://qa-product-api.qa-svc.svc.cluster.local:80"]}}
+    if routing == "config-file":
+        services["policy-service"] = {"urls": ["http://qa-elsewhere:80"]}
+    env = [
+        {"name": "MICRONAUT_ENVIRONMENTS", "value": "local-dev" if routing == "profile" else "qa"},
+        {"name": "MICRONAUT_CONFIG_FILES", "value": "/etc/product-route/application.yml"},
+    ]
+    if routing == "environment":
+        env.append({"name": "MICRONAUT_HTTP_SERVICES_POLICY_SERVICE_URLS", "value": "http://x"})
+    gateway_pod = {
+        "spec": {
+            "containers": [
+                {
+                    "env": env,
+                    "volumeMounts": [
+                        {"name": "route", "mountPath": "/etc/product-route", "readOnly": True}
+                    ],
+                }
+            ],
+            "volumes": [{"name": "route", "configMap": {"name": "qa-gateway-route"}}],
+        }
+    }
+    override = {"micronaut": {"http": {"services": services}}}
+
+    def endpoints(service: str, name: str) -> dict:
+        return {
+            "items": [
+                {
+                    "endpoints": [
+                        {"conditions": {"ready": True}, "targetRef": {"kind": "Pod", "name": name}}
+                    ]
+                }
+            ]
+        }
+
+    def read(*args: str, **_kwargs: object) -> dict:
+        if args[:2] == ("get", "endpointslices"):
+            service = args[3].split("=", 1)[1]
+            name = "gateway-0" if "gateway" in service else "java-0"
+            return endpoints(service, name)
+        if args[:2] == ("get", "configmap"):
+            assert args[2] == "qa-gateway-route"
+            return {"data": {"application.yml": yaml.safe_dump(override)}}
+        if args[:2] == ("get", "service"):
+            return {"spec": {"selector": dict(policy.JAVA_SELECTOR)}}
+        if args[2] == "gateway-0":
+            return gateway_pod
+        return {"metadata": {"labels": dict(policy.JAVA_SELECTOR)}}
+
+    monkeypatch.setattr(target, "json", read)
+
+    # when
+    policy.verify_java_route(target, {"metadata": {"name": "go-0"}})
+
+    # then
+    if routing == "java":
+        policy.verify_gateway_route(target)
+    else:
+        with pytest.raises(DeploymentError, match="Policy upstream"):
+            policy.verify_gateway_route(target)
 
 
 @pytest.mark.parametrize(

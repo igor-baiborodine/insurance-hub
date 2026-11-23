@@ -632,6 +632,7 @@ def verify_direct_rpc(module_path: str, port: int) -> None:
 def verify(target: Target, items: dict[str, dict]) -> None:
     """Accept an environment: the private workload plus Java coexistence."""
     pod = verify_workload(target, items)
+    verify_gateway_route(target)
     verify_java_route(target, pod)
 
 
@@ -694,6 +695,80 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
     return pod
 
 
+def ready_endpoint_pods(target: Target, service: str) -> list[str]:
+    slices = target.json(
+        "get", "endpointslices", "-l", f"kubernetes.io/service-name={service}"
+    ).get("items", [])
+    references = [
+        endpoint.get("targetRef", {})
+        for item in slices
+        for endpoint in item.get("endpoints") or []
+        if endpoint.get("conditions", {}).get("ready") is True
+    ]
+    require(
+        all(reference.get("kind") == "Pod" for reference in references),
+        f"{service} endpoint is not a Pod",
+    )
+    return sorted({reference.get("name", "") for reference in references})
+
+
+def mounted_config(target: Target, pod: dict, path: str) -> dict:
+    spec = pod["spec"]
+    mounts = [
+        mount
+        for mount in spec["containers"][0].get("volumeMounts", [])
+        if path.startswith(mount.get("mountPath", "").rstrip("/") + "/")
+    ]
+    require(
+        len(mounts) == 1 and "subPath" not in mounts[0],
+        f"gateway config file {path} is not one mounted ConfigMap",
+    )
+    volumes = [item for item in spec.get("volumes", []) if item.get("name") == mounts[0]["name"]]
+    require(
+        len(volumes) == 1 and "configMap" in volumes[0],
+        f"gateway config file {path} is not one mounted ConfigMap",
+    )
+    config = target.json("get", "configmap", volumes[0]["configMap"]["name"])
+    key = path[len(mounts[0]["mountPath"].rstrip("/")) + 1 :]
+    try:
+        return yaml.safe_load(config.get("data", {})[key]) or {}
+    except (KeyError, yaml.YAMLError) as error:
+        raise lifecycle.DeploymentError(f"gateway config file {path} is unreadable") from error
+
+
+def verify_gateway_route(target: Target) -> None:
+    """Observe each serving gateway Pod's effective Policy destination without mutation."""
+    service = f"{target.environment}-agent-portal-gateway-legacy"
+    names = ready_endpoint_pods(target, service)
+    require(bool(names), "gateway has no ready Pods")
+    for name in names:
+        pod = target.json("get", "pod", name)
+        containers = pod.get("spec", {}).get("containers", [])
+        require(len(containers) == 1, "gateway container inventory differs")
+        container = containers[0]
+        env = {item["name"]: item.get("value") for item in container.get("env", [])}
+        require(
+            not container.get("envFrom")
+            and env.get("MICRONAUT_ENVIRONMENTS") == target.environment
+            and not any(
+                "POLICY_SERVICE" in key or "policy-service" in (value or "")
+                for key, value in env.items()
+            ),
+            "gateway environment may override the Policy upstream",
+        )
+        for path in filter(None, (env.get("MICRONAUT_CONFIG_FILES") or "").split(",")):
+            services = mounted_config(target, pod, path.strip())
+            services = services.get("micronaut", {}).get("http", {}).get("services", {})
+            require(
+                "policy-service" not in services,
+                f"gateway config file {path} overrides the Policy upstream",
+            )
+    print(
+        f"Gateway Pods {names} use the {target.environment} profile without a Policy override: "
+        f"http://{target.environment}-policy-api-legacy:80"
+    )
+
+
 def verify_java_route(target: Target, pod: dict) -> None:
     service = f"{target.environment}-policy-api-legacy"
     actual = target.json("get", "service", service)
@@ -701,26 +776,15 @@ def verify_java_route(target: Target, pod: dict) -> None:
         actual.get("spec", {}).get("selector", {}).items() >= JAVA_SELECTOR.items(),
         "Java Policy Service selector differs",
     )
-    slices = target.json(
-        "get", "endpointslices", "-l", f"kubernetes.io/service-name={service}"
-    ).get("items", [])
-    ready = [
-        endpoint.get("targetRef", {})
-        for item in slices
-        for endpoint in item.get("endpoints") or []
-        if endpoint.get("conditions", {}).get("ready") is True
-    ]
-    names = {reference.get("name") for reference in ready}
+    names = ready_endpoint_pods(target, service)
     require(
-        bool(ready)
-        and all(reference.get("kind") == "Pod" for reference in ready)
-        and pod["metadata"]["name"] not in names,
+        bool(names) and pod["metadata"]["name"] not in names,
         "Java Policy Service must select only ready Java Policy Pods",
     )
     for name in names:
         labels = target.json("get", "pod", name).get("metadata", {}).get("labels", {})
         require(JAVA_SELECTOR.items() <= labels.items(), "Java Policy endpoint is not Java Policy")
-    print(f"Gateway upstream {service} selects ready Java Policy Pods: {sorted(names)}")
+    print(f"Java Policy Service {service} selects ready Java Policy Pods: {names}")
 
 
 def run_probe(target: Target, name: str, description: str, args: list[str]) -> list[str]:

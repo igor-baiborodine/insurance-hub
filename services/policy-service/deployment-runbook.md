@@ -114,9 +114,31 @@ to match the ready Pod image ID.
 `go-svc-deploy-verify` resolves the ready Policy Pod and uses private port-forwards for all
 three listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. It then confirms that the `<environment>-policy-api-legacy` Service EndpointSlices list only
-ready Java Policy Pods. `go-svc-deploy-check` separately confirms that the gateway profile and its
-route override keep the Java upstream. For manual troubleshooting, forward the exact Pod selected by status.
+UID. It then reads each ready `<environment>-agent-portal-gateway-legacy` Pod without mutation. The
+Pod must select the `<environment>` Micronaut profile, which routes `policy-service` to
+`http://<environment>-policy-api-legacy:80`. No environment variable or `envFrom` may override it,
+and no file in `MICRONAUT_CONFIG_FILES` (resolved through its mounted ConfigMap) may define
+`policy-service`. Finally, the `<environment>-policy-api-legacy` Service EndpointSlices must list
+only ready Java Policy Pods. `go-svc-deploy-check` separately confirms that the checked-in gateway
+profile and route override keep the Java upstream. The profile itself is part of the gateway image,
+so the live check relies on that image being built from the reviewed profile.
+
+For a manual read-only view of the same inputs:
+
+```bash
+kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get pods \
+  -l app.kubernetes.io/name=agent-portal-gateway-legacy \
+  -o 'custom-columns=POD:.metadata.name,ENV:.spec.containers[0].env[*].name,CONFIG:.spec.volumes[*].configMap.name'
+for config in $(kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get pods \
+  -l app.kubernetes.io/name=agent-portal-gateway-legacy \
+  -o jsonpath='{.items[*].spec.volumes[*].configMap.name}' | tr ' ' '\n' | sort -u); do
+  kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get configmap "$config" \
+    -o jsonpath='{.data}'; echo
+done
+```
+
+Expect `MICRONAUT_ENVIRONMENTS` among the names, no `*POLICY_SERVICE*` variable and no
+`policy-service` key in the printed configuration. For manual troubleshooting, forward the exact Pod selected by status.
 
 ```bash
 : "${POLICY_POD:?set the ready Go Policy Pod name from status}"
