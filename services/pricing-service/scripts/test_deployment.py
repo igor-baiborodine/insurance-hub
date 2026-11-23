@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from scripts.go.service import release
-from scripts.go.service.deployment import DeploymentError, apply
 
 import deployment as pricing
+from scripts.go.service import release
+from scripts.go.service.deployment import DeploymentError, apply
 
 SMOKE_LABEL = "insurance-hub.io/pricing-disposable"
 
@@ -239,8 +239,16 @@ def test_qa_render_rejects_placeholder_release_identity() -> None:
         pricing.validate_render("qa", yaml.safe_dump_all(items.values()))
 
 
-def test_qa_staging_keeps_go_out_of_shared_owner_and_suspends_old_initialization(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("resource", "error"),
+    [
+        ("./pricing/legacy", "nested Pricing resources"),
+        ("./pricing", "shared QA ownership must not activate Pricing Go"),
+    ],
+    ids=["legacy", "go"],
+)
+def test_qa_handoff_keeps_pricing_out_of_shared_owner_and_suspends_old_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource: str, error: str
 ) -> None:
     # given
     for relative in (
@@ -258,9 +266,9 @@ def test_qa_staging_keeps_go_out_of_shared_owner_and_suspends_old_initialization
 
     # then
     shared = yaml.safe_load((tmp_path / "k8s/overlays/qa/svc/kustomization.yaml").read_text())
-    shared["resources"].append("./pricing")
+    shared["resources"].append(resource)
     (tmp_path / "k8s/overlays/qa/svc/kustomization.yaml").write_text(yaml.safe_dump(shared))
-    with pytest.raises(DeploymentError, match="shared QA ownership"):
+    with pytest.raises(DeploymentError, match=error):
         pricing.qa_release_ownership()
 
 
