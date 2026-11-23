@@ -12,7 +12,8 @@ resources:
 images:
   - name: insurance-hub-policy-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/policy-api
-    newTag: 0.0.0-unpublished
+    newTag: 1.0.0
+    digest: sha256:75334e771d8b9f4d596e015d37799f4f198c90d7af42bc93a7c0d2e52b386977
 configMapGenerator:
   - name: policy-config
     behavior: merge
@@ -20,7 +21,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-000000000000
+      - SERVICE_VERSION=git-64fc4c813d21
 patches:
   - path: network-policy-patch.yaml
     target:

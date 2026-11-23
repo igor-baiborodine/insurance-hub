@@ -9,6 +9,7 @@ resources:
 - ./document
 - ./jsreport
 - ./payment/legacy
+- ./policy
 - ./policy-search
 - ./policy/legacy
 - ./web-vue/legacy
