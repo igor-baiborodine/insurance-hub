@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service.configuration import service_record, target_record
 from scripts.go.service.tooling_contracts import (
@@ -487,9 +488,8 @@ def qa_release_ownership() -> None:
         "resources"
     ]
     require(
-        [resource for resource in resources if resource.startswith("./pricing/")]
-        == ["./pricing/legacy"],
-        "QA legacy Pricing must remain the only nested Pricing resource",
+        not [resource for resource in resources if resource.startswith("./pricing/")],
+        "shared QA ownership must not include nested Pricing resources",
     )
     require("./pricing" not in resources, "shared QA ownership must not activate Pricing Go")
     flux_resources = yaml.safe_load((ROOT / "k8s/flux/qa/kustomization.yaml").read_text())[
