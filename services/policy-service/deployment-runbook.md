@@ -71,9 +71,11 @@ make go-svc-deploy-verify SVC_NAME=policy
 
 The [release workflow](../../.github/workflows/go-release-svc.yml) builds once, pushes the
 semantic and source tags, and resolves the registry digest before calling
-`go-svc-release-prepare`. Release preparation records the semantic tag and source-derived
-runtime version and adds `./policy` to the parent QA Kustomization in the same release
-commit. Keep image source and Flux configuration commits separate.
+`go-svc-release-prepare`. Release preparation records the semantic tag, pins the published
+digest beside it (catalog `pinDigest`), sets the source-derived runtime version and adds
+`./policy` to the parent QA Kustomization in the same release commit. The QA Pod template
+therefore references `policy-api:<version>@sha256:<digest>`, and the render check rejects an
+active QA release without a digest. Keep image source and Flux configuration commits separate.
 
 From the checkout of the applied release configuration, set the full image source and applied
 Flux commits from the workflow and Flux records. Set `RELEASE_VERSION` to the published
@@ -101,7 +103,8 @@ make go-svc-deploy-verify SVC_NAME=policy
 
 Status checks the exact deployment, ready Pod, Pod UID, version and running image ID. Use a
 digest-qualified image reference for OCI revision and version checks. Status and verification
-inspect that pulled image and require the published digest to match the ready Pod image ID.
+inspect that pulled image, require the rendered QA image to carry the same digest, and require it
+to match the ready Pod image ID.
 
 ## Private smoke and recovery
 

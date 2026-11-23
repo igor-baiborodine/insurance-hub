@@ -269,9 +269,11 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             (version == PLACEHOLDER and image == f"{registry}:0.0.0-unpublished")
             or (
                 version != PLACEHOLDER
-                and re.fullmatch(rf"{re.escape(registry)}:1\.[0-9]+\.[0-9]+", image)
+                and re.fullmatch(
+                    rf"{re.escape(registry)}:1\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{{64}}", image
+                )
             ),
-            "QA image and release version differ",
+            "QA image must be the placeholder or a digest-pinned release",
         )
     else:
         require(
@@ -509,6 +511,9 @@ def image_id(target: Target, image: str) -> str:
     digest = os.environ.get("DEPLOY_IMAGE_DIGEST", "") if flux else ""
     if flux:
         require(valid_digest(digest), "recorded publication digest is required")
+        require(
+            image.endswith(f"@{digest}"), "QA desired state is not pinned to the publication digest"
+        )
         image = f"{target.record['registryImage']}@{digest}"
     records = json.loads(run([os.environ.get("DOCKER", "docker"), "image", "inspect", image]))
     require(len(records) == 1, "Policy image inspection differs")

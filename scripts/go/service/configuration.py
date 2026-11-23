@@ -157,6 +157,7 @@ def target_record(root: Path, record: dict[str, Any], name: str) -> dict[str, An
                 bool(re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", runtime_version_variable)),
                 "invalid runtimeVersionVariable",
             )
+        require(isinstance(flux.get("pinDigest", False), bool), "invalid pinDigest")
         activation_path = flux.get("activationKustomization")
         activation_resource = flux.get("activationResource")
         require(

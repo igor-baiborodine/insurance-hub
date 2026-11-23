@@ -317,6 +317,31 @@ def test_dashboard_release_uses_the_no_initialization_path(tmp_path: Path) -> No
     assert "newTag: 1.2.3" in overlay.read_text()
 
 
+@pytest.mark.parametrize("pin_digest", [False, True])
+def test_no_initialization_release_pins_digest_only_when_selected(
+    tmp_path: Path, pin_digest: bool
+) -> None:
+    # given
+    create_service(tmp_path, "policy", initialization=False)
+    catalog_path = tmp_path / "scripts/go/service/catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    if pin_digest:
+        catalog["services"]["policy"]["deploymentTargets"]["qa"]["flux"]["pinDigest"] = True
+    catalog_path.write_text(json.dumps(catalog))
+    overlay = tmp_path / "k8s/overlays/qa/svc/policy/kustomization.yaml"
+    release.prepare_release(
+        tmp_path, "policy", REPOSITORY, "1.2.2", SOURCE_COMMIT, "sha256:" + "e" * 64
+    )
+
+    # when
+    release.prepare_release(tmp_path, "policy", REPOSITORY, "1.2.3", SOURCE_COMMIT, IMAGE_DIGEST)
+
+    # then
+    image = yaml.safe_load(overlay.read_text())["images"][0]
+    expected = {"newTag": "1.2.3", "digest": IMAGE_DIGEST} if pin_digest else {"newTag": "1.2.3"}
+    assert {key: image[key] for key in ("newTag", "digest") if key in image} == expected
+
+
 def test_document_release_updates_identity_without_reactivating_legacy(tmp_path: Path) -> None:
     # given
     create_service(tmp_path, "document", initialization=False)

@@ -574,7 +574,8 @@
             "sharedPath": "./k8s/overlays/qa/svc",
             "branch": "main",
             "activationKustomization": "k8s/overlays/qa/svc/kustomization.yaml",
-            "activationResource": "./policy"
+            "activationResource": "./policy",
+            "pinDigest": true
           }
         }
       }

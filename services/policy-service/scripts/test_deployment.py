@@ -125,10 +125,36 @@ def test_qa_image_requires_published_digest_and_matching_oci_labels(
 
     # when / then
     if revision_matches:
-        assert policy.image_id(target, f"{registry}:1.0.0") == digest
+        assert policy.image_id(target, f"{registry}:1.0.0@{digest}") == digest
     else:
         with pytest.raises(DeploymentError, match="OCI labels"):
-            policy.image_id(target, f"{registry}:1.0.0")
+            policy.image_id(target, f"{registry}:1.0.0@{digest}")
+
+
+def test_qa_rejects_desired_state_without_publication_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "qa")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
+    monkeypatch.setenv("DEPLOY_IMAGE_DIGEST", "sha256:" + "b" * 64)
+    target = policy.Target()
+    registry = target.record["registryImage"]
+    items = policy.validate_render("qa", policy.render("qa"))
+    monkeypatch.setattr(policy, "run", lambda *_args, **_kwargs: pytest.fail("unexpected access"))
+    items["ConfigMap"]["data"]["SERVICE_VERSION"] = "git-0123456789ab"
+    deployment = items["Deployment"]
+    template = deployment["spec"]["template"]
+    for metadata in (deployment["metadata"], template["metadata"]):
+        metadata["labels"][policy.VERSION_LABEL] = "git-0123456789ab"
+    template["spec"]["containers"][0]["image"] = f"{registry}:1.0.0"
+
+    # when / then
+    with pytest.raises(DeploymentError, match="digest-pinned release"):
+        policy.validate_render("qa", yaml.safe_dump_all(items.values()))
+    with pytest.raises(DeploymentError, match="not pinned to the publication digest"):
+        policy.image_id(target, f"{registry}:1.0.0@sha256:" + "c" * 64)
 
 
 def test_qa_requires_exact_flux_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,7 +245,7 @@ def test_release_prepares_published_version_and_activation(
     items = policy.validate_render("qa", policy.render("qa"))
     assert items["ConfigMap"]["data"]["SERVICE_VERSION"] == "git-0123456789ab"
     assert items["Deployment"]["spec"]["template"]["spec"]["containers"][0]["image"] == (
-        "ghcr.io/igor-baiborodine/insurance-hub/policy-api:1.0.0"
+        "ghcr.io/igor-baiborodine/insurance-hub/policy-api:1.0.0@sha256:" + "d" * 64
     )
     policy.qa_activation(yaml.safe_load(parent.read_text())["resources"], items)
     after = inventory()
