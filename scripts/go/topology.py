@@ -32,6 +32,7 @@ MAIN_COVERAGE_MODULES = (
     ("services/document-service", "business-service", "document-service"),
     ("services/chat-service", "business-service", "chat-service"),
     ("services/pricing-service", "business-service", "pricing-service"),
+    ("services/policy-service", "business-service", "policy-service"),
 )
 MAIN_COVERAGE_PATHS = (
     "libs/mvel/**",

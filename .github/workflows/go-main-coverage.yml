@@ -66,6 +66,10 @@ jobs:
             role: business-service
             coverage_files: services/pricing-service/coverage.txt,services/pricing-service/integration-coverage.txt
             flag: pricing-service
+          - module: services/policy-service
+            role: business-service
+            coverage_files: services/policy-service/coverage.txt,services/policy-service/integration-coverage.txt
+            flag: policy-service
     steps:
       - name: Checkout exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

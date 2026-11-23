@@ -27,6 +27,7 @@ TOOL_NAMES = (
     "govulncheck",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+COVERAGE_OUTPUTS = {"coverage.txt", "integration-coverage.txt"}
 PROTO_SCHEMA = Path("api/policy/v1/example_service.proto")
 GENERATED_PACKAGE = Path("gen/policy/v1")
 
@@ -43,14 +44,18 @@ class Tooling:
 
 
 def _ignore(_: str, names: list[str]) -> set[str]:
-    return {name for name in names if name in IGNORED_DIRECTORIES}
+    return {name for name in names if name in IGNORED_DIRECTORIES or name in COVERAGE_OUTPUTS}
 
 
 def inventory(root: Path) -> dict[str, str]:
     result: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
-        if not path.is_file() or any(part in IGNORED_DIRECTORIES for part in relative.parts):
+        if (
+            not path.is_file()
+            or relative.as_posix() in COVERAGE_OUTPUTS
+            or any(part in IGNORED_DIRECTORIES for part in relative.parts)
+        ):
             continue
         result[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
@@ -327,7 +332,7 @@ def test_controlled_defect_is_rejected_without_mutation(tooling: Tooling, case: 
     run_target(tooling, fixture, case, target, *variables, expect_failure=diagnostic)
 
 
-def test_policy_pr_check_passes_without_coverage(tooling: Tooling) -> None:
+def test_policy_pr_check_emits_coverage_profiles(tooling: Tooling) -> None:
     # given
     fixture = new_fixture(tooling, "policy-pr-check")
 
@@ -336,5 +341,11 @@ def test_policy_pr_check_passes_without_coverage(tooling: Tooling) -> None:
 
     # then
     log = (tooling.temporary_root / "logs" / "policy-pr-check.log").read_text(encoding="utf-8")
-    assert "-coverprofile=" not in log
-    assert not (fixture / "coverage.txt").exists()
+    assert "coverage-check:" in log
+    for name in sorted(COVERAGE_OUTPUTS):
+        profile = (fixture / name).read_text(encoding="utf-8").splitlines()
+        assert profile[0] == "mode: atomic"
+        assert any(
+            line.startswith("github.com/igor-baiborodine/insurance-hub/services/policy-service/")
+            for line in profile[1:]
+        )

@@ -38,6 +38,9 @@ flag_management:
     - name: pricing-service
       paths:
         - services/pricing-service/
+    - name: policy-service
+      paths:
+        - services/policy-service/
 
 ignore:
   - "services/product-service/gen/**"
@@ -49,3 +52,4 @@ ignore:
   - "services/dashboard-service/internal/testing/**"
   - "services/document-service/gen/**"
   - "services/pricing-service/gen/**"
+  - "services/policy-service/gen/**"
