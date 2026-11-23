@@ -2,13 +2,15 @@
 
 GO ?= go
 DOCKER ?= docker
+KUBECTL ?= kubectl
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
-	scripts/test_check_gateway_contract.py scripts/test_tooling.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py)
+	scripts/test_check_gateway_contract.py scripts/test_tooling.py \
+	scripts/deployment.py scripts/test_deployment.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -88,7 +90,9 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
-	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image \
+	deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop \
+	deploy-test-tooling deploy-smoke _deploy-smoke-rpc
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
@@ -222,6 +226,27 @@ shared-candidate-generated shared-candidate-breaking shared-candidate-integratio
 	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
 
+
+deploy-render deploy-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/deployment.py '$(@:deploy-%=%)'
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		DOCKER="$(DOCKER)" GO="$(GO)" MAKE_COMMAND="$(MAKE)" "$(PYTHON)" scripts/deployment.py '$@'
+
+deploy-test-tooling: python-toolchain-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" -m pytest -q -p no:cacheprovider -m 'not integration' scripts/test_deployment.py
+
+deploy-smoke: python-toolchain-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		DOCKER="$(DOCKER)" GO="$(GO)" MAKE_COMMAND="$(MAKE)" \
+		"$(PYTHON)" -m pytest -q -s -p no:cacheprovider -m integration scripts/test_deployment.py
+
+_deploy-smoke-rpc:
+	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
+		-run '^TestDeployedDirectRPC_Echo$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
