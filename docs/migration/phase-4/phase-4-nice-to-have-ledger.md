@@ -63,6 +63,11 @@
       - [issue-388-N01 Shared fanout and multi-replica ordering](#issue-388-n01-shared-fanout-and-multi-replica-ordering)
       - [issue-388-N02 Persistent chat history and retention](#issue-388-n02-persistent-chat-history-and-retention)
       - [issue-388-N03 Internal gRPC streaming API](#issue-388-n03-internal-grpc-streaming-api)
+  - [Sub-epic 4.8 Policy migration to Go](#sub-epic-48-policy-migration-to-go)
+    - [Issue 439 Establish Policy storage and failure baselines](#issue-439-establish-policy-storage-and-failure-baselines)
+      - [issue-439-N01 Repeat-safe termination commands](#issue-439-n01-repeat-safe-termination-commands)
+      - [issue-439-N02 Concurrent termination protection](#issue-439-n02-concurrent-termination-protection)
+      - [issue-439-N03 Explicit natural-expiry termination semantics](#issue-439-n03-explicit-natural-expiry-termination-semantics)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -1196,6 +1201,121 @@ observable requirements that justify a streaming contract.
 wire-compatibility and real-stream tests cover framing, cancellation, backpressure, status mapping,
 authorization and lifecycle, while browser WebSocket parity remains intact. Deployment and
 telemetry evidence distinguish the two transports and show no unapproved direct access.
+
+## Sub-epic 4.8 Policy migration to Go
+
+Parent: [issue 437](https://github.com/igor-baiborodine/insurance-hub/issues/437).
+The migration preserves the accepted Policy lifecycle while establishing explicit Go persistence,
+transaction and event-publication ownership. The optional command and domain refinements below do
+not change the mandatory termination safeguards or baseline scope.
+
+### Issue 439 Establish Policy storage and failure baselines
+
+Origin: issue-439 Step 3 termination review, added on 2026-11-23 after the Java runtime baseline
+could not execute the termination domain operation. These entries separate retry, concurrent-write
+and exact natural-expiry decisions from the mandatory Go aggregate, transaction, event and clock
+safeguards.
+
+Source ticket: [issue 439](https://github.com/igor-baiborodine/insurance-hub/issues/439).
+Local evidence: `ai/artifacts/epic-4.8/issue-439/issue-439-step-03-wire-baseline.md` (ignored local
+evidence).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-439-N01](#issue-439-n01-repeat-safe-termination-commands) | Repeat-safe termination commands | Deferred | Unassigned; select when command retry/idempotency semantics are approved |
+| [issue-439-N02](#issue-439-n02-concurrent-termination-protection) | Concurrent termination protection | Deferred | Unassigned; select when concurrent-write behavior becomes an accepted requirement |
+| [issue-439-N03](#issue-439-n03-explicit-natural-expiry-termination-semantics) | Explicit natural-expiry termination semantics | Deferred | Unassigned; requires an approved domain outcome for a request on the coverage-end date |
+
+#### issue-439-N01 Repeat-safe termination commands
+
+**Requirement:** Make the Go termination command retry-safe when this capability is selected. If a
+policy is already terminated for the same effective date, return the existing successful result
+without inserting another version, cover or termination outbox record. Return a typed conflict for
+a later command that proposes a different termination date after termination. Use a stable
+operation or event-intent key where needed so an ambiguous caller or publisher retry cannot create
+a second logical termination effect.
+
+**Why deferred:** The Java runtime failure prevented repeated termination from reaching the domain,
+and issue 439 has not yet measured an accepted caller-retry contract. A single successful Go
+termination can preserve the established lifecycle without defining broader command idempotency.
+Policy Search demonstrates the narrower projection pattern: identical termination events replace
+one policy-number document and therefore converge to one effective view, but every event is still
+processed and the pattern does not deduplicate Policy versions or producer records.
+
+**Reconsider when:** Gateway or client retries can repeat an ambiguous termination, publication
+recovery needs a stable operation identity, or duplicate terminal versions/events are observed.
+
+**Acceptance evidence:** Focused Go application tests and a disposable PostgreSQL/outbox scenario
+exercise the original command, an identical repeat, a different-date repeat and an ambiguous
+post-commit retry. The accepted outcomes create exactly one logical terminal transition and event
+intent, preserve prior history, expose the approved typed conflict and map consistently through the
+private API and Gateway. A consumer observation distinguishes one published event from two records
+with the same key.
+
+**Related reference:** Policy Search's
+[projection use case](../../../services/policy-search-service/internal/application/projection_test.go)
+and
+[real replacement fixture](../../../services/policy-search-service/internal/testing/event_fixture_integration_test.go)
+prove duplicate replacement by policy number. They are a projection precedent, not a producer or
+aggregate idempotency guarantee.
+
+#### issue-439-N02 Concurrent termination protection
+
+**Requirement:** When selected, serialize or detect competing Go termination commands before they
+can append the same next policy version. Use either a repository row lock such as
+`SELECT ... FOR UPDATE` or an explicit optimistic concurrency token, re-evaluate the domain
+invariant inside the SQL transaction, enforce uniqueness for `(policy_id, version_number)` and use
+a stable uniqueness key for the termination outbox record. Map a detected loser to the approved
+idempotent or typed-conflict result; do not retry a non-idempotent transition outside its owning
+application transaction.
+
+**Why deferred:** The Java lazy-loading failure preempted the planned concurrent-termination probe,
+so no accepted legacy outcome or demonstrated traffic need currently requires this stronger
+guarantee. The mandatory Go transaction still owns one command's aggregate and outbox atomicity.
+Policy Search is a caution rather than a solution: it deliberately has no lifecycle guard or
+cross-topic ordering rule, and a later registration replaces an earlier termination.
+
+**Reconsider when:** Multiple replicas or callers can terminate the same policy concurrently, a
+duplicate-version or outbox collision is observed, or the Policy owner selects a formal conflict
+or retry contract.
+
+**Acceptance evidence:** A disposable PostgreSQL integration test releases at least two competing
+commands against the same initial version and proves the approved winner/loser results, exactly one
+new version number, the correct covers, one event intent and no orphan rows. The same test proves
+the real uniqueness constraint and selected lock or optimistic-conflict path; focused transport
+tests verify the approved conflict mapping.
+
+**Related reference:** Policy Search's number-keyed
+[Elasticsearch writer](../../../services/policy-search-service/internal/elasticsearch/writer.go)
+keeps one current document, but its accepted registration-after-termination behavior shows why
+replacement alone is not an ordering or aggregate-concurrency guard.
+
+#### issue-439-N03 Explicit natural-expiry termination semantics
+
+**Requirement:** Define the Policy result when termination is requested exactly on the current
+coverage end date. Select and document one observable rule—an idempotent/no-op success, a typed
+domain rejection, or another explicitly approved terminal representation—and apply it consistently
+to the private API, Gateway response, aggregate history and `policy-terminated` event behavior.
+Do not create an invalid next-day terminal version outside the policy's natural coverage solely to
+reuse the ordinary early-termination transition.
+
+**Why deferred:** The Java date range includes its end date, but its terminal-version calculation
+starts the new validity period on the following day. The observed Java runtime fails earlier on
+lazy aggregate access, so it supplies no wire, state or event oracle for this equality case. The Go
+migration can safely implement ordinary in-coverage termination and deterministic business time
+without inventing this separate product rule. Repeat protection and concurrency control remain
+separately deferred in `issue-439-N01` and `issue-439-N02`.
+
+**Reconsider when:** The Policy owner defines natural-expiry handling, a caller needs an explicit
+response for this boundary, or implementation of the ordinary termination path reaches the
+coverage-end equality case.
+
+**Acceptance evidence:** Owner-approved API, state and event expectations cover the day before
+natural expiry, the exact coverage-end date and the following day. Focused Go domain and
+application tests prove the selected equality outcome, no invalid version or cover is created, and
+the HTTP/Gateway mapping and event count match the approved contract. If `issue-439-N01` or
+`issue-439-N02` is also selected, combined checks prove that the equality rule preserves its
+accepted repeat and concurrency outcomes.
 
 ## Ad hoc repository improvements
 
