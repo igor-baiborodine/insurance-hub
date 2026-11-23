@@ -40,6 +40,9 @@ placeholder fails the check. Local-dev requires an explicit, source-matched imag
 operations. For disposable qualification, build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
+It runs only the private workload checks (Echo, probes, identity, Pod denial and scale-to-zero).
+It has no Java Policy, so the gateway and Java endpoint coexistence check runs only through
+`go-svc-deploy-verify` against local-dev and QA.
 
 ## Direct local-dev
 

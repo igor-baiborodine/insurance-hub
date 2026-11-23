@@ -630,6 +630,13 @@ def verify_direct_rpc(module_path: str, port: int) -> None:
 
 
 def verify(target: Target, items: dict[str, dict]) -> None:
+    """Accept an environment: the private workload plus Java coexistence."""
+    pod = verify_workload(target, items)
+    verify_java_route(target, pod)
+
+
+def verify_workload(target: Target, items: dict[str, dict]) -> dict:
+    """Check only the private Go workload; a disposable namespace has no Java Policy."""
     probe = os.environ.get("DEPLOY_DENIAL_PROBE", "0")
     require(probe in {"0", "1"}, "DEPLOY_DENIAL_PROBE must be 0 or 1")
     pod = target.live(items, require_deployment=True)
@@ -682,9 +689,9 @@ def verify(target: Target, items: dict[str, dict]) -> None:
     print(
         f"Policy HTTP Echo, direct gRPC Echo, liveness, readiness and identity passed: {expected}"
     )
-    verify_java_route(target, pod)
     if probe == "1":
         verify_denial(target, pod)
+    return pod
 
 
 def verify_java_route(target: Target, pod: dict) -> None:

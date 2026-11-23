@@ -378,6 +378,61 @@ def test_java_route_selects_only_ready_java_pods(
         policy.verify_java_route(target, go_pod)
 
 
+def test_workload_verification_does_not_depend_on_java_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "0")
+    target = policy.Target()
+    target.namespace = "policy-smoke-0123456789ab"
+    items = {"ConfigMap": {"data": {"SERVICE_VERSION": "git-0123456789ab"}}}
+    pod = {"metadata": {"name": "go-0", "uid": "uid-0"}}
+    started = {
+        "msg": "service started",
+        "service_name": "policy-service",
+        "service_namespace": "insurance-hub",
+        "service_version": "git-0123456789ab",
+        "service_instance_id": "uid-0",
+        "deployment_environment_name": "local-dev",
+        "service_implementation": "go",
+    }
+
+    class Forward:
+        def __init__(self, spec: object, **_kwargs: object) -> None:
+            self.port = spec.remote_port
+
+        def __enter__(self) -> int:
+            return self.port
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def answer(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
+        if payload:
+            return 200, payload
+        return 200, b"live\n" if path == "/livez" else b"ready\n"
+
+    monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)
+    monkeypatch.setattr(target, "kubectl", lambda *_args, **_kwargs: json.dumps(started))
+    monkeypatch.setattr(target, "json", lambda *_args, **_kwargs: pytest.fail("Java lookup"))
+    monkeypatch.setattr(policy, "OwnedPortForward", Forward)
+    monkeypatch.setattr(policy, "response", answer)
+    monkeypatch.setattr(policy, "verify_direct_rpc", lambda *_args: None)
+    java: list[dict] = []
+    monkeypatch.setattr(policy, "verify_java_route", lambda _target, value: java.append(value))
+
+    # when
+    workload = policy.verify_workload(target, items)
+    policy.verify(target, items)
+
+    # then
+    assert workload == pod
+    assert java == [pod]
+
+
 @pytest.mark.parametrize(
     "output",
     [
@@ -483,7 +538,7 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
 
         # then
         monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
-        policy.verify(target, items)
+        policy.verify_workload(target, items)
         policy.stop(target, items)
         assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0
     finally:
