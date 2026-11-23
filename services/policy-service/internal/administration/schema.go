@@ -1,0 +1,112 @@
+package administration
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+)
+
+const businessTables = 6
+
+type queryRower interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// inspect checks target identity, schema compatibility and logical migration state. The same
+// function runs under the migration session lock and inside read-only status transactions.
+func inspect(ctx context.Context, db queryRower, target Target) (string, error) {
+	if err := inspectPlatform(ctx, db, target); err != nil {
+		return "", err
+	}
+	var tables int
+	var outbox, javaAllocator, history bool
+	if err := db.QueryRowContext(ctx, inspectSchemaObjectsQuery).
+		Scan(&tables, &outbox, &javaAllocator, &history); err != nil {
+		return "", fmt.Errorf("inspect schema objects: %w", err)
+	}
+	managed := false
+	switch {
+	case tables == 0 && !outbox && !javaAllocator:
+	case tables == businessTables && outbox && !javaAllocator:
+		managed = true
+		if err := inspectPolicy(ctx, db, true); err != nil {
+			return "", err
+		}
+	case tables == businessTables && !outbox:
+		if err := inspectPolicy(ctx, db, false); err != nil {
+			return "", err
+		}
+	default:
+		return "", errors.New("partial Policy schema")
+	}
+	if !history {
+		switch {
+		case managed:
+			return "", errors.New("managed Policy schema has no migration history")
+		case tables == 0:
+			return "uninitialized", nil
+		default:
+			return "unmanaged", nil
+		}
+	}
+	return inspectHistory(ctx, db, managed)
+}
+
+func inspectPlatform(ctx context.Context, db queryRower, target Target) error {
+	var accepted bool
+	if err := db.QueryRowContext(ctx, inspectPlatformQuery, target.Environment,
+		target.InstanceID, target.ClusterUID, ownerRole, migratorRole).
+		Scan(&accepted); err != nil {
+		return fmt.Errorf("inspect protected target: %w", err)
+	}
+	if !accepted {
+		return errors.New(
+			"protected target identity or marker permissions differ from enrollment",
+		)
+	}
+	return nil
+}
+
+func inspectPolicy(ctx context.Context, db queryRower, managed bool) error {
+	var accepted bool
+	if err := db.QueryRowContext(ctx, inspectPolicySchemaQuery, managed).
+		Scan(&accepted); err != nil {
+		return fmt.Errorf("inspect Policy schema: %w", err)
+	}
+	if !accepted {
+		return errors.New("incompatible Policy schema or owner")
+	}
+	if !managed {
+		return nil
+	}
+	if err := db.QueryRowContext(ctx, inspectIdentityProgressQuery).
+		Scan(&accepted); err != nil {
+		return fmt.Errorf("inspect Policy identity progress: %w", err)
+	}
+	if !accepted {
+		return errors.New(
+			"an identity allocator is behind its Policy table; no repair performed",
+		)
+	}
+	return nil
+}
+
+func inspectHistory(ctx context.Context, db queryRower, managed bool) (string, error) {
+	var shape bool
+	if err := db.QueryRowContext(ctx, inspectHistorySchemaQuery).Scan(&shape); err != nil {
+		return "", fmt.Errorf("inspect migration history shape: %w", err)
+	}
+	if !shape {
+		return "", errors.New("incompatible migration history metadata")
+	}
+	var version string
+	if err := db.QueryRowContext(ctx, inspectHistoryRowsQuery, managed).
+		Scan(&version); err != nil {
+		return "", fmt.Errorf("inspect migration history rows: %w", err)
+	}
+	if version == "invalid" {
+		return "", errors.New("inconsistent migration history")
+	}
+	return version, nil
+}
