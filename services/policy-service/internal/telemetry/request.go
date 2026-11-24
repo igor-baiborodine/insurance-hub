@@ -68,10 +68,7 @@ func (observer *RequestObserver) StartGRPC(ctx context.Context, operation string
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
 	operation := "unknown"
-	switch route {
-	case "POST /v1/example/echo":
-		operation = "echo"
-	case "POST /offers":
+	if route == "POST /offers" {
 		operation = "create_offer"
 	}
 	return &Request{

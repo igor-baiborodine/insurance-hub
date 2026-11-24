@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,29 +40,29 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"valid",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"hello"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json",
 			200,
 			1,
-			`{"message":"hello"}`,
+			`{"offerNumber":"offer-1","totalPrice":78,"coversPrices":{"C1":26}}`,
 		},
 		{
 			"valid charset",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"é"}`,
+			"/offers",
+			`{"productCode":"é"}`,
 			"application/json; charset=utf-8",
 			"*/*",
 			200,
 			1,
-			`{"message":"é"}`,
+			`{"offerNumber":"offer-1","totalPrice":78,"coversPrices":{"C1":26}}`,
 		},
 		{
 			"missing value reaches RPC",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			`{}`,
 			"application/json",
 			"",
@@ -74,7 +73,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"malformed",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			`{`,
 			"application/json",
 			"",
@@ -85,8 +84,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"duplicate",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","message":"b"}`,
+			"/offers",
+			`{"productCode":"A","productCode":"B"}`,
 			"application/json",
 			"",
 			400,
@@ -96,8 +95,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unknown member",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","secret":"b"}`,
+			"/offers",
+			`{"productCode":"TRI","secret":"b"}`,
 			"application/json",
 			"",
 			400,
@@ -107,8 +106,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"wrong type",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":7}`,
+			"/offers",
+			`{"productCode":7}`,
 			"application/json",
 			"",
 			400,
@@ -118,8 +117,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"query",
 			http.MethodPost,
-			"/v1/example/echo?secret=value",
-			`{"message":"a"}`,
+			"/offers?secret=value",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"",
 			400,
@@ -140,7 +139,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"trailing slash",
 			http.MethodPost,
-			"/v1/example/echo/",
+			"/offers/",
 			`{}`,
 			"application/json",
 			"",
@@ -151,7 +150,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"method",
 			http.MethodGet,
-			"/v1/example/echo",
+			"/offers",
 			"",
 			"",
 			"",
@@ -162,8 +161,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unacceptable",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"text/plain",
 			406,
@@ -173,8 +172,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"zero quality response",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json;q=0",
 			406,
@@ -184,8 +183,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"parameterized response",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json;profile=private",
 			406,
@@ -195,8 +194,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unsupported",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"text/plain",
 			"",
 			415,
@@ -206,7 +205,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"too large",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			strings.Repeat("x", 65),
 			"application/json",
 			"",
@@ -249,47 +248,6 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 					"RPC calls = %d, want %d",
 					client.callCount(),
 					test.wantCalls,
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
-	// given
-	privateMarker := "private-upstream-marker"
-	for _, test := range []struct {
-		name string
-		err  error
-		want int
-		body string
-	}{
-		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
-		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
-		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
-		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
-		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
-		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{err: test.err}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"hello"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.want || recorder.Body.String() != test.body ||
-				strings.Contains(recorder.Body.String(), privateMarker) {
-				t.Errorf(
-					"unsafe response = (%d, %q)",
-					recorder.Code,
-					recorder.Body.String(),
 				)
 			}
 		})
@@ -468,73 +426,12 @@ func TestHandler_CreateOffer_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	}
 }
 
-func TestHandler_CreateOffer_RejectsOtherMethods(t *testing.T) {
-	// given
-	client := &fakeClient{}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(http.MethodGet, "/offers", nil)
-	recorder := httptest.NewRecorder()
-
-	// when
-	handler.ServeHTTP(recorder, request)
-
-	// then
-	if recorder.Code != http.StatusMethodNotAllowed ||
-		recorder.Body.String() != errorBody(
-			12,
-			"method not allowed",
-		) || client.callCount() != 0 {
-		t.Errorf("response = (%d, %q)", recorder.Code, recorder.Body.String())
-	}
-}
-
 func postOffer(handler http.Handler, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder
-}
-
-func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
-	// given
-	for _, test := range []struct {
-		name    string
-		message string
-		status  int
-	}{
-		{"ASCII maximum", strings.Repeat("a", 128), http.StatusOK},
-		{"ASCII over", strings.Repeat("a", 129), http.StatusBadRequest},
-		{"UTF-8 maximum", strings.Repeat("é", 64), http.StatusOK},
-		{"UTF-8 over", strings.Repeat("é", 64) + "a", http.StatusBadRequest},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"`+test.message+`"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.status || client.callCount() != 1 {
-				t.Errorf(
-					"result = (status %d, calls %d), want (%d, 1)",
-					recorder.Code,
-					client.callCount(),
-					test.status,
-				)
-			}
-			if test.status == http.StatusOK &&
-				recorder.Body.String() != `{"message":"`+test.message+`"}` {
-				t.Errorf("Echo changed value: %q", recorder.Body.String())
-			}
-		})
-	}
 }
 
 func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
@@ -556,7 +453,7 @@ func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
 				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
 				defer cancel()
 			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
+			request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(`{"productCode":"TRI"}`)).
 				WithContext(ctx)
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Grpc-Timeout", "999H")
@@ -585,7 +482,7 @@ func TestHandler_PropagatesCallerCancellation(t *testing.T) {
 	client := &fakeClient{waitForContext: true, started: started}
 	handler := newTestHandlerWithTimeout(t, client, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
+	request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(`{"productCode":"TRI"}`)).
 		WithContext(ctx)
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -618,8 +515,8 @@ func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		"/offers",
+		strings.NewReader(`{"productCode":"TRI"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer private")
@@ -682,8 +579,8 @@ func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		"/offers",
+		strings.NewReader(`{"productCode":"TRI"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("TE", "trailers")
@@ -716,7 +613,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(&fakeClient{}, &fakeClient{}, Settings{
+	handler, err := NewHandler(&fakeClient{}, Settings{
 		RequestTimeout: time.Second, MaxBodyBytes: 4096,
 		TracerProvider: tracerProvider, MeterProvider: meterProvider,
 		Propagator: propagation.TraceContext{}, Observer: observer,
@@ -730,8 +627,8 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	handler.ServeHTTP(httptest.NewRecorder(), unknown)
 	malformed := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"`+marker),
+		"/offers",
+		strings.NewReader(`{"productCode":"`+marker),
 	)
 	malformed.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), malformed)
@@ -748,7 +645,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if strings.Contains(combined, marker) {
 		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
 	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
+	if !strings.Contains(combined, "POST /offers") ||
 		!strings.Contains(combined, "unmatched") ||
 		!strings.Contains(combined, "insurance_hub.service.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
@@ -779,7 +676,7 @@ func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	// when
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/offers", nil))
 
 	// then
 	if recorder.Code != http.StatusServiceUnavailable ||
@@ -836,7 +733,7 @@ func newTestHandlerWithSettings(
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(client, client, Settings{
+	handler, err := NewHandler(client, Settings{
 		RequestTimeout: timeout, MaxBodyBytes: maxBody,
 		TracerProvider: noop.NewTracerProvider(), MeterProvider: meter,
 		Propagator: propagation.TraceContext{}, Observer: observer,
@@ -862,39 +759,12 @@ type fakeClient struct {
 func (client *fakeClient) CreateOffer(
 	ctx context.Context,
 	request *policyv1.CreateOfferRequest,
-	_ ...grpc.CallOption,
+	options ...grpc.CallOption,
 ) (*policyv1.CreateOfferResponse, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.calls++
 	client.offerRequest = request
-	if client.err != nil {
-		return nil, client.err
-	}
-	if client.waitForContext {
-		if client.started != nil {
-			close(client.started)
-		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
-	}
-	return client.offer, nil
-}
-
-func (client *fakeClient) lastOfferRequest() *policyv1.CreateOfferRequest {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.offerRequest
-}
-
-func (client *fakeClient) Echo(
-	ctx context.Context,
-	request *policyv1.EchoRequest,
-	options ...grpc.CallOption,
-) (*policyv1.EchoResponse, error) {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	client.calls++
 	client.metadata, _ = metadata.FromOutgoingContext(ctx)
 	for _, option := range options {
 		switch selected := option.(type) {
@@ -911,13 +781,30 @@ func (client *fakeClient) Echo(
 		if client.started != nil {
 			close(client.started)
 		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
+		select {
+		case <-ctx.Done():
+			return nil, status.FromContextError(ctx.Err()).Err()
+		case <-time.After(5 * time.Second):
+			return nil, status.Error(codes.Internal, "fake RPC had no deadline")
+		}
 	}
-	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
+	if request.GetProductCode() == "" {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
-	return &policyv1.EchoResponse{Message: request.GetMessage()}, nil
+	if client.offer == nil {
+		return &policyv1.CreateOfferResponse{
+			OfferNumber:  "offer-1",
+			TotalPrice:   "78",
+			CoversPrices: map[string]string{"C1": "26"},
+		}, nil
+	}
+	return client.offer, nil
+}
+
+func (client *fakeClient) lastOfferRequest() *policyv1.CreateOfferRequest {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.offerRequest
 }
 
 func (client *fakeClient) callCount() int {

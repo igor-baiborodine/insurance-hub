@@ -30,9 +30,7 @@ import (
 )
 
 const (
-	echoPath   = "/v1/example/echo"
 	offersPath = "/offers"
-	echoRoute  = "POST " + echoPath
 	offerRoute = "POST " + offersPath
 )
 
@@ -45,13 +43,9 @@ type Settings struct {
 	Observer       *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated clients while retaining a strict HTTP contract.
-func NewHandler(
-	echoClient policyv1.ExampleServiceClient,
-	policyClient policyv1.PolicyServiceClient,
-	settings Settings,
-) (http.Handler, error) {
-	if echoClient == nil || policyClient == nil || !validSettings(settings) {
+// NewHandler registers the generated client while retaining a strict HTTP contract.
+func NewHandler(client policyv1.PolicyServiceClient, settings Settings) (http.Handler, error) {
+	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
 	marshaler := newPolicyMarshaler()
@@ -64,22 +58,14 @@ func NewHandler(
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := policyv1.RegisterExampleServiceHandlerClient(
-		context.Background(),
-		mux,
-		echoClient,
-	); err != nil {
-		return nil, errors.New("create gateway: register generated handler")
-	}
 	if err := policyv1.RegisterPolicyServiceHandlerClient(
 		context.Background(),
 		mux,
-		policyClient,
+		client,
 	); err != nil {
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
 	handler.offers = handler.instrument(offerRoute, http.HandlerFunc(handler.serveCreateOffer))
 	handler.unmatched = handler.instrument(
 		"unmatched",
@@ -118,7 +104,6 @@ func validSettings(settings Settings) bool {
 type Handler struct {
 	mux       http.Handler
 	settings  Settings
-	echo      http.Handler
 	offers    http.Handler
 	unmatched http.Handler
 }
@@ -141,15 +126,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if request.Method == http.MethodPost {
-		switch facts.originalPath {
-		case echoPath:
-			handler.echo.ServeHTTP(writer, request)
-			return
-		case offersPath:
-			handler.offers.ServeHTTP(writer, request)
-			return
-		}
+	if facts.originalPath == offersPath && request.Method == http.MethodPost {
+		handler.offers.ServeHTTP(writer, request)
+		return
 	}
 	request.URL.Path = "/unmatched"
 	handler.unmatched.ServeHTTP(writer, request)
@@ -172,23 +151,9 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 	)
 }
 
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
-	handler.serveJSON(writer, request, func(body []byte) ([]byte, bool) {
-		return body, validRequestJSON(body)
-	})
-}
-
-func (handler *Handler) serveCreateOffer(writer http.ResponseWriter, request *http.Request) {
-	handler.serveJSON(writer, request, normalizeOfferJSON)
-}
-
-// serveJSON applies the shared media, size and query rules before the generated route decodes
+// serveCreateOffer applies the media, size and query rules before the generated route decodes
 // the normalized RPC body.
-func (handler *Handler) serveJSON(
-	writer http.ResponseWriter,
-	request *http.Request,
-	normalize func([]byte) ([]byte, bool),
-) {
+func (handler *Handler) serveCreateOffer(writer http.ResponseWriter, request *http.Request) {
 	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
@@ -225,7 +190,7 @@ func (handler *Handler) serveJSON(
 		)
 		return
 	}
-	normalized, ok := normalize(body)
+	normalized, ok := normalizeOfferJSON(body)
 	if !ok {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
@@ -236,7 +201,7 @@ func (handler *Handler) serveJSON(
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == echoPath || facts.originalPath == offersPath {
+	if facts.originalPath == offersPath {
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -327,36 +292,6 @@ func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
 	return data, len(data) > maximum, err
-}
-
-func validRequestJSON(data []byte) bool {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return false
-	}
-	seen := false
-	for decoder.More() {
-		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
-		}
-		seen = true
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return false
-		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
-			}
-		}
-	}
-	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
-	}
-	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
 }
 
 func normalizeOfferJSON(data []byte) ([]byte, bool) {

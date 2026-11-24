@@ -55,7 +55,7 @@ func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := context.Background()
-			request := observer.StartGRPC(ctx, "echo")
+			request := observer.StartGRPC(ctx, "create_offer")
 			// when
 			request.Finish(ctx, rpcCodeName(test.code))
 			// then

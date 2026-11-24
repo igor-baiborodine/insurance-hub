@@ -23,7 +23,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
-	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
@@ -34,31 +34,31 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 		name, message, outcome, status string
 		code                           codes.Code
 		sendLimit, receiveLimit        int
-		echo                           transport.Echo
+		createOffer                    transport.CreateOffer
 		unsupportedCompression         bool
 	}{
 		{
-			name:    "success",
-			message: "private-payload",
-			outcome: "success",
-			status:  "OK",
-			echo:    transport.IdentityEcho,
+			name:        "success",
+			message:     "private-payload",
+			outcome:     "success",
+			status:      "OK",
+			createOffer: succeedOffer,
 		},
 		{
-			name:    "invalid input",
-			outcome: "invalid_request",
-			status:  "INVALID_ARGUMENT",
-			code:    codes.InvalidArgument,
-			echo:    transport.IdentityEcho,
+			name:        "invalid input",
+			outcome:     "invalid_request",
+			status:      "INVALID_ARGUMENT",
+			code:        codes.InvalidArgument,
+			createOffer: succeedOffer,
 		},
 		{
-			name:      "send limit",
-			message:   "private-payload",
-			outcome:   "invalid_request",
-			status:    "RESOURCE_EXHAUSTED",
-			code:      codes.ResourceExhausted,
-			sendLimit: 1,
-			echo:      transport.IdentityEcho,
+			name:        "send limit",
+			message:     "private-payload",
+			outcome:     "invalid_request",
+			status:      "RESOURCE_EXHAUSTED",
+			code:        codes.ResourceExhausted,
+			sendLimit:   1,
+			createOffer: succeedOffer,
 		},
 		{
 			name:         "receive limit",
@@ -67,7 +67,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			status:       "RESOURCE_EXHAUSTED",
 			code:         codes.ResourceExhausted,
 			receiveLimit: 1,
-			echo:         transport.IdentityEcho,
+			createOffer:  succeedOffer,
 		},
 		{
 			name:    "internal failure",
@@ -75,7 +75,9 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			outcome: "internal_error",
 			status:  "INTERNAL",
 			code:    codes.Internal,
-			echo:    func(context.Context, string) (string, error) { return "", errors.New("private-error") },
+			createOffer: func(context.Context, domain.OfferRequest) (domain.Offer, error) {
+				return domain.Offer{}, errors.New("private-error")
+			},
 		},
 		{
 			name:                   "unsupported compression",
@@ -83,7 +85,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			outcome:                "invalid_request",
 			status:                 "UNIMPLEMENTED",
 			code:                   codes.Unimplemented,
-			echo:                   transport.IdentityEcho,
+			createOffer:            succeedOffer,
 			unsupportedCompression: true,
 		},
 		{
@@ -92,7 +94,10 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			outcome: "deadline_exceeded",
 			status:  "DEADLINE_EXCEEDED",
 			code:    codes.DeadlineExceeded,
-			echo:    func(ctx context.Context, _ string) (string, error) { <-ctx.Done(); return "", ctx.Err() },
+			createOffer: func(ctx context.Context, _ domain.OfferRequest) (domain.Offer, error) {
+				<-ctx.Done()
+				return domain.Offer{}, ctx.Err()
+			},
 		},
 	}
 	for _, test := range cases {
@@ -126,11 +131,16 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 				)
 				options = append(options, compressor)
 			}
-			client, stop := runtimeClient(t, settings, test.echo, &logs, options...)
+			client, stop := runtimeClient(
+				t,
+				settings,
+				test.createOffer,
+				&logs,
+				options...)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			// when
-			_, err = client.Echo(ctx, &policyv1.EchoRequest{Message: test.message})
+			_, err = client.CreateOffer(ctx, offerRequestFor(test.message))
 			stop()
 			// then
 			if status.Code(err) != test.code {
@@ -173,7 +183,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 							attrs[string(attr.Key)] = attr.Value.AsString()
 						}
 						if len(attrs) != 4 ||
-							attrs["insurance_hub.service.operation"] != "echo" ||
+							attrs["insurance_hub.service.operation"] != "create_offer" ||
 							attrs["insurance_hub.service.outcome"] != test.outcome ||
 							attrs["rpc.response.status_code"] != test.status {
 							t.Errorf(
@@ -194,19 +204,19 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 func TestServer_PreservesShorterCallerDeadline(t *testing.T) {
 	// given
 	deadlineSeen := make(chan time.Time, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
+	createOffer := func(ctx context.Context, _ domain.OfferRequest) (domain.Offer, error) {
 		deadline, _ := ctx.Deadline()
 		deadlineSeen <- deadline
 		<-ctx.Done()
-		return "", ctx.Err()
+		return domain.Offer{}, ctx.Err()
 	}
-	client, stop := runtimeClient(t, defaultSettings(), echo, new(bytes.Buffer))
+	client, stop := runtimeClient(t, defaultSettings(), createOffer, new(bytes.Buffer))
 	defer stop()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	// when
-	_, err := client.Echo(ctx, &policyv1.EchoRequest{Message: "hello"})
+	_, err := client.CreateOffer(ctx, validOfferRequest())
 	// then
 	if status.Code(err) != codes.DeadlineExceeded {
 		t.Fatalf("status=%v", err)
@@ -225,10 +235,10 @@ func TestServer_PreservesShorterCallerDeadline(t *testing.T) {
 func runtimeClient(
 	t *testing.T,
 	settings transport.Settings,
-	echo transport.Echo,
+	createOffer transport.CreateOffer,
 	logs *bytes.Buffer,
 	options ...grpcgo.DialOption,
-) (policyv1.ExampleServiceClient, func()) {
+) (policyv1.PolicyServiceClient, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -239,8 +249,7 @@ func runtimeClient(
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		settings,
-		echo,
-		application.UnavailableOffers,
+		createOffer,
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -279,7 +288,21 @@ func runtimeClient(
 		}
 	}
 	t.Cleanup(stop)
-	return policyv1.NewExampleServiceClient(connection), stop
+	return policyv1.NewPolicyServiceClient(connection), stop
+}
+
+// succeedOffer returns a fixed committed offer for transport tests.
+func succeedOffer(context.Context, domain.OfferRequest) (domain.Offer, error) {
+	return domain.Offer{
+		Number: "offer-1", TotalPrice: "78", CoverPrices: map[string]string{"C1": "26"},
+	}, nil
+}
+
+// offerRequestFor returns a valid request carrying the product code, or an invalid one for "".
+func offerRequestFor(productCode string) *policyv1.CreateOfferRequest {
+	request := validOfferRequest()
+	request.ProductCode = productCode
+	return request
 }
 
 type unsupportedCompressor struct{}

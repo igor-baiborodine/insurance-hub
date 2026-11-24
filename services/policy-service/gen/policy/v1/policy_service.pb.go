@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: policy/v1/example_service.proto
+// source: policy/v1/policy_service.proto
 
 package policyv1
 
@@ -24,94 +24,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type EchoRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EchoRequest) Reset() {
-	*x = EchoRequest{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EchoRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EchoRequest) ProtoMessage() {}
-
-func (x *EchoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EchoRequest.ProtoReflect.Descriptor instead.
-func (*EchoRequest) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *EchoRequest) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-type EchoResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EchoResponse) Reset() {
-	*x = EchoResponse{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EchoResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EchoResponse) ProtoMessage() {}
-
-func (x *EchoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EchoResponse.ProtoReflect.Descriptor instead.
-func (*EchoResponse) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *EchoResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 type CreateOfferRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ProductCode    string                 `protobuf:"bytes,1,opt,name=product_code,json=productCode,proto3" json:"product_code,omitempty"`
@@ -125,7 +37,7 @@ type CreateOfferRequest struct {
 
 func (x *CreateOfferRequest) Reset() {
 	*x = CreateOfferRequest{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[2]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -137,7 +49,7 @@ func (x *CreateOfferRequest) String() string {
 func (*CreateOfferRequest) ProtoMessage() {}
 
 func (x *CreateOfferRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[2]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -150,7 +62,7 @@ func (x *CreateOfferRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateOfferRequest.ProtoReflect.Descriptor instead.
 func (*CreateOfferRequest) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{2}
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CreateOfferRequest) GetProductCode() string {
@@ -204,7 +116,7 @@ type OfferAnswer struct {
 
 func (x *OfferAnswer) Reset() {
 	*x = OfferAnswer{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[3]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +128,7 @@ func (x *OfferAnswer) String() string {
 func (*OfferAnswer) ProtoMessage() {}
 
 func (x *OfferAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[3]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +141,7 @@ func (x *OfferAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OfferAnswer.ProtoReflect.Descriptor instead.
 func (*OfferAnswer) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{3}
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *OfferAnswer) GetQuestionCode() string {
@@ -306,7 +218,7 @@ type CreateOfferResponse struct {
 
 func (x *CreateOfferResponse) Reset() {
 	*x = CreateOfferResponse{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[4]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +230,7 @@ func (x *CreateOfferResponse) String() string {
 func (*CreateOfferResponse) ProtoMessage() {}
 
 func (x *CreateOfferResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[4]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +243,7 @@ func (x *CreateOfferResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateOfferResponse.ProtoReflect.Descriptor instead.
 func (*CreateOfferResponse) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{4}
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateOfferResponse) GetOfferNumber() string {
@@ -367,7 +279,7 @@ type CreateOfferHTTPResponse struct {
 
 func (x *CreateOfferHTTPResponse) Reset() {
 	*x = CreateOfferHTTPResponse{}
-	mi := &file_policy_v1_example_service_proto_msgTypes[5]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -379,7 +291,7 @@ func (x *CreateOfferHTTPResponse) String() string {
 func (*CreateOfferHTTPResponse) ProtoMessage() {}
 
 func (x *CreateOfferHTTPResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_policy_v1_example_service_proto_msgTypes[5]
+	mi := &file_policy_v1_policy_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -392,7 +304,7 @@ func (x *CreateOfferHTTPResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateOfferHTTPResponse.ProtoReflect.Descriptor instead.
 func (*CreateOfferHTTPResponse) Descriptor() ([]byte, []int) {
-	return file_policy_v1_example_service_proto_rawDescGZIP(), []int{5}
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CreateOfferHTTPResponse) GetOfferNumber() string {
@@ -416,16 +328,11 @@ func (x *CreateOfferHTTPResponse) GetCoversPrices() map[string]float64 {
 	return nil
 }
 
-var File_policy_v1_example_service_proto protoreflect.FileDescriptor
+var File_policy_v1_policy_service_proto protoreflect.FileDescriptor
 
-const file_policy_v1_example_service_proto_rawDesc = "" +
+const file_policy_v1_policy_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1fpolicy/v1/example_service.proto\x12\tpolicy.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"3\n" +
-	"\vEchoRequest\x12$\n" +
-	"\amessage\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05 \x01(\x80\x01R\amessage\"(\n" +
-	"\fEchoResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xb7\x02\n" +
+	"\x1epolicy/v1/policy_service.proto\x12\tpolicy.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xb7\x02\n" +
 	"\x12CreateOfferRequest\x12,\n" +
 	"\fproduct_code\x18\x01 \x01(\tB\t\xbaH\x06r\x04 \x01(@R\vproductCode\x12D\n" +
 	"\vpolicy_from\x18\x02 \x01(\tB#\xbaH r\x1e2\x1c^[0-9]{4}-[0-9]{2}-[0-9]{2}$R\n" +
@@ -455,48 +362,7 @@ const file_policy_v1_example_service_proto_rawDesc = "" +
 	"\rcovers_prices\x18\x03 \x03(\v24.policy.v1.CreateOfferHTTPResponse.CoversPricesEntryR\fcoversPrices\x1a?\n" +
 	"\x11CoversPricesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x012\x85\v\n" +
-	"\x0eExampleService\x12\xf2\n" +
-	"\n" +
-	"\x04Echo\x12\x16.policy.v1.EchoRequest\x1a\x17.policy.v1.EchoResponse\"\xb8\n" +
-	"\x92A\x99\n" +
-	"2\x10application/json:\x10application/jsonJj\n" +
-	"\x03200\x12c\n" +
-	"\x1bThe unchanged Echo message.\x12\x1b\n" +
-	"\x19\x1a\x17.policy.v1.EchoResponse\"'\n" +
-	"\x10application/json\x12\x13{\"message\":\"hello\"}J\x81\x01\n" +
-	"\x03400\x12z\n" +
-	"\x17The request is invalid.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"G\n" +
-	"\x10application/json\x123{\"code\":3,\"message\":\"invalid request\",\"details\":[]}J\x9d\x01\n" +
-	"\x03406\x12\x95\x01\n" +
-	"3The requested response media type is not available.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"F\n" +
-	"\x10application/json\x122{\"code\":3,\"message\":\"not acceptable\",\"details\":[]}J\x90\x01\n" +
-	"\x03413\x12\x88\x01\n" +
-	"\x1eThe request body is too large.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"N\n" +
-	"\x10application/json\x12:{\"code\":8,\"message\":\"request body too large\",\"details\":[]}J\x9a\x01\n" +
-	"\x03415\x12\x92\x01\n" +
-	"(The request media type is not supported.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"N\n" +
-	"\x10application/json\x12:{\"code\":3,\"message\":\"unsupported media type\",\"details\":[]}J\x84\x01\n" +
-	"\x03499\x12}\n" +
-	"\x19The request was canceled.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"H\n" +
-	"\x10application/json\x124{\"code\":1,\"message\":\"request canceled\",\"details\":[]}J\x8b\x01\n" +
-	"\x03500\x12\x83\x01\n" +
-	" The request failed unexpectedly.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"G\n" +
-	"\x10application/json\x123{\"code\":13,\"message\":\"internal error\",\"details\":[]}J\x8f\x01\n" +
-	"\x03503\x12\x87\x01\n" +
-	"\x1fThe RPC service is unavailable.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"L\n" +
-	"\x10application/json\x128{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}J\x8b\x01\n" +
-	"\x03504\x12\x83\x01\n" +
-	"\x1eThe RPC deadline was exceeded.\x12\x16\n" +
-	"\x14\x1a\x12.google.rpc.Status\"I\n" +
-	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/example/echo2\xab\r\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x012\xab\r\n" +
 	"\rPolicyService\x12\x99\r\n" +
 	"\vCreateOffer\x12\x1d.policy.v1.CreateOfferRequest\x1a\x1e.policy.v1.CreateOfferResponse\"\xca\f\x92A\xb4\f2\x10application/json:\x10application/jsonJ\xe4\x01\n" +
 	"\x03200\x12\xdc\x01\n" +
@@ -541,49 +407,45 @@ const file_policy_v1_example_service_proto_rawDesc = "" +
 	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\f:\x01*\"\a/offersBZZXgithub.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1;policyv1b\x06proto3"
 
 var (
-	file_policy_v1_example_service_proto_rawDescOnce sync.Once
-	file_policy_v1_example_service_proto_rawDescData []byte
+	file_policy_v1_policy_service_proto_rawDescOnce sync.Once
+	file_policy_v1_policy_service_proto_rawDescData []byte
 )
 
-func file_policy_v1_example_service_proto_rawDescGZIP() []byte {
-	file_policy_v1_example_service_proto_rawDescOnce.Do(func() {
-		file_policy_v1_example_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_policy_v1_example_service_proto_rawDesc), len(file_policy_v1_example_service_proto_rawDesc)))
+func file_policy_v1_policy_service_proto_rawDescGZIP() []byte {
+	file_policy_v1_policy_service_proto_rawDescOnce.Do(func() {
+		file_policy_v1_policy_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_policy_v1_policy_service_proto_rawDesc), len(file_policy_v1_policy_service_proto_rawDesc)))
 	})
-	return file_policy_v1_example_service_proto_rawDescData
+	return file_policy_v1_policy_service_proto_rawDescData
 }
 
-var file_policy_v1_example_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_policy_v1_example_service_proto_goTypes = []any{
-	(*EchoRequest)(nil),             // 0: policy.v1.EchoRequest
-	(*EchoResponse)(nil),            // 1: policy.v1.EchoResponse
-	(*CreateOfferRequest)(nil),      // 2: policy.v1.CreateOfferRequest
-	(*OfferAnswer)(nil),             // 3: policy.v1.OfferAnswer
-	(*CreateOfferResponse)(nil),     // 4: policy.v1.CreateOfferResponse
-	(*CreateOfferHTTPResponse)(nil), // 5: policy.v1.CreateOfferHTTPResponse
-	nil,                             // 6: policy.v1.CreateOfferResponse.CoversPricesEntry
-	nil,                             // 7: policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
+var file_policy_v1_policy_service_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_policy_v1_policy_service_proto_goTypes = []any{
+	(*CreateOfferRequest)(nil),      // 0: policy.v1.CreateOfferRequest
+	(*OfferAnswer)(nil),             // 1: policy.v1.OfferAnswer
+	(*CreateOfferResponse)(nil),     // 2: policy.v1.CreateOfferResponse
+	(*CreateOfferHTTPResponse)(nil), // 3: policy.v1.CreateOfferHTTPResponse
+	nil,                             // 4: policy.v1.CreateOfferResponse.CoversPricesEntry
+	nil,                             // 5: policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
 }
-var file_policy_v1_example_service_proto_depIdxs = []int32{
-	3, // 0: policy.v1.CreateOfferRequest.answers:type_name -> policy.v1.OfferAnswer
-	6, // 1: policy.v1.CreateOfferResponse.covers_prices:type_name -> policy.v1.CreateOfferResponse.CoversPricesEntry
-	7, // 2: policy.v1.CreateOfferHTTPResponse.covers_prices:type_name -> policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
-	0, // 3: policy.v1.ExampleService.Echo:input_type -> policy.v1.EchoRequest
-	2, // 4: policy.v1.PolicyService.CreateOffer:input_type -> policy.v1.CreateOfferRequest
-	1, // 5: policy.v1.ExampleService.Echo:output_type -> policy.v1.EchoResponse
-	4, // 6: policy.v1.PolicyService.CreateOffer:output_type -> policy.v1.CreateOfferResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
+var file_policy_v1_policy_service_proto_depIdxs = []int32{
+	1, // 0: policy.v1.CreateOfferRequest.answers:type_name -> policy.v1.OfferAnswer
+	4, // 1: policy.v1.CreateOfferResponse.covers_prices:type_name -> policy.v1.CreateOfferResponse.CoversPricesEntry
+	5, // 2: policy.v1.CreateOfferHTTPResponse.covers_prices:type_name -> policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
+	0, // 3: policy.v1.PolicyService.CreateOffer:input_type -> policy.v1.CreateOfferRequest
+	2, // 4: policy.v1.PolicyService.CreateOffer:output_type -> policy.v1.CreateOfferResponse
+	4, // [4:5] is the sub-list for method output_type
+	3, // [3:4] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_policy_v1_example_service_proto_init() }
-func file_policy_v1_example_service_proto_init() {
-	if File_policy_v1_example_service_proto != nil {
+func init() { file_policy_v1_policy_service_proto_init() }
+func file_policy_v1_policy_service_proto_init() {
+	if File_policy_v1_policy_service_proto != nil {
 		return
 	}
-	file_policy_v1_example_service_proto_msgTypes[3].OneofWrappers = []any{
+	file_policy_v1_policy_service_proto_msgTypes[1].OneofWrappers = []any{
 		(*OfferAnswer_Choice)(nil),
 		(*OfferAnswer_Text)(nil),
 		(*OfferAnswer_Number)(nil),
@@ -592,17 +454,17 @@ func file_policy_v1_example_service_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_policy_v1_example_service_proto_rawDesc), len(file_policy_v1_example_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_policy_v1_policy_service_proto_rawDesc), len(file_policy_v1_policy_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
-			NumServices:   2,
+			NumServices:   1,
 		},
-		GoTypes:           file_policy_v1_example_service_proto_goTypes,
-		DependencyIndexes: file_policy_v1_example_service_proto_depIdxs,
-		MessageInfos:      file_policy_v1_example_service_proto_msgTypes,
+		GoTypes:           file_policy_v1_policy_service_proto_goTypes,
+		DependencyIndexes: file_policy_v1_policy_service_proto_depIdxs,
+		MessageInfos:      file_policy_v1_policy_service_proto_msgTypes,
 	}.Build()
-	File_policy_v1_example_service_proto = out.File
-	file_policy_v1_example_service_proto_goTypes = nil
-	file_policy_v1_example_service_proto_depIdxs = nil
+	File_policy_v1_policy_service_proto = out.File
+	file_policy_v1_policy_service_proto_goTypes = nil
+	file_policy_v1_policy_service_proto_depIdxs = nil
 }

@@ -84,15 +84,16 @@ type dependencies struct {
 	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo, transport.CreateOffer) (grpcServer, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.CreateOffer) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newProvider    func(string, telemetryProvider) (providerConnection, error)
 	now            func() time.Time
-	newGateway     func(policyv1.ExampleServiceClient, policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
+	// createOffer, when set, replaces the composed offer use case.
+	createOffer transport.CreateOffer
 }
 
 func productionDependencies() dependencies {
@@ -105,13 +106,12 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo, createOffer transport.CreateOffer) (grpcServer, error) {
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, createOffer transport.CreateOffer) (grpcServer, error) {
 			return transport.NewServer(
 				logger,
 				tracer,
 				propagator,
 				settings,
-				echo,
 				createOffer,
 			)
 		},
@@ -131,7 +131,6 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
 }
 
@@ -259,7 +258,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo, createOffer,
+		}, createOffer,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -319,7 +318,6 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		policyv1.NewExampleServiceClient(runtime.connection),
 		policyv1.NewPolicyServiceClient(runtime.connection),
 		gatewaySettings,
 	)
@@ -376,6 +374,9 @@ func (runtime *runningService) composeOffers(
 	provider telemetryProvider,
 	deps dependencies,
 ) (transport.CreateOffer, error) {
+	if deps.createOffer != nil {
+		return deps.createOffer, nil
+	}
 	if runtime.pool == nil || !settings.Providers.Configured() {
 		return application.UnavailableOffers, nil
 	}

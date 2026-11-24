@@ -47,7 +47,8 @@ source-matched image to perform operations. For disposable qualification, build 
 below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
-It runs only the private workload checks (Echo, probes, identity, Pod denial and scale-to-zero).
+It runs only the private workload checks (offer rejection, probes, identity, Pod denial and
+scale-to-zero).
 Shared routing and coexistence checks run only through `go-svc-deploy-verify` against local-dev and
 QA.
 
@@ -119,7 +120,8 @@ to match the ready Pod image ID.
 ## Private smoke and recovery
 
 `go-svc-deploy-verify` resolves the ready Policy Pod and uses private port-forwards for all
-three listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management
+three listeners. It checks that HTTP and generated-client gRPC reject an empty offer with
+`InvalidArgument` (HTTP 400) before any provider call or write, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
 UID. It also reads the configured gateway and external Policy endpoint contract without mutation
 to ensure this private workload does not change shared routing. For manual troubleshooting, forward
@@ -138,8 +140,9 @@ an ordinary workload cannot open any Policy port and removes its own probe Pod.
 In another terminal, use bounded requests against the loopback ports.
 
 ```bash
-curl --fail --max-time 5 -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' http://127.0.0.1:18080/v1/example/echo
+# An empty offer is rejected before any provider call or write: expect 400 and code 3.
+curl --max-time 5 -sS -w '\n%{http_code}\n' -H 'Content-Type: application/json' \
+  -d '{}' http://127.0.0.1:18080/offers
 make -C services/policy-service _deploy-smoke-rpc POLICY_SMOKE_GRPC_ADDR=127.0.0.1:19090
 curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz

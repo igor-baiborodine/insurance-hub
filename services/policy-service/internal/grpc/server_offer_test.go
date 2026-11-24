@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,12 +12,8 @@ import (
 
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace/noop"
-	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-
-	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
@@ -203,39 +198,7 @@ func newPolicyClient(
 	logs *bytes.Buffer,
 ) policyv1.PolicyServiceClient {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server, err := transport.NewServer(
-		logger.New(logs, "policy-service", 0),
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		defaultSettings(),
-		transport.IdentityEcho,
-		createOffer,
+	return newTracedPolicyClient(
+		t, createOffer, noop.NewTracerProvider(), propagation.TraceContext{}, logs,
 	)
-	if err != nil {
-		_ = listener.Close()
-		t.Fatal(err)
-	}
-	served := make(chan struct{})
-	go func() {
-		defer close(served)
-		_ = server.Serve(listener)
-	}()
-	connection, err := grpcgo.NewClient(
-		listener.Addr().String(),
-		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		server.Stop()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = connection.Close()
-		server.Stop()
-		<-served
-	})
-	return policyv1.NewPolicyServiceClient(connection)
 }

@@ -33,23 +33,11 @@ const (
 
 // operations names the observed RPCs; other methods are not instrumented.
 var operations = map[string]string{
-	policyv1.ExampleService_Echo_FullMethodName:       "echo",
 	policyv1.PolicyService_CreateOffer_FullMethodName: "create_offer",
 }
 
 // CreateOffer is the offer use case invoked by the PolicyService transport.
 type CreateOffer func(context.Context, domain.OfferRequest) (domain.Offer, error)
-
-// Echo handles the example's single responsibility independently of transport details.
-type Echo func(context.Context, string) (string, error)
-
-// IdentityEcho returns the supplied message while preserving a canceled request context.
-func IdentityEcho(ctx context.Context, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return message, nil
-}
 
 type Settings struct {
 	RequestTimeout  time.Duration
@@ -59,13 +47,12 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated services.
+// NewServer constructs the instrumented server and registers the generated PolicyService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	echo Echo,
 	createOffer CreateOffer,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
@@ -77,8 +64,8 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil || createOffer == nil {
-		return nil, errors.New("create gRPC server: echo and offer handlers are required")
+	if createOffer == nil {
+		return nil, errors.New("create gRPC server: offer handler is required")
 	}
 
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
@@ -89,7 +76,7 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&policyv1.EchoRequest{}, &policyv1.CreateOfferRequest{}),
+		protovalidate.WithMessages(&policyv1.CreateOfferRequest{}),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -119,11 +106,6 @@ func NewServer(
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	policyv1.RegisterExampleServiceServer(server, &exampleServer{
-		logger:         logger,
-		requestTimeout: settings.RequestTimeout,
-		echo:           echo,
-	})
 	policyv1.RegisterPolicyServiceServer(server, &policyServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
@@ -222,41 +204,6 @@ func (server *policyServer) offerError(ctx context.Context, err error) error {
 		)
 		return status.Error(codes.Internal, internalMessage)
 	}
-}
-
-type exampleServer struct {
-	policyv1.UnimplementedExampleServiceServer
-	logger         *slog.Logger
-	requestTimeout time.Duration
-	echo           Echo
-}
-
-func (server *exampleServer) Echo(
-	ctx context.Context,
-	request *policyv1.EchoRequest,
-) (*policyv1.EchoResponse, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
-	defer cancel()
-	message, err := server.echo(requestCtx, request.GetMessage())
-	if err == nil {
-		err = requestCtx.Err()
-	}
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, context.Canceled.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(
-				codes.DeadlineExceeded,
-				context.DeadlineExceeded.Error(),
-			)
-		}
-		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", policyv1.ExampleService_Echo_FullMethodName),
-		)
-		return nil, status.Error(codes.Internal, internalMessage)
-	}
-	return &policyv1.EchoResponse{Message: message}, nil
 }
 
 func validationInterceptor(

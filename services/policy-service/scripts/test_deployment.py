@@ -467,8 +467,8 @@ def test_workload_verification_does_not_depend_on_java_policy(
             return None
 
     def answer(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
-        if payload:
-            return 200, payload
+        if path == "/offers" and payload == b"{}":
+            return 400, b'{"code":3,"message":"invalid request","details":[]}'
         return 200, b"live\n" if path == "/livez" else b"ready\n"
 
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)

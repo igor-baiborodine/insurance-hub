@@ -28,16 +28,16 @@ GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/policy/v1/example_service.proto
+PROTO_SCHEMA := api/policy/v1/policy_service.proto
 # Policy-local client bindings are generated from exact copies of the provider-owned contracts.
 PROVIDER_PROTOS := api/product/v1/product_service.proto api/pricing/v1/pricing_service.proto
 PROTO_GENERATION_INPUTS := $(PROTO_SCHEMA) $(PROVIDER_PROTOS)
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/policy/v1/example_service.pb.go \
-	gen/policy/v1/example_service.pb.gw.go \
-	gen/policy/v1/example_service_grpc.pb.go \
-	gen/openapiv2/policy/v1/example_service.swagger.json \
+	gen/policy/v1/policy_service.pb.go \
+	gen/policy/v1/policy_service.pb.gw.go \
+	gen/policy/v1/policy_service_grpc.pb.go \
+	gen/openapiv2/policy/v1/policy_service.swagger.json \
 	gen/product/v1/product_service.pb.go \
 	gen/product/v1/product_service_grpc.pb.go \
 	gen/pricing/v1/pricing_service.pb.go \
@@ -201,7 +201,7 @@ check-provider-protos: ## Verify the provider client contracts match their ownin
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/policy/v1/example_service.swagger.json
+		--swagger gen/openapiv2/policy/v1/policy_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -284,7 +284,7 @@ deploy-smoke: python-toolchain-check
 
 _deploy-smoke-rpc:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run '^TestDeployedDirectRPC_Echo$$' -json ./internal/service
+		-run '^TestDeployedDirectRPC_CreateOffer$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \

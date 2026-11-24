@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,29 +20,29 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
 )
 
-func TestExampleService_GeneratedIdentity(t *testing.T) {
+func TestPolicyService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
-		wantFile       = "policy/v1/example_service.proto"
+		wantFile       = "policy/v1/policy_service.proto"
 		wantPackage    = "policy.v1"
 		wantModule     = "github.com/igor-baiborodine/insurance-hub/services/policy-service"
-		wantService    = "policy.v1.ExampleService"
-		wantFullMethod = "/policy.v1.ExampleService/Echo"
+		wantService    = "policy.v1.PolicyService"
+		wantFullMethod = "/policy.v1.PolicyService/CreateOffer"
 	)
 	wantGoPackage := wantModule + "/gen/policy/v1;policyv1"
 
 	// when
-	descriptor := (&policyv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+	descriptor := (&policyv1.CreateOfferRequest{}).ProtoReflect().Descriptor().ParentFile()
 
 	// then
 	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
@@ -65,129 +64,30 @@ func TestExampleService_GeneratedIdentity(t *testing.T) {
 	if options.GetGoPackage() != wantGoPackage {
 		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
 	}
-	service := descriptor.Services().ByName("ExampleService")
+	service := descriptor.Services().ByName("PolicyService")
 	if service == nil || string(service.FullName()) != wantService {
 		t.Errorf("service descriptor = %v, want %q", service, wantService)
 	}
-	if policyv1.ExampleService_Echo_FullMethodName != wantFullMethod {
+	if policyv1.PolicyService_CreateOffer_FullMethodName != wantFullMethod {
 		t.Errorf(
 			"full method = %q, want %q",
-			policyv1.ExampleService_Echo_FullMethodName,
+			policyv1.PolicyService_CreateOffer_FullMethodName,
 			wantFullMethod,
 		)
 	}
 }
 
-func TestExampleService_Echo_Boundaries(t *testing.T) {
-	// given
-	var calls atomic.Int64
-	echo := func(ctx context.Context, message string) (string, error) {
-		calls.Add(1)
-		return transport.IdentityEcho(ctx, message)
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	tests := []struct {
-		name     string
-		message  string
-		wantCode codes.Code
-		wantCall bool
-	}{
-		{name: "empty", message: "", wantCode: codes.InvalidArgument},
-		{name: "one ASCII byte", message: "a", wantCode: codes.OK, wantCall: true},
-		{name: "two-byte UTF-8", message: "é", wantCode: codes.OK, wantCall: true},
-		{
-			name:     "128 ASCII bytes",
-			message:  strings.Repeat("a", 128),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "128 multibyte UTF-8 bytes",
-			message:  strings.Repeat("é", 64),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "129 ASCII bytes",
-			message:  strings.Repeat("a", 129),
-			wantCode: codes.InvalidArgument,
-		},
-		{
-			name:     "129 bytes ending in ASCII after multibyte UTF-8",
-			message:  strings.Repeat("é", 64) + "a",
-			wantCode: codes.InvalidArgument,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// given
-			callsBefore := calls.Load()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-
-			// when
-			response, err := client.Echo(
-				ctx,
-				&policyv1.EchoRequest{Message: test.message},
-			)
-
-			// then
-			if status.Code(err) != test.wantCode {
-				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
-				)
-			}
-			wantCalls := callsBefore
-			if test.wantCall {
-				wantCalls++
-			}
-			if calls.Load() != wantCalls {
-				t.Errorf("handler calls = %d, want %d", calls.Load(), wantCalls)
-			}
-			if test.wantCode != codes.OK {
-				if response != nil {
-					t.Errorf("response = %v, want nil", response)
-				}
-				if status.Convert(err).Message() != "invalid request" {
-					t.Errorf(
-						"message = %q, want invalid request",
-						status.Convert(err).Message(),
-					)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Echo: %v", err)
-			}
-			want := &policyv1.EchoResponse{Message: test.message}
-			if !proto.Equal(response, want) {
-				t.Errorf("response = %v, want byte-identical message", response)
-			}
-		})
-	}
-}
-
-func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
+func TestPolicyService_CreateOffer_PreservesCancellation(t *testing.T) {
 	// given
 	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
+	createOffer := func(ctx context.Context, _ domain.OfferRequest) (domain.Offer, error) {
 		close(started)
 		<-ctx.Done()
-		return "", ctx.Err()
+		return domain.Offer{}, ctx.Err()
 	}
-	client := newExampleClient(
+	client := newTracedPolicyClient(
 		t,
-		echo,
+		createOffer,
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		new(bytes.Buffer),
@@ -197,7 +97,7 @@ func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
 
 	// when
 	go func() {
-		_, err := client.Echo(ctx, &policyv1.EchoRequest{Message: "cancel"})
+		_, err := client.CreateOffer(ctx, validOfferRequest())
 		result <- err
 	}()
 
@@ -222,17 +122,17 @@ func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
 	}
 }
 
-func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
+func TestPolicyService_CreateOffer_PreservesDeadline(t *testing.T) {
 	// given
 	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
+	createOffer := func(ctx context.Context, _ domain.OfferRequest) (domain.Offer, error) {
 		close(started)
 		<-ctx.Done()
-		return "", ctx.Err()
+		return domain.Offer{}, ctx.Err()
 	}
-	client := newExampleClient(
+	client := newTracedPolicyClient(
 		t,
-		echo,
+		createOffer,
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		new(bytes.Buffer),
@@ -243,7 +143,7 @@ func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
 
 	// when
 	go func() {
-		_, err := client.Echo(ctx, &policyv1.EchoRequest{Message: "deadline"})
+		_, err := client.CreateOffer(ctx, validOfferRequest())
 		result <- err
 	}()
 
@@ -263,74 +163,7 @@ func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
 	}
 }
 
-func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
-	// given
-	tests := []struct {
-		name       string
-		handlerErr error
-		wantCode   codes.Code
-	}{
-		{name: "canceled", handlerErr: context.Canceled, wantCode: codes.Canceled},
-		{
-			name:       "deadline exceeded",
-			handlerErr: context.DeadlineExceeded,
-			wantCode:   codes.DeadlineExceeded,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// given
-			handlerContextErr := make(chan error, 1)
-			echo := func(ctx context.Context, _ string) (string, error) {
-				handlerContextErr <- ctx.Err()
-				return "", test.handlerErr
-			}
-			client := newExampleClient(
-				t,
-				echo,
-				noop.NewTracerProvider(),
-				propagation.TraceContext{},
-				new(bytes.Buffer),
-			)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// when
-			response, err := client.Echo(
-				ctx,
-				&policyv1.EchoRequest{Message: "handler context error"},
-			)
-
-			// then
-			if handlerErr := <-handlerContextErr; handlerErr != nil {
-				t.Errorf(
-					"handler context error before return = %v, want nil",
-					handlerErr,
-				)
-			}
-			if ctx.Err() != nil {
-				t.Errorf(
-					"client context error after response = %v, want nil",
-					ctx.Err(),
-				)
-			}
-			if response != nil {
-				t.Errorf("response = %v, want nil", response)
-			}
-			if status.Code(err) != test.wantCode {
-				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
-					err,
-				)
-			}
-		})
-	}
-}
-
-func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
+func TestPolicyService_CreateOffer_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
 	// given
 	const (
 		payloadMarker = "payload-marker"
@@ -346,18 +179,18 @@ func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T)
 		}
 	})
 	handlerContext := make(chan trace.SpanContext, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
+	createOffer := func(ctx context.Context, _ domain.OfferRequest) (domain.Offer, error) {
 		handlerContext <- trace.SpanContextFromContext(ctx)
-		return "", status.Error(codes.Unknown, privateMarker)
+		return domain.Offer{}, status.Error(codes.Unknown, privateMarker)
 	}
 	var logs bytes.Buffer
 	propagator := propagation.TraceContext{}
-	client := newExampleClient(t, echo, tracerProvider, propagator, &logs)
+	client := newTracedPolicyClient(t, createOffer, tracerProvider, propagator, &logs)
 	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
 	parentSpanContext := parentSpan.SpanContext()
 
 	// when
-	response, err := client.Echo(parentCtx, &policyv1.EchoRequest{Message: payloadMarker})
+	response, err := client.CreateOffer(parentCtx, offerRequestFor(payloadMarker))
 	parentSpan.End()
 
 	// then
@@ -426,13 +259,11 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 		loggerMissing     bool
 		tracerMissing     bool
 		propagatorMissing bool
-		echoMissing       bool
 		offerMissing      bool
 	}{
 		{name: "logger", loggerMissing: true},
 		{name: "tracer provider", tracerMissing: true},
 		{name: "propagator", propagatorMissing: true},
-		{name: "echo handler", echoMissing: true},
 		{name: "offer handler", offerMissing: true},
 	}
 	for _, test := range tests {
@@ -441,7 +272,6 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			selectedLogger := log
 			selectedTracer := trace.TracerProvider(tracerProvider)
 			selectedPropagator := propagation.TextMapPropagator(propagator)
-			selectedEcho := transport.Echo(transport.IdentityEcho)
 			selectedOffer := transport.CreateOffer(application.UnavailableOffers)
 			if test.loggerMissing {
 				selectedLogger = nil
@@ -451,9 +281,6 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			}
 			if test.propagatorMissing {
 				selectedPropagator = nil
-			}
-			if test.echoMissing {
-				selectedEcho = nil
 			}
 			if test.offerMissing {
 				selectedOffer = nil
@@ -465,7 +292,6 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 				selectedTracer,
 				selectedPropagator,
 				defaultSettings(),
-				selectedEcho,
 				selectedOffer,
 			)
 
@@ -477,13 +303,13 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 	}
 }
 
-func newExampleClient(
+func newTracedPolicyClient(
 	t *testing.T,
-	echo transport.Echo,
+	createOffer transport.CreateOffer,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	logs *bytes.Buffer,
-) policyv1.ExampleServiceClient {
+) policyv1.PolicyServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -494,8 +320,7 @@ func newExampleClient(
 		tracerProvider,
 		propagator,
 		defaultSettings(),
-		echo,
-		application.UnavailableOffers,
+		createOffer,
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -536,7 +361,7 @@ func newExampleClient(
 			t.Error("server did not stop")
 		}
 	})
-	return policyv1.NewExampleServiceClient(connection)
+	return policyv1.NewPolicyServiceClient(connection)
 }
 
 func defaultSettings() transport.Settings {

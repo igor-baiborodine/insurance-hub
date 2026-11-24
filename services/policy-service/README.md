@@ -10,7 +10,6 @@
     - [Repository onboarding](#repository-onboarding)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
-  - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
   - [Offer creation](#offer-creation)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
@@ -19,9 +18,9 @@
 
 # Policy service
 
-The Go Policy foundation exposes the bootstrap Echo contract over direct gRPC and an HTTP
-gateway. Its separate management listener serves liveness and readiness. Java Policy continues
-to serve agents' offer, policy and termination requests.
+The Go Policy service exposes private offer creation over direct gRPC and an HTTP gateway. Its
+separate management listener serves liveness and readiness. Java Policy continues to serve
+agents' offer, policy and termination requests.
 
 ## Prerequisites
 
@@ -69,17 +68,17 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/policy/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/policy/v1/policy_service.proto` with pinned Buf.                                                      | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.4; readonly modules; runtime settings below.                                           |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/policy/v1/example_service.pb.go
-gen/policy/v1/example_service.pb.gw.go
-gen/policy/v1/example_service_grpc.pb.go
-gen/openapiv2/policy/v1/example_service.swagger.json
+gen/policy/v1/policy_service.pb.go
+gen/policy/v1/policy_service.pb.gw.go
+gen/policy/v1/policy_service_grpc.pb.go
+gen/openapiv2/policy/v1/policy_service.swagger.json
 gen/product/v1/product_service.pb.go
 gen/product/v1/product_service_grpc.pb.go
 gen/pricing/v1/pricing_service.pb.go
@@ -110,7 +109,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make check-proto-breaking` | Current schema against `testdata/contract-baseline/` with Buf `FILE` rules. The baseline is fixed and never promoted automatically.                                                                                                                                        | Verified tools and readable checked-in baseline/lock data.                                                                                                                         |
 | `make check-proto-drift`    | Exact generated path set and bytes against two isolated regenerations, detecting added, modified, missing, deleted, and non-reproducible output.                                                                                                                           | Verified tools and BSR access unless cached.                                                                                                                                       |
 | `make check-provider-protos` | The Product and Pricing contract copies under `api/` are byte-identical to `services/product-service` and `services/pricing-service`. | Repository checkout containing both provider services. |
-| `make check-gateway-contract` | Generated Swagger routes, schemas, media types, responses and safe examples for Echo and `POST /offers` against `testdata/http-contract.json`. | Managed Python and readable generated Swagger; no service process or network. |
+| `make check-gateway-contract` | Generated Swagger routes, schemas, media types, responses and safe examples for `POST /offers` against `testdata/http-contract.json`. | Managed Python and readable generated Swagger; no service process or network. |
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
@@ -125,7 +124,8 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-The Echo foundation has no database, broker, generated mocks, migrations, or Go workspace.
+The module has no broker, generated mocks or Go workspace. Its migrations run only from an
+operator checkout, never at service startup.
 Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
@@ -240,8 +240,8 @@ seconds; queue saturation has a separate safe warning. The executable installs t
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
 `insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /v1/example/echo` or
-`unmatched`; gRPC records the fixed Echo operation and final status. Request paths, queries,
+bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /offers` or `unmatched`;
+gRPC records the fixed `create_offer` operation and final status. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 
@@ -292,34 +292,6 @@ gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
-## Example RPC and HTTP gateway
-
-The generated `policy.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
-message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
-the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
-`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
-return `Internal` with the stable message `internal error`. The generated gateway exposes the same
-operation as `POST /v1/example/echo` with an `application/json` body:
-
-```sh
-curl --fail-with-body \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' \
-  http://127.0.0.1:8080/v1/example/echo
-```
-
-The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
-query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
-The generated Swagger 2.0 document is
-`gen/openapiv2/policy/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
-independent contract fixture checked by `make check-gateway-contract`.
-
-The transports log neither request/response bodies nor underlying failure details. HTTP identity,
-forwarding, `Grpc-Timeout` and `Grpc-Metadata-*` headers are stripped; application metadata and
-upstream response metadata have empty allowlists. `REQUEST_TIMEOUT` begins at HTTP admission and
-the configured HTTP/gRPC limits remain independent. Reflection, CORS, profiling, authentication,
-debug endpoints and production exposure are not enabled by this foundation.
-
 ## Offer creation
 
 `policy.v1.PolicyService/CreateOffer` is exposed privately as `POST /offers`. It accepts the legacy
@@ -343,6 +315,18 @@ writer. Success is HTTP 200 with exactly `offerNumber` (a random UUID), `totalPr
 `coversPrices`; amounts are JSON numbers written from Pricing's exact decimal text. The offer has
 status NEW and a creation date taken once from the clock in `BUSINESS_TIME_ZONE`. Offer creation
 publishes no event.
+
+Malformed, duplicate or unknown JSON members, a nonempty query, unsupported media, an unknown route
+and a wrong method receive fixed JSON error envelopes. The generated Swagger 2.0 document is
+`gen/openapiv2/policy/v1/policy_service.swagger.json`; `testdata/http-contract.json` is the
+independent contract fixture checked by `make check-gateway-contract`. The compatibility baseline
+in `testdata/contract-baseline/` records the accepted PolicyService wire contract.
+
+The transports log neither request/response bodies nor underlying failure details. HTTP identity,
+forwarding, `Grpc-Timeout` and `Grpc-Metadata-*` headers are stripped; application metadata and
+upstream response metadata have empty allowlists. `REQUEST_TIMEOUT` begins at HTTP admission and
+the configured HTTP/gRPC limits remain independent. Reflection, CORS, profiling, authentication,
+debug endpoints and production exposure are not enabled.
 
 | Outcome | HTTP / gRPC code | Writes |
 | --- | --- | --- |
@@ -369,9 +353,9 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed offer operation, bounded transport signals and configurable HTTP/gRPC limits. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness including the optional database, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
+| Business architecture | Product application-owned catalog ports and injected adapters | `CreateOffer` owns its Product, Pricing and offer-store ports; adapters are injected by composition. |
 
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -385,13 +369,13 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo and PolicyService registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/grpc` | Generated PolicyService registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/application` | `CreateOffer` use case, its `ProductCatalog`, `QuoteCalculator` and `OfferStore` ports, and its failures. |
 | `internal/domain` | Offer request, answer, quote and offer values; NEW status, keyed answers and exact-amount invariants. |
 | `internal/providers` | Product and Pricing gRPC adapters with bounded calls and status translation. |
 | `internal/postgres` | Writer pool, readiness, aggregate reads and the transactional offer and issuance writes. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Completion-log and offer signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policy/v1`, `gen/policy/v1`, `gen/openapiv2/policy/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 | `api/product/v1`, `api/pricing/v1`, `gen/product/v1`, `gen/pricing/v1` | Exact provider contract copies and the generated Policy-local clients. |
@@ -432,13 +416,11 @@ flowchart TD
 ```
 
 At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
+from the bound address and waits for that channel to become ready. An HTTP offer obtains a bounded
 HTTP server span, uses the generated client across the instrumented connection, obtains client and
-server spans, passes protobuf validation and calls the injected function with the shorter deadline.
-HTTP and gRPC record separate bounded completion signals.
-
-An HTTP offer follows the same path to `PolicyService/CreateOffer`, which maps the validated request
-to a domain `OfferRequest` and calls `CreateOffer.Execute`. The use case calls the Product and
+server spans and passes protobuf validation. HTTP and gRPC record separate bounded completion
+signals. `PolicyService/CreateOffer` maps the validated request to a domain `OfferRequest` and
+calls `CreateOffer.Execute` with the shorter deadline. The use case calls the Product and
 Pricing adapters in turn over their process-owned connections. Each call is bounded by
 `PROVIDER_CALL_TIMEOUT` and the request deadline and carries the trace context. The use case then
 commits the offer through the store. The providers and the store satisfy the application ports
