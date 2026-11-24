@@ -114,6 +114,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
+| `make test-integration`     | Production composition plus migration, access, storage, lifecycle and ordered outbox recovery against owned disposable TLS PostgreSQL and Kafka containers. The Kafka case stops and restarts its broker and removes both containers. | Go 1.27.4, Docker, OpenSSL, readonly modules and cached pinned images or registry access. |
 | `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with coverage, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It writes only the coverage profiles and tool-managed output. The real-listener tests use disposable loopback listeners. |
@@ -125,8 +126,9 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-The module has no broker, generated mocks or Go workspace. Its migrations run only from an
-operator checkout, never at service startup.
+The module has no consumer group, generated mocks or Go workspace. Its migrations run only from
+an operator checkout, never at service startup. The optional producer uses committed outbox rows;
+it does not migrate the schema or create topics.
 Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
@@ -208,6 +210,12 @@ do not repeat its supplied value.
 | `PRICING_GRPC_TARGET` | unset | `host:port` of the private Pricing gRPC service. Required unless `DEPLOYMENT_ENVIRONMENT` is `development`; must be supplied together with `PRODUCT_GRPC_TARGET`. |
 | `BUSINESS_TIME_ZONE` | `UTC` | IANA time zone name defining the business date of a new offer and of a policy command; `Local` is rejected. |
 | `PROVIDER_CALL_TIMEOUT` | `3s` | Positive duration bounding each Product and Pricing call; with provider targets, twice this value must be less than `REQUEST_TIMEOUT`. A shorter caller deadline still applies. |
+| `EVENT_PUBLISHER_ENABLED` | `false` | Boolean. When false, every Kafka setting below must be absent. |
+| `KAFKA_BROKERS` | unset | Required when event publication is enabled; comma-separated `host:port` bootstrap brokers. |
+| `KAFKA_REGISTERED_TOPIC` | `policy-registered` when enabled | Must retain the owned registration topic. |
+| `KAFKA_TERMINATED_TOPIC` | `policy-terminated` when enabled | Must retain the owned termination topic. |
+| `KAFKA_CA_FILE` | unset | Required when event publication is enabled; readable PEM CA used for TLS 1.2+ and broker hostname verification. |
+| `KAFKA_PUBLISH_TIMEOUT` | `3s` when enabled | Positive per-record acknowledgement timeout shorter than the non-telemetry shutdown budget. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
 `insurance-hub`, implementation `go` and generated logical service name are fixed. `development` is
@@ -286,13 +294,16 @@ connection remains `READY` within `PROBE_TIMEOUT`; liveness stays independent of
 With `POLICY_DATABASE_URL`, startup opens the writer pool and refuses to listen until a bounded
 query proves the `go_policy_writer` identity and access to every Policy table. Each readiness
 request repeats that query within `DB_QUERY_TIMEOUT`; liveness does not touch the database. The
-pool closes after HTTP handlers drain.
+pool closes after HTTP handlers drain. When the event publisher is enabled, startup also verifies
+the TLS broker and readiness rechecks it. Broker failure withdraws readiness while committed
+outbox intents remain pending for retry.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
-HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops
-gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and management cleanup
-share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
-reserved interval within the one overall deadline.
+HTTP handlers finish before stopping and flushing the publisher, closing the gateway connection,
+and gracefully or forcibly stopping gRPC and management HTTP. Telemetry shuts down last. HTTP,
+publisher, connection, gRPC and management cleanup share the cutoff at
+`SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final reserved interval
+within the one overall deadline.
 
 ## Offer creation
 
@@ -372,6 +383,13 @@ HALF_UP at scale 20) and rounded HALF_UP to cents; the premium is their sum. For
 120.00 cover for 2026-01-01–2026-12-31 terminated on 2026-06-30 becomes 59.51. The event carries
 the shortened coverage and corrected premium. Repeated and concurrent termination commands have
 no additional protection.
+
+The producer sends pending intents only after their aggregate transaction commits. It holds a
+per-row database lock through broker acknowledgement, marks `published_at` afterward, and excludes
+a policy's later intent while any earlier one is pending. A lost acknowledgement can therefore
+repeat the same keyed payload, but cannot make termination overtake registration. Only persisted
+W3C `traceparent` and `tracestate` fields become Kafka headers; diagnostics and bounded telemetry
+never include the policy key or payload.
 
 | Failure | gRPC status | Writes |
 | --- | --- | --- |

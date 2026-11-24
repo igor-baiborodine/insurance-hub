@@ -42,6 +42,8 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default, managed
         ('policy_outbox', 'topic', 'character varying(64)', true, false, false, true),
         ('policy_outbox', 'message_key', 'character varying(255)', true, false, false, true),
         ('policy_outbox', 'payload', 'jsonb', true, false, false, true),
+        ('policy_outbox', 'trace_parent', 'character varying(55)', false, false, false, true),
+        ('policy_outbox', 'trace_state', 'character varying(512)', false, false, false, true),
         ('policy_outbox', 'created_at', 'timestamp with time zone', true, false, true, true),
         ('policy_outbox', 'published_at', 'timestamp with time zone', false, false, false, true)
 ), expected_constraint (
@@ -83,7 +85,9 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default, managed
     WHERE a.attnum > 0 AND NOT a.attisdropped
 ), wanted_column AS (
     SELECT tbl, col, typ, not_null, identity_id AND $1, has_default
-    FROM expected_column WHERE NOT managed_only OR $1
+    FROM expected_column
+    WHERE (NOT managed_only OR $1)
+      AND (col NOT IN ('trace_parent', 'trace_state') OR $2)
 ), actual_constraint AS (
     SELECT r.tbl, con.contype::text,
         (SELECT array_agg(a.attname::text ORDER BY k.ord)

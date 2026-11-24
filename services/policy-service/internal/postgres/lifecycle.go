@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 )
@@ -57,7 +59,7 @@ func (t Transaction) AddPolicy(
 	if len(policy.Versions) != 1 {
 		return errors.New("add policy: a new policy has exactly one version")
 	}
-	intent, err := outboxIntent(event)
+	intent, err := outboxIntent(ctx, event)
 	if err != nil {
 		return err
 	}
@@ -93,7 +95,7 @@ func (t Transaction) AppendVersion(
 	version domain.PolicyVersion,
 	event domain.PolicyEvent,
 ) error {
-	intent, err := outboxIntent(event)
+	intent, err := outboxIntent(ctx, event)
 	if err != nil {
 		return err
 	}
@@ -144,7 +146,7 @@ type eventPolicy struct {
 }
 
 // outboxIntent encodes the event as its keyed record; the policy number is the key.
-func outboxIntent(event domain.PolicyEvent) (Intent, error) {
+func outboxIntent(ctx context.Context, event domain.PolicyEvent) (Intent, error) {
 	payload, err := json.Marshal(eventEnvelope{Policy: eventPolicy{
 		Number:       event.PolicyNumber,
 		From:         dateArray(event.From),
@@ -156,11 +158,15 @@ func outboxIntent(event domain.PolicyEvent) (Intent, error) {
 	if err != nil {
 		return Intent{}, fmt.Errorf("encode %s event: %w", event.Topic, err)
 	}
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
 	return Intent{
-		ID:      event.IntentID,
-		Topic:   event.Topic,
-		Key:     event.PolicyNumber,
-		Payload: payload,
+		ID:          event.IntentID,
+		Topic:       event.Topic,
+		Key:         event.PolicyNumber,
+		Payload:     payload,
+		TraceParent: carrier.Get("traceparent"),
+		TraceState:  carrier.Get("tracestate"),
 	}, nil
 }
 

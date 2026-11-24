@@ -60,10 +60,32 @@ INSERT INTO public.cover (policy_version_id, code, price)
 VALUES (sqlc.arg(policy_version_id), sqlc.arg(code), sqlc.narg(price)::text::numeric);
 
 -- name: InsertOutboxIntent :one
-INSERT INTO public.policy_outbox (intent_id, policy_id, topic, message_key, payload)
+INSERT INTO public.policy_outbox (
+    intent_id, policy_id, topic, message_key, payload, trace_parent, trace_state
+)
 VALUES (sqlc.arg(intent_id), sqlc.arg(policy_id), sqlc.arg(topic), sqlc.arg(message_key),
-    sqlc.arg(payload))
+    sqlc.arg(payload), sqlc.narg(trace_parent), sqlc.narg(trace_state))
 RETURNING id;
+
+-- name: LockNextOutboxIntent :one
+SELECT o.id, o.intent_id, o.topic, o.message_key, o.payload, o.trace_parent, o.trace_state
+FROM public.policy_outbox AS o
+WHERE o.published_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.policy_outbox AS earlier
+      WHERE earlier.policy_id = o.policy_id
+        AND earlier.id < o.id
+        AND earlier.published_at IS NULL
+  )
+ORDER BY o.id
+LIMIT 1
+FOR UPDATE OF o SKIP LOCKED;
+
+-- name: MarkOutboxIntentPublished :execrows
+UPDATE public.policy_outbox
+SET published_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(id) AND published_at IS NULL;
 
 -- name: InsertOffer :one
 INSERT INTO public.offer (

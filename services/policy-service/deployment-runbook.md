@@ -245,7 +245,7 @@ kubectl config use-context kind-local-dev-insurance-hub
 4. `POLICY_MIGRATION_OPERATION=status make -C services/policy-service migration` reports
    `uninitialized`. Then `POLICY_MIGRATION_OPERATION=migrate
    POLICY_MIGRATION_CONFIRM=migrate-local-dev-policy-schema make -C services/policy-service
-   migration` returns `version=1`, and status confirms it. The command runs the checkout's migrator
+   migration` returns `version=2`, and status confirms it. The command runs the checkout's migrator
    through an owned port-forward to the primary. It writes the enrollment, CA and tunnel URL only
    to a private temporary directory.
 5. `make -C services/policy-service resource-verify` now also proves writer reads and SQLSTATE

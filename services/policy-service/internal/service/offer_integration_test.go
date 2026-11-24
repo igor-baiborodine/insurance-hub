@@ -58,7 +58,7 @@ func TestRun_ProductionCompositionCreatesOffers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 	product, pricing := &fakeProduct{}, &fakePricing{}
 	providerAddress := serveProviders(t, product, pricing)
 	address := startPolicy(t, ctx, map[string]string{

@@ -40,7 +40,7 @@ func TestRun_PolicyTerminationAppendsHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 	fixture.Exec(t, ctx, insertTerminationPoliciesQuery)
 	pool, err := postgres.OpenPool(ctx, postgres.PoolSettings{
 		URL: fixture.WriterURL(

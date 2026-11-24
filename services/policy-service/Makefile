@@ -64,6 +64,8 @@ GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260928230214-8a89bd6388cc
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
+FRANZ_GO_VERSION := v1.22.2
+KAFKA_IMAGE ?= apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f
 SQLC_VERSION := v1.31.1
 SQL_SCHEMA := internal/postgres/sql/schema.sql
 SQL_QUERIES := internal/postgres/sql/queries.sql
@@ -171,6 +173,7 @@ update-deps:
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
 		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
 		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
+		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
 		go.opentelemetry.io/otel@$(OTEL_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@$(OTEL_GRPC_VERSION) \
 		go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@$(OTEL_HTTP_VERSION) \
@@ -220,13 +223,13 @@ check: check-go-pr
 # Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration, access, storage and termination smoke tests (Docker required)
+test-integration: ## Run the service composition and disposable PostgreSQL/TLS Kafka recovery smoke tests (Docker and OpenSSL required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
-	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyTerminationAppendsHistory|PolicyWriterReadiness)$$' \
-		./internal/service ./internal/administration ./internal/postgres \
+	POLICY_TEST_KAFKA_IMAGE="$(KAFKA_IMAGE)" GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
+		-run '^TestRun_(ProductionComposition.*|PolicyEventPublisherRecovery|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyTerminationAppendsHistory|PolicyWriterReadiness)$$' \
+		./internal/service ./internal/administration ./internal/postgres ./internal/kafka \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:

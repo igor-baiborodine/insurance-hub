@@ -46,7 +46,7 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
 	fixture.LoadJavaData(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 	product, pricing := &fakeProduct{}, &fakePricing{}
 	providerAddress := serveProviders(t, product, pricing)
 	addresses := startPolicyServers(t, ctx, map[string]string{

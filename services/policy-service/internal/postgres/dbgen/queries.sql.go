@@ -150,18 +150,22 @@ func (q *Queries) InsertOfferCover(ctx context.Context, arg InsertOfferCoverPara
 }
 
 const insertOutboxIntent = `-- name: InsertOutboxIntent :one
-INSERT INTO public.policy_outbox (intent_id, policy_id, topic, message_key, payload)
+INSERT INTO public.policy_outbox (
+    intent_id, policy_id, topic, message_key, payload, trace_parent, trace_state
+)
 VALUES ($1, $2, $3, $4,
-    $5)
+    $5, $6, $7)
 RETURNING id
 `
 
 type InsertOutboxIntentParams struct {
-	IntentID   pgtype.UUID
-	PolicyID   int64
-	Topic      string
-	MessageKey string
-	Payload    []byte
+	IntentID    pgtype.UUID
+	PolicyID    int64
+	Topic       string
+	MessageKey  string
+	Payload     []byte
+	TraceParent pgtype.Text
+	TraceState  pgtype.Text
 }
 
 func (q *Queries) InsertOutboxIntent(ctx context.Context, arg InsertOutboxIntentParams) (int64, error) {
@@ -171,6 +175,8 @@ func (q *Queries) InsertOutboxIntent(ctx context.Context, arg InsertOutboxIntent
 		arg.Topic,
 		arg.MessageKey,
 		arg.Payload,
+		arg.TraceParent,
+		arg.TraceState,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -396,4 +402,59 @@ func (q *Queries) ListPolicyVersions(ctx context.Context, policyID pgtype.Int8) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockNextOutboxIntent = `-- name: LockNextOutboxIntent :one
+SELECT o.id, o.intent_id, o.topic, o.message_key, o.payload, o.trace_parent, o.trace_state
+FROM public.policy_outbox AS o
+WHERE o.published_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.policy_outbox AS earlier
+      WHERE earlier.policy_id = o.policy_id
+        AND earlier.id < o.id
+        AND earlier.published_at IS NULL
+  )
+ORDER BY o.id
+LIMIT 1
+FOR UPDATE OF o SKIP LOCKED
+`
+
+type LockNextOutboxIntentRow struct {
+	ID          int64
+	IntentID    pgtype.UUID
+	Topic       string
+	MessageKey  string
+	Payload     []byte
+	TraceParent pgtype.Text
+	TraceState  pgtype.Text
+}
+
+func (q *Queries) LockNextOutboxIntent(ctx context.Context) (LockNextOutboxIntentRow, error) {
+	row := q.db.QueryRow(ctx, lockNextOutboxIntent)
+	var i LockNextOutboxIntentRow
+	err := row.Scan(
+		&i.ID,
+		&i.IntentID,
+		&i.Topic,
+		&i.MessageKey,
+		&i.Payload,
+		&i.TraceParent,
+		&i.TraceState,
+	)
+	return i, err
+}
+
+const markOutboxIntentPublished = `-- name: MarkOutboxIntentPublished :execrows
+UPDATE public.policy_outbox
+SET published_at = CURRENT_TIMESTAMP
+WHERE id = $1 AND published_at IS NULL
+`
+
+func (q *Queries) MarkOutboxIntentPublished(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, markOutboxIntentPublished, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

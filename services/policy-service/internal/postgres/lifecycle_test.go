@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestOutboxIntent_EncodesTheKeyedPolicyEnvelope(t *testing.T) {
 	}
 
 	// when
-	intent, err := outboxIntent(event)
+	intent, err := outboxIntent(context.Background(), event)
 
 	// then
 	want := `{"policy":{"number":"policy-1","from":[2026,1,1],"to":[2026,12,31],` +
