@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-import deployment as pricing
 from scripts.go.service import release
 from scripts.go.service.deployment import DeploymentError, apply
+
+import deployment as pricing
 
 SMOKE_LABEL = "insurance-hub.io/pricing-disposable"
 
