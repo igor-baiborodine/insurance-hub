@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ var readIssuanceStateQuery string
 
 //go:embed testdata/sql/insert-nullable-aggregates.sql
 var insertNullableAggregatesQuery string
+
+//go:embed testdata/sql/append-policy-version.sql
+var appendPolicyVersionQuery string
 
 //go:embed sql/schema.sql
 var sqlcSchema string
@@ -123,6 +127,59 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 			t.Fatalf("issued policy: %+v (%v)", issued, err)
 		}
 		requireUnchangedPolicy(t, ctx, store, existing)
+	})
+
+	t.Run("concurrent append does not split the aggregate snapshot", func(t *testing.T) {
+		tracer := newCoverQueryTracer()
+		t.Cleanup(tracer.release)
+		configuration, err := pgxpool.ParseConfig(fixture.WriterURL("policy"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		configuration.ConnConfig.Tracer = tracer
+		concurrentPool, err := pgxpool.NewWithConfig(ctx, configuration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(concurrentPool.Close)
+		concurrentStore, err := postgres.NewStore(concurrentPool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type readResult struct {
+			policy postgres.Policy
+			err    error
+		}
+		result := make(chan readResult, 1)
+		go func() {
+			policy, err := concurrentStore.Policy(ctx, postgresfixture.JavaPolicyNumber)
+			result <- readResult{policy: policy, err: err}
+		}()
+		select {
+		case <-tracer.coversStarted:
+		case <-ctx.Done():
+			t.Fatal("policy read did not reach the cover query")
+		}
+		fixture.Exec(t, ctx, appendPolicyVersionQuery)
+		tracer.release()
+		var read readResult
+		select {
+		case read = <-result:
+		case <-ctx.Done():
+			t.Fatal("policy read did not complete after the concurrent append")
+		}
+		requireJavaPolicy(t, read.policy, read.err)
+		current, err := store.Policy(ctx, postgresfixture.JavaPolicyNumber)
+		if err != nil || len(current.Versions) != 3 ||
+			optionalInt64(current.Versions[2].Number) != 3 ||
+			len(current.Versions[2].Covers) != 1 ||
+			optionalString(current.Versions[2].Covers[0].Code) != "CONCURRENT" {
+			t.Fatalf(
+				"concurrent version did not commit after the snapshot: %+v (%v)",
+				current,
+				err,
+			)
+		}
 	})
 
 	t.Run("sqlc schema equals the migrated shape", func(t *testing.T) {
@@ -336,6 +393,41 @@ func optionalMapEqual(got map[string]*string, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+type coverQueryTracer struct {
+	coversStarted chan struct{}
+	continueRead  chan struct{}
+	startedOnce   sync.Once
+	releaseOnce   sync.Once
+}
+
+func newCoverQueryTracer() *coverQueryTracer {
+	return &coverQueryTracer{
+		coversStarted: make(chan struct{}),
+		continueRead:  make(chan struct{}),
+	}
+}
+
+func (tracer *coverQueryTracer) TraceQueryStart(
+	ctx context.Context,
+	_ *pgx.Conn,
+	data pgx.TraceQueryStartData,
+) context.Context {
+	if strings.Contains(data.SQL, "FROM public.cover AS c") {
+		tracer.startedOnce.Do(func() { close(tracer.coversStarted) })
+		select {
+		case <-tracer.continueRead:
+		case <-ctx.Done():
+		}
+	}
+	return ctx
+}
+
+func (*coverQueryTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (tracer *coverQueryTracer) release() {
+	tracer.releaseOnce.Do(func() { close(tracer.continueRead) })
 }
 
 // requireSQLCSchemaMatchesMigration applies the sqlc input to an empty database and checks it
