@@ -244,6 +244,19 @@ var errBlock = errors.New("block until the call context ends")
 
 func startPolicy(t *testing.T, ctx context.Context, environment map[string]string) string {
 	t.Helper()
+	addresses := startPolicyServers(t, ctx, environment)
+	return addresses.http
+}
+
+// policyAddresses are the bound business HTTP and gRPC addresses of a started service.
+type policyAddresses struct{ http, grpc string }
+
+func startPolicyServers(
+	t *testing.T,
+	ctx context.Context,
+	environment map[string]string,
+) policyAddresses {
+	t.Helper()
 	for name, value := range map[string]string{
 		"HTTP_ADDR": "127.0.0.1:0", "GRPC_ADDR": "127.0.0.1:0", "HEALTH_ADDR": "127.0.0.1:0",
 	} {
@@ -256,7 +269,7 @@ func startPolicy(t *testing.T, ctx context.Context, environment map[string]strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := &startedHandler{address: make(chan string, 1)}
+	started := &startedHandler{addresses: make(chan policyAddresses, 1)}
 	runCtx, stop := context.WithCancel(ctx)
 	result := make(chan error, 1)
 	go func() { result <- service.Run(runCtx, settings, slog.New(started)) }()
@@ -272,18 +285,18 @@ func startPolicy(t *testing.T, ctx context.Context, environment map[string]strin
 		}
 	})
 	select {
-	case address := <-started.address:
-		return address
+	case addresses := <-started.addresses:
+		return addresses
 	case err := <-result:
 		t.Fatalf("service stopped before starting: %v", err)
 	case <-time.After(30 * time.Second):
 		t.Fatal("service did not start")
 	}
-	return ""
+	return policyAddresses{}
 }
 
-// startedHandler reports the bound business HTTP address from the startup record.
-type startedHandler struct{ address chan string }
+// startedHandler reports the bound business addresses from the startup record.
+type startedHandler struct{ addresses chan policyAddresses }
 
 func (*startedHandler) Enabled(context.Context, slog.Level) bool   { return true }
 func (handler *startedHandler) WithAttrs([]slog.Attr) slog.Handler { return handler }
@@ -293,13 +306,17 @@ func (handler *startedHandler) Handle(_ context.Context, record slog.Record) err
 	if record.Message != "service started" {
 		return nil
 	}
+	var addresses policyAddresses
 	record.Attrs(func(attribute slog.Attr) bool {
-		if attribute.Key == "http_address" {
-			handler.address <- attribute.Value.String()
-			return false
+		switch attribute.Key {
+		case "http_address":
+			addresses.http = attribute.Value.String()
+		case "grpc_address":
+			addresses.grpc = attribute.Value.String()
 		}
 		return true
 	})
+	handler.addresses <- addresses
 	return nil
 }
 

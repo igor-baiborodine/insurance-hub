@@ -7,7 +7,7 @@
   "tags": [
     {
       "name": "PolicyService",
-      "description": "PolicyService exposes the private offer boundary."
+      "description": "PolicyService exposes the private offer and policy lifecycle boundary."
     }
   ],
   "consumes": [

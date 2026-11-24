@@ -84,7 +84,7 @@ type dependencies struct {
 	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.CreateOffer) (grpcServer, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Handlers) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newProvider    func(string, telemetryProvider) (providerConnection, error)
 	now            func() time.Time
@@ -106,13 +106,13 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, createOffer transport.CreateOffer) (grpcServer, error) {
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, handlers transport.Handlers) (grpcServer, error) {
 			return transport.NewServer(
 				logger,
 				tracer,
 				propagator,
 				settings,
-				createOffer,
+				handlers,
 			)
 		},
 		newConnection:  newGatewayConnection,
@@ -253,6 +253,11 @@ func run(
 	}
 	logger.InfoContext(ctx, "offer creation configured",
 		slog.Bool("enabled", runtime.pool != nil && settings.Providers.Configured()))
+	handlers, err := runtime.composePolicies(settings, deps)
+	if err != nil {
+		return fail(fmt.Errorf("run service: %w", err))
+	}
+	handlers.CreateOffer = createOffer
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -261,7 +266,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, createOffer,
+		}, handlers,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -442,6 +447,33 @@ func (runtime *runningService) composeOffers(
 		return nil, err
 	}
 	return useCase.Execute, nil
+}
+
+// composePolicies wires the policy lifecycle when storage is configured; otherwise the
+// operations report that policy storage is unavailable. Issuance never calls a provider.
+func (runtime *runningService) composePolicies(
+	settings config.Config,
+	deps dependencies,
+) (transport.Handlers, error) {
+	if runtime.pool == nil {
+		return transport.Handlers{
+			IssuePolicy: application.UnavailableIssuance,
+			GetPolicy:   application.UnavailablePolicyDetails,
+		}, nil
+	}
+	store, err := postgres.NewStore(runtime.pool)
+	if err != nil {
+		return transport.Handlers{}, err
+	}
+	issue, err := application.NewIssuePolicy(store, deps.now, settings.BusinessTimeZone)
+	if err != nil {
+		return transport.Handlers{}, err
+	}
+	get, err := application.NewGetPolicy(store)
+	if err != nil {
+		return transport.Handlers{}, err
+	}
+	return transport.Handlers{IssuePolicy: issue.Execute, GetPolicy: get.Execute}, nil
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {

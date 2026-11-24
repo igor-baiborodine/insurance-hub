@@ -104,115 +104,125 @@ func NewStore(pool TxBeginner) (*Store, error) {
 
 // Offer loads one offer with its answers and cover prices.
 func (s *Store) Offer(ctx context.Context, number string) (result Offer, resultErr error) {
-	resultErr = s.readOnly(ctx, func(queries *dbgen.Queries) error {
-		row, err := queries.GetOffer(ctx, text(number))
-		if err != nil {
-			return readError("offer", err)
-		}
-		answers, err := queries.ListOfferAnswers(ctx, row.ID)
-		if err != nil {
-			return readError("offer answers", err)
-		}
-		covers, err := queries.ListOfferCovers(ctx, row.ID)
-		if err != nil {
-			return readError("offer covers", err)
-		}
-		totalPrice, err := decimalValue(row.TotalPrice)
-		if err != nil {
-			return readError("offer total price", err)
-		}
-		result = Offer{
-			ID:           row.ID,
-			Number:       row.Number.String,
-			ProductCode:  textValue(row.ProductCode),
-			Status:       textValue(row.Status),
-			CreationDate: dateValue(row.CreationDate),
-			PolicyFrom:   dateValue(row.PolicyFrom),
-			PolicyTo:     dateValue(row.PolicyTo),
-			TotalPrice:   totalPrice,
-			Answers:      make(map[string]*string, len(answers)),
-			CoverPrices:  make(map[string]*string, len(covers)),
-		}
-		for _, answer := range answers {
-			result.Answers[answer.QuestionCode] = textValue(answer.Answer)
-		}
-		for _, cover := range covers {
-			price, err := decimalValue(cover.Price)
-			if err != nil {
-				return readError("offer cover price", err)
-			}
-			result.CoverPrices[cover.CoverCode] = price
-		}
-		return nil
+	resultErr = s.readOnly(ctx, func(queries *dbgen.Queries) (err error) {
+		result, err = readOffer(ctx, queries, number)
+		return err
 	})
 	return result, resultErr
 }
 
+func readOffer(ctx context.Context, queries *dbgen.Queries, number string) (Offer, error) {
+	row, err := queries.GetOffer(ctx, text(number))
+	if err != nil {
+		return Offer{}, readError("offer", err)
+	}
+	answers, err := queries.ListOfferAnswers(ctx, row.ID)
+	if err != nil {
+		return Offer{}, readError("offer answers", err)
+	}
+	covers, err := queries.ListOfferCovers(ctx, row.ID)
+	if err != nil {
+		return Offer{}, readError("offer covers", err)
+	}
+	totalPrice, err := decimalValue(row.TotalPrice)
+	if err != nil {
+		return Offer{}, readError("offer total price", err)
+	}
+	result := Offer{
+		ID:           row.ID,
+		Number:       row.Number.String,
+		ProductCode:  textValue(row.ProductCode),
+		Status:       textValue(row.Status),
+		CreationDate: dateValue(row.CreationDate),
+		PolicyFrom:   dateValue(row.PolicyFrom),
+		PolicyTo:     dateValue(row.PolicyTo),
+		TotalPrice:   totalPrice,
+		Answers:      make(map[string]*string, len(answers)),
+		CoverPrices:  make(map[string]*string, len(covers)),
+	}
+	for _, answer := range answers {
+		result.Answers[answer.QuestionCode] = textValue(answer.Answer)
+	}
+	for _, cover := range covers {
+		price, err := decimalValue(cover.Price)
+		if err != nil {
+			return Offer{}, readError("offer cover price", err)
+		}
+		result.CoverPrices[cover.CoverCode] = price
+	}
+	return result, nil
+}
+
 // Policy loads one policy with every version and cover.
 func (s *Store) Policy(ctx context.Context, number string) (result Policy, resultErr error) {
-	resultErr = s.readOnly(ctx, func(queries *dbgen.Queries) error {
-		row, err := queries.GetPolicy(ctx, text(number))
-		if err != nil {
-			return readError("policy", err)
-		}
-		versions, err := queries.ListPolicyVersions(
-			ctx,
-			pgtype.Int8{Int64: row.ID, Valid: true},
-		)
-		if err != nil {
-			return readError("policy versions", err)
-		}
-		covers, err := queries.ListPolicyCovers(
-			ctx,
-			pgtype.Int8{Int64: row.ID, Valid: true},
-		)
-		if err != nil {
-			return readError("policy covers", err)
-		}
-		result = Policy{
-			ID:         row.ID,
-			Number:     row.Number.String,
-			AgentLogin: textValue(row.AgentLogin),
-		}
-		index := make(map[int64]int, len(versions))
-		for _, version := range versions {
-			totalPremium, err := decimalValue(version.TotalPremiumAmount)
-			if err != nil {
-				return readError("policy version total premium", err)
-			}
-			index[version.ID] = len(result.Versions)
-			result.Versions = append(result.Versions, Version{
-				ID:            version.ID,
-				Number:        int64Value(version.VersionNumber),
-				ProductCode:   textValue(version.ProductCode),
-				FirstName:     textValue(version.FirstName),
-				LastName:      textValue(version.LastName),
-				Pesel:         textValue(version.Pesel),
-				AccountNumber: textValue(version.AccountNumber),
-				CoverFrom:     dateValue(version.CoverFrom),
-				CoverTo:       dateValue(version.CoverTo),
-				VersionFrom:   dateValue(version.VersionFrom),
-				VersionTo:     dateValue(version.VersionTo),
-				TotalPremium:  totalPremium,
-			})
-		}
-		for _, cover := range covers {
-			price, err := decimalValue(cover.Price)
-			if err != nil {
-				return readError("policy cover price", err)
-			}
-			position, found := index[cover.PolicyVersionID.Int64]
-			if !cover.PolicyVersionID.Valid || !found {
-				return errors.New(
-					"read policy covers: cover has no visible policy version",
-				)
-			}
-			result.Versions[position].Covers = append(result.Versions[position].Covers,
-				Cover{Code: textValue(cover.Code), Price: price})
-		}
-		return nil
+	resultErr = s.readOnly(ctx, func(queries *dbgen.Queries) (err error) {
+		result, err = readPolicy(ctx, queries, number)
+		return err
 	})
 	return result, resultErr
+}
+
+func readPolicy(ctx context.Context, queries *dbgen.Queries, number string) (Policy, error) {
+	row, err := queries.GetPolicy(ctx, text(number))
+	if err != nil {
+		return Policy{}, readError("policy", err)
+	}
+	versions, err := queries.ListPolicyVersions(
+		ctx,
+		pgtype.Int8{Int64: row.ID, Valid: true},
+	)
+	if err != nil {
+		return Policy{}, readError("policy versions", err)
+	}
+	covers, err := queries.ListPolicyCovers(
+		ctx,
+		pgtype.Int8{Int64: row.ID, Valid: true},
+	)
+	if err != nil {
+		return Policy{}, readError("policy covers", err)
+	}
+	result := Policy{
+		ID:         row.ID,
+		Number:     row.Number.String,
+		AgentLogin: textValue(row.AgentLogin),
+	}
+	index := make(map[int64]int, len(versions))
+	for _, version := range versions {
+		totalPremium, err := decimalValue(version.TotalPremiumAmount)
+		if err != nil {
+			return Policy{}, readError("policy version total premium", err)
+		}
+		index[version.ID] = len(result.Versions)
+		result.Versions = append(result.Versions, Version{
+			ID:            version.ID,
+			Number:        int64Value(version.VersionNumber),
+			ProductCode:   textValue(version.ProductCode),
+			FirstName:     textValue(version.FirstName),
+			LastName:      textValue(version.LastName),
+			Pesel:         textValue(version.Pesel),
+			AccountNumber: textValue(version.AccountNumber),
+			CoverFrom:     dateValue(version.CoverFrom),
+			CoverTo:       dateValue(version.CoverTo),
+			VersionFrom:   dateValue(version.VersionFrom),
+			VersionTo:     dateValue(version.VersionTo),
+			TotalPremium:  totalPremium,
+		})
+	}
+	for _, cover := range covers {
+		price, err := decimalValue(cover.Price)
+		if err != nil {
+			return Policy{}, readError("policy cover price", err)
+		}
+		position, found := index[cover.PolicyVersionID.Int64]
+		if !cover.PolicyVersionID.Valid || !found {
+			return Policy{}, errors.New(
+				"read policy covers: cover has no visible policy version",
+			)
+		}
+		result.Versions[position].Covers = append(result.Versions[position].Covers,
+			Cover{Code: textValue(cover.Code), Price: price})
+	}
+	return result, nil
 }
 
 func (s *Store) readOnly(

@@ -292,7 +292,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 				selectedTracer,
 				selectedPropagator,
 				defaultSettings(),
-				selectedOffer,
+				transport.Handlers{CreateOffer: selectedOffer},
 			)
 
 			// then
@@ -311,6 +311,18 @@ func newTracedPolicyClient(
 	logs *bytes.Buffer,
 ) policyv1.PolicyServiceClient {
 	t.Helper()
+	return newHandlersClient(t, transport.Handlers{CreateOffer: createOffer}, tracerProvider,
+		propagator, logs)
+}
+
+func newHandlersClient(
+	t *testing.T,
+	handlers transport.Handlers,
+	tracerProvider trace.TracerProvider,
+	propagator propagation.TextMapPropagator,
+	logs *bytes.Buffer,
+) policyv1.PolicyServiceClient {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -320,7 +332,7 @@ func newTracedPolicyClient(
 		tracerProvider,
 		propagator,
 		defaultSettings(),
-		createOffer,
+		handlers,
 	)
 	if err != nil {
 		_ = listener.Close()

@@ -249,7 +249,7 @@ func runtimeClient(
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		settings,
-		createOffer,
+		transport.Handlers{CreateOffer: createOffer},
 	)
 	if err != nil {
 		_ = listener.Close()

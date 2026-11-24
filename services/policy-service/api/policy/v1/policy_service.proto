@@ -10,7 +10,7 @@ import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1;policyv1";
 
-// PolicyService exposes the private offer boundary.
+// PolicyService exposes the private offer and policy lifecycle boundary.
 service PolicyService {
   // CreateOffer checks the product, prices the selected covers and stores a new offer.
   rpc CreateOffer(CreateOfferRequest) returns (CreateOfferResponse) {
@@ -153,6 +153,12 @@ service PolicyService {
       }
     };
   }
+
+  // IssuePolicy issues a policy from a stored, unexpired offer at its saved price.
+  rpc IssuePolicy(IssuePolicyRequest) returns (IssuePolicyResponse);
+
+  // GetPolicy returns the details of a policy's latest version.
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
 }
 
 message CreateOfferRequest {
@@ -237,4 +243,49 @@ message OfferHTTPAnswer {
   string question_code = 2;
   // A JSON string for "choice" and "text" answers; a JSON number for "numeric" answers.
   google.protobuf.Value answer = 3;
+}
+
+message IssuePolicyRequest {
+  string offer_number = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  PolicyHolder policy_holder = 2 [(buf.validate.field).required = true];
+  // The authenticated agent; an empty login issues a policy without an agent.
+  string agent_login = 3 [(buf.validate.field).string.max_len = 255];
+}
+
+// PolicyHolder is the insured person named on the policy.
+message PolicyHolder {
+  string first_name = 1 [(buf.validate.field).string.max_len = 255];
+  string last_name = 2 [(buf.validate.field).string.max_len = 255];
+  string tax_id = 3 [(buf.validate.field).string.max_len = 255];
+}
+
+message IssuePolicyResponse {
+  string policy_number = 1;
+}
+
+message GetPolicyRequest {
+  string policy_number = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+message GetPolicyResponse {
+  PolicyDetails policy = 1;
+}
+
+// PolicyDetails describes a policy's latest version. Dates are "YYYY-MM-DD" text and the
+// premium is an exact decimal string; each cover is formatted as "code - price".
+message PolicyDetails {
+  string number = 1;
+  string date_from = 2;
+  string date_to = 3;
+  string policy_holder = 4;
+  string total_premium = 5;
+  string product_code = 6;
+  string account_number = 7;
+  repeated string covers = 8;
 }

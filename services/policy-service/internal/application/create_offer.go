@@ -104,14 +104,27 @@ func (useCase *CreateOffer) Execute(
 
 // newOfferNumber returns a random (version 4) UUID.
 func newOfferNumber() (string, error) {
+	value, err := randomUUID()
+	if err != nil {
+		return "", fmt.Errorf("generate offer number: %w", err)
+	}
+	return formatUUID(value), nil
+}
+
+// randomUUID returns the bytes of a random (version 4) UUID.
+func randomUUID() ([16]byte, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("generate offer number: %w", err)
+		return value, err
 	}
 	value[6] = value[6]&0x0f | 0x40
 	value[8] = value[8]&0x3f | 0x80
+	return value, nil
+}
+
+func formatUUID(value [16]byte) string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", value[0:4], value[4:6], value[6:8], value[8:10],
-		value[10:16]), nil
+		value[10:16])
 }
 
 // UnavailableOffers is the offer operation of an instance without storage or providers.

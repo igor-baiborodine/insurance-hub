@@ -799,6 +799,8 @@ func newTestHandlerWithSettings(
 }
 
 type fakeClient struct {
+	// PolicyServiceClient leaves the RPCs this gateway does not route unimplemented.
+	policyv1.PolicyServiceClient
 	mu               sync.Mutex
 	calls            int
 	metadata         metadata.MD
