@@ -53,3 +53,5 @@ ignore:
   - "services/document-service/gen/**"
   - "services/pricing-service/gen/**"
   - "services/policy-service/gen/**"
+  - "services/policy-service/internal/postgres/dbgen/**"
+  - "services/policy-service/internal/testing/**"
