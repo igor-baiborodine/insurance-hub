@@ -6,6 +6,13 @@
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke and recovery](#private-smoke-and-recovery)
+  - [PostgreSQL storage (local-dev)](#postgresql-storage-local-dev)
+    - [Target selection](#target-selection)
+    - [Fresh installation order](#fresh-installation-order)
+    - [Access contract](#access-contract)
+    - [Populated adoption and replay](#populated-adoption-and-replay)
+    - [Refusals and retry](#refusals-and-retry)
+    - [Isolated cleanup](#isolated-cleanup)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -16,8 +23,10 @@ Use catalog key `policy`. The Go workload is `<environment>-policy-api`, selecte
 (`policy-search-api`) keep their own selectors. The agent portal gateway keeps its
 environment-specific `http://<environment>-policy-api-legacy:80` upstream, so agents continue to
 use Java Policy. Go Policy serves only the bootstrap Echo. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
-Operators use a loopback-bound Kubernetes API port-forward. The foundation has no Kubernetes
-Service, ingress route, workload token or business credentials.
+Operators use a loopback-bound Kubernetes API port-forward. The workload has no Kubernetes
+Service, ingress route or workload token. In local-dev only, it reads Policy PostgreSQL as
+`go_policy_writer`; QA receives no database settings until its own rollout (see
+[PostgreSQL storage](#postgresql-storage-local-dev)).
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
@@ -189,3 +198,98 @@ kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
 
 Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
 absent, and the Java Policy endpoint to remain ready.
+
+## PostgreSQL storage (local-dev)
+
+The local-dev overlay injects `POLICY_DATABASE_URL` from Secret
+`local-dev-postgres-policy-writer-creds` and mounts only its `ca.crt` at
+`/etc/policy-service/postgres`. Egress is limited to DNS and port 5432 of the
+`local-dev-postgres-policy` CNPG Pods. Readiness fails until the writer's bounded query reads every
+Policy table, and the Pod logs `policy database ready` with `database_role=go_policy_writer`.
+`go-svc-deploy-verify` requires both. The base and QA overlay carry no database settings, so a
+release cannot break the QA workload before its own provisioning.
+
+### Target selection
+
+| Binding | Namespace (data and workload) | Use |
+| --- | --- | --- |
+| Normal | `local-dev-all` | The established local-dev environment. It already serves the Java Policy database, so it cannot provide an empty target. |
+| Isolated | `local-dev-policy-isolated` | A fresh Policy CNPG cluster and Go workload together, for fresh-install qualification. Only Policy may select it (`SVC_NAME=policy`), and only in local-dev. |
+
+Every owner accepts the isolated namespace only when both coordinates name it. Set the same value
+everywhere and never point a mutating command at `local-dev-all` to obtain an empty database.
+
+```bash
+export NS=local-dev-policy-isolated   # or local-dev-all for the normal binding
+export POLICY_RESOURCE_ENV=local-dev POLICY_RESOURCE_CONTEXT=kind-local-dev-insurance-hub \
+  POLICY_RESOURCE_DATA_NS="$NS" POLICY_RESOURCE_SVC_NS="$NS" \
+  POLICY_RESOURCE_CLUSTER=local-dev-postgres-policy \
+  POLICY_RESOURCE_DB_HOST="local-dev-postgres-policy-rw.$NS.svc.cluster.local"
+export DEPLOY_ENV=local-dev DEPLOY_CONTEXT=kind-local-dev-insurance-hub DEPLOY_SVC_NS="$NS"
+kubectl config use-context kind-local-dev-insurance-hub
+```
+
+### Fresh installation order
+
+1. Confirm the empty start: no `local-dev-postgres-policy` cluster, PVCs, Policy Secrets or
+   `local-dev-policy-api` Deployment in `$NS`.
+2. Create the bootstrap owner credential from a mode-0600 file, then the cluster:
+   `make -C k8s postgres-svc-secret-create SVC_NAME=policy DATA_NS="$NS" SVC_NS="$NS"
+   PG_SVC_USER_PWD_FILE=/absolute/path` and `make -C k8s postgres-svc-deploy SVC_NAME=policy
+   DATA_NS="$NS" SVC_NS="$NS"`. `postgres-svc-status` tolerates diagnostic errors, so check the
+   cluster directly: `kubectl -n "$NS" get cluster.postgresql.cnpg.io local-dev-postgres-policy
+   -o jsonpath='{.metadata.uid} {.status.phase} {.status.currentPrimary}'` must report a new UID,
+   `Cluster in healthy state` and a ready primary.
+3. `make -C services/policy-service resource-inspect` reports missing roles and Secrets without
+   mutation. Then `POLICY_RESOURCE_CONFIRM=ensure-local-dev-policy-resources make -C
+   services/policy-service resource-ensure` publishes the enrollment and both credential Secrets,
+   creates the logins and marker, and runs `resource-verify`.
+4. `POLICY_MIGRATION_OPERATION=status make -C services/policy-service migration` reports
+   `uninitialized`. Then `POLICY_MIGRATION_OPERATION=migrate
+   POLICY_MIGRATION_CONFIRM=migrate-local-dev-policy-schema make -C services/policy-service
+   migration` returns `version=1`, and status confirms it. The command runs the checkout's migrator
+   through an owned port-forward to the primary. It writes the enrollment, CA and tunnel URL only
+   to a private temporary directory.
+5. `make -C services/policy-service resource-verify` now also proves writer reads and SQLSTATE
+   42501 denials for DDL, DELETE, migration history and enrollment.
+6. Build, load and deploy the source-matched image with the [direct local-dev](#direct-local-dev)
+   commands, using `DEPLOY_SVC_NS="$NS"`.
+
+### Access contract
+
+| Principal | Holds | Allowed |
+| --- | --- | --- |
+| `postgres` (CNPG superuser) | Enrollment schema `policy_admin` | Runs ensure/verify through `kubectl exec`; writes the marker once |
+| `policy` (CNPG owner) | Database and every Policy table | Owner privileges; DDL only through the migrator's `SET ROLE` |
+| `go_policy_migrator` | Secret `local-dev-postgres-policy-migrator-creds` (operator only) | `CONNECT`; `SET ROLE policy`; reads the enrollment marker |
+| `go_policy_writer` | Secret `local-dev-postgres-policy-writer-creds` (workload) | `CONNECT`; `USAGE` on `public`; `SELECT, INSERT, UPDATE` on the six business tables and `policy_outbox` |
+
+`PUBLIC` has no database or `public` schema privileges. Migration reapplies the writer grants on
+every run, so fresh and adopted schemas converge on the same access. Credentials stay in their
+Secrets and temporary 0600 files; never place a value in arguments, logs or evidence.
+
+### Populated adoption and replay
+
+Adoption of populated Java data is qualified on disposable PostgreSQL rather than a serving
+database. `make -C services/policy-service test-integration` loads an independent C02 Java-shaped
+fixture, checks its baseline and adopts it. It compares all six table fingerprints, verifies the
+generated IDs `2/3/7/9`, replays without rewinding an allocator, and then exercises reads, atomic
+issuance and rollback under the writer login. Adopting a serving Java database is a separate
+operation outside this runbook.
+
+### Refusals and retry
+
+- Status and migrate refuse a mismatched enrollment, a partial or incompatible schema, invalid
+  history, or an allocator behind its table. A refused run changes no schema, data or history.
+  Fix the reported cause and rerun; never repair history by hand.
+- An interrupted ensure has already published its Secrets. Rerun it: it reuses those credentials
+  and refuses a role that exists without its Secret. Inspect before acting on any other drift.
+- If readiness stays false, run `resource-verify` and migration status, then check that the
+  writer Secret's CA equals `local-dev-postgres-policy-ca` and that the NetworkPolicy reaches the
+  CNPG Pods.
+
+### Isolated cleanup
+
+After qualification, record the evidence, then delete only the isolated namespace:
+`kubectl --context kind-local-dev-insurance-hub delete namespace local-dev-policy-isolated`.
+`local-dev-all`, its Java Policy database and the gateway route are never touched.

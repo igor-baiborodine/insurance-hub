@@ -61,6 +61,77 @@ def test_local_egress_rejects_broad_dns() -> None:
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
 
 
+def without_database(items: dict[str, dict]) -> dict[str, dict]:
+    """Remove local-dev database wiring for a namespace that has no Policy database."""
+    pod = items["Deployment"]["spec"]["template"]["spec"]
+    container = pod["containers"][0]
+    container["env"] = [item for item in container["env"] if item["name"] != "POLICY_DATABASE_URL"]
+    container.pop("volumeMounts")
+    pod.pop("volumes")
+    for key in policy.DATABASE_CONFIG:
+        items["ConfigMap"]["data"].pop(key)
+    items["NetworkPolicy"]["spec"]["egress"] = items["NetworkPolicy"]["spec"]["egress"][:1]
+    return items
+
+
+@pytest.mark.parametrize(
+    "defect", ["migrator credential", "extra mount", "missing database egress"]
+)
+def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
+    # given
+    items = policy.validate_render("local-dev", policy.render("local-dev"))
+    pod = items["Deployment"]["spec"]["template"]["spec"]
+    if defect == "migrator credential":
+        pod["volumes"][0]["secret"]["secretName"] = "local-dev-postgres-policy-migrator-creds"
+    elif defect == "extra mount":
+        pod["containers"][0]["volumeMounts"].append({"name": "admin", "mountPath": "/admin"})
+    else:
+        items["NetworkPolicy"]["spec"]["egress"].pop()
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+@pytest.mark.parametrize(
+    ("environment", "namespace", "accepted"),
+    [
+        ("local-dev", policy.ISOLATED_NAMESPACE, True),
+        ("local-dev", "local-dev-policy-other", False),
+        ("qa", policy.ISOLATED_NAMESPACE, False),
+    ],
+)
+def test_isolated_binding_moves_workload_and_database_egress(
+    monkeypatch: pytest.MonkeyPatch, environment: str, namespace: str, accepted: bool
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", environment)
+    monkeypatch.setenv(
+        "DEPLOY_CONTEXT", f"{'kind-' if environment != 'qa' else ''}{environment}-insurance-hub"
+    )
+    monkeypatch.setenv("DEPLOY_SVC_NS", namespace)
+    if not accepted:
+        # when / then
+        with pytest.raises(DeploymentError, match="coordinates"):
+            policy.Target()
+        return
+    target = policy.Target()
+    items = policy.validate_render(environment, policy.render(environment))
+
+    # when
+    policy.bind_namespace(items, environment, target.namespace)
+
+    # then
+    assert {item["metadata"]["namespace"] for item in items.values()} == {namespace}
+    database = items["NetworkPolicy"]["spec"]["egress"][1]["to"][0]
+    assert database["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": namespace
+    }
+    assert database["podSelector"]["matchLabels"] == {
+        "cnpg.io/cluster": "local-dev-postgres-policy"
+    }
+
+
 def test_qa_refuses_placeholder_activation_and_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -378,8 +449,13 @@ def test_java_route_selects_only_ready_java_pods(
         policy.verify_java_route(target, go_pod)
 
 
+@pytest.mark.parametrize(
+    ("database", "logged", "accepted"),
+    [(False, False, True), (True, True, True), (True, False, False)],
+    ids=["no-database", "database-ready", "database-unverified"],
+)
 def test_workload_verification_does_not_depend_on_java_policy(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, database: bool, logged: bool, accepted: bool
 ) -> None:
     # given
     monkeypatch.setenv("DEPLOY_ENV", "local-dev")
@@ -388,7 +464,10 @@ def test_workload_verification_does_not_depend_on_java_policy(
     monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "0")
     target = policy.Target()
     target.namespace = "policy-smoke-0123456789ab"
-    items = {"ConfigMap": {"data": {"SERVICE_VERSION": "git-0123456789ab"}}}
+    items = policy.validate_render("local-dev", policy.render("local-dev"))
+    if not database:
+        items = without_database(items)
+    items["ConfigMap"]["data"]["SERVICE_VERSION"] = "git-0123456789ab"
     pod = {"metadata": {"name": "go-0", "uid": "uid-0"}}
     started = {
         "msg": "service started",
@@ -416,7 +495,9 @@ def test_workload_verification_does_not_depend_on_java_policy(
         return 200, b"live\n" if path == "/livez" else b"ready\n"
 
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)
-    monkeypatch.setattr(target, "kubectl", lambda *_args, **_kwargs: json.dumps(started))
+    ready = {"msg": "policy database ready", "database_role": "go_policy_writer"}
+    logs = "\n".join(json.dumps(record) for record in [started, *([ready] if logged else [])])
+    monkeypatch.setattr(target, "kubectl", lambda *_args, **_kwargs: logs)
     monkeypatch.setattr(target, "json", lambda *_args, **_kwargs: pytest.fail("Java lookup"))
     monkeypatch.setattr(policy, "OwnedPortForward", Forward)
     monkeypatch.setattr(policy, "response", answer)
@@ -427,6 +508,12 @@ def test_workload_verification_does_not_depend_on_java_policy(
     monkeypatch.setattr(
         policy, "verify_gateway_route", lambda value: gateway.append(value.environment)
     )
+
+    if not accepted:
+        # when / then
+        with pytest.raises(DeploymentError, match="writer database connection"):
+            policy.verify_workload(target, items)
+        return
 
     # when
     workload = policy.verify_workload(target, items)
@@ -599,6 +686,8 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
+    # The throwaway namespace has no Policy database; Step 5 qualifies the database path.
+    items = without_database(items)
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 

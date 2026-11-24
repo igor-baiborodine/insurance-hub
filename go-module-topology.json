@@ -211,14 +211,15 @@
         "FORMAT_SCOPE",
         "FORMAT_BASE"
       ],
-      "packageScope": "all Policy packages under ./..., the server executable, Policy v1 Echo and generated gateway/Swagger output, independent HTTP contract, real-listener lifecycle checks and module dependency metadata",
+      "packageScope": "all Policy packages under ./..., the server and migrator executables, Policy v1 Echo and generated gateway/Swagger output, independent HTTP contract, real-listener lifecycle checks, guarded PostgreSQL migration, sqlc-generated runtime storage and outbox transactions with disposable fresh, Java-shaped adoption, access and storage suites, and module dependency metadata",
       "prerequisites": [
         "Go 1.27.4",
         "managed CPython 3.14.8",
         "pinned Policy Go tools installed by make -C services/policy-service bootstrap-go-tools",
         "GCC for race-enabled tests",
         "kubectl with Kustomize replacements and field creation support (verified with v1.34.1)",
-        "Docker Engine with daemon and Buildx access for runtime image checks",
+        "Docker Engine with daemon and Buildx access for runtime image checks and disposable PostgreSQL tests",
+        "pinned postgres:17.10-alpine image digest available locally or from its public registry",
         "public module, schema, tool, vulnerability and container services unless cached"
       ],
       "consumers": [

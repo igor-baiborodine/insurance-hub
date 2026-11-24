@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: policy-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: policy-api
+          env:
+            - name: POLICY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-policy-writer-creds
+                  key: database-url
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/policy-service/postgres
+              readOnly: true
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: local-dev-postgres-policy-writer-creds
+            items:
+              - key: ca.crt
+                path: ca.crt

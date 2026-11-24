@@ -25,6 +25,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
 
@@ -63,7 +64,15 @@ type gatewayConnection interface {
 	Close() error
 }
 
+// databasePool is the process-owned Policy writer pool.
+type databasePool interface {
+	postgres.QueryRower
+	Close()
+}
+
 type dependencies struct {
+	openPool       func(context.Context, postgres.PoolSettings) (databasePool, error)
+	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
@@ -77,7 +86,11 @@ type dependencies struct {
 
 func productionDependencies() dependencies {
 	return dependencies{
-		listen: net.Listen,
+		openPool: func(ctx context.Context, settings postgres.PoolSettings) (databasePool, error) {
+			return postgres.OpenPool(ctx, settings)
+		},
+		checkDatabase: postgres.CheckReadiness,
+		listen:        net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
@@ -129,6 +142,7 @@ func newGatewayConnection(
 }
 
 type runningService struct {
+	pool               databasePool
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -166,6 +180,28 @@ func run(
 			failure,
 			runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 		)
+	}
+	checkDatabase := func(ctx context.Context) error {
+		if runtime.pool == nil {
+			return nil
+		}
+		return deps.checkDatabase(ctx, runtime.pool, settings.Database.QueryTimeout)
+	}
+	if settings.Database.Configured() {
+		pool, err := deps.openPool(ctx, postgres.PoolSettings{
+			URL:            settings.Database.URL.Value(),
+			MaxConnections: settings.Database.MaxConnections,
+			ConnectTimeout: settings.Database.ConnectTimeout,
+		})
+		if err != nil {
+			return fail(fmt.Errorf("run service: open Policy database: %w", err))
+		}
+		runtime.pool = pool
+		if err := checkDatabase(ctx); err != nil {
+			return fail(fmt.Errorf("run service: verify Policy database: %w", err))
+		}
+		logger.InfoContext(ctx, "policy database ready",
+			slog.String("database_role", postgres.WriterRole))
 	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
 	if err != nil {
@@ -219,11 +255,12 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
+	// Readiness includes the database; liveness stays independent of it.
+	state, err := health.NewState(settings.ProbeTimeout, func(ctx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return nil
+		return checkDatabase(ctx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -424,6 +461,10 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	// Handlers have drained, so no request still holds a database connection.
+	if runtime.pool != nil {
+		runtime.pool.Close()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {
