@@ -254,7 +254,27 @@ def validate_network_policy(
                 {"port": 8080, "protocol": "TCP"},
                 {"port": 9090, "protocol": "TCP"},
             ],
-        }
+        },
+        {
+            # Go Policy checks product existence over private gRPC only.
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {
+                            "kubernetes.io/metadata.name": settings["service_namespace"]
+                        }
+                    },
+                    "podSelector": {
+                        "matchLabels": {
+                            "app.kubernetes.io/name": "policy-api",
+                            "app.kubernetes.io/component": "api",
+                            "environment": environment,
+                        }
+                    },
+                }
+            ],
+            "ports": [{"port": 9090, "protocol": "TCP"}],
+        },
     ]
     egress = [
         {

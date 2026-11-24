@@ -37,8 +37,9 @@ ALLOY_EGRESS = (
     {"app.kubernetes.io/name": "alloy", "app.kubernetes.io/instance": "qa-alloy"},
     [(4317, "TCP")],
 )
-# Local-dev reaches its own Policy CNPG cluster as the writer; QA has no Go Policy database yet.
+# Each environment reaches its Policy CNPG cluster as the writer and both providers over gRPC.
 DATABASE_PORT = 5432
+PROVIDER_PORT = 9090
 DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
 WRITER_CA_DIRECTORY = "/etc/policy-service/postgres"
 PROBE_IMAGE = (
@@ -55,6 +56,8 @@ PROBE_SHELL_FUNCTIONS = (
     "denied() { status=0; output=$(curl --verbose --connect-timeout 2 --max-time 3 "
     '"telnet://$1" 2>&1) || status=$?; ! connected "$output" '
     '&& { [ "$status" = 7 ] || [ "$status" = 28 ]; }; }; '
+    'allowed() { output=$(curl --verbose --connect-timeout 2 --max-time 3 "telnet://$1" 2>&1) '
+    '|| true; connected "$output"; }; '
 )
 # Agents keep reaching Java Policy through the gateway until the later direct transfer.
 JAVA_SELECTOR = {
@@ -101,11 +104,30 @@ def database_egress(environment: str, namespace: str) -> tuple:
     )
 
 
-def expected_policy(environment: str, data_namespace: str) -> dict:
+def provider_egress(namespace: str, provider: str) -> tuple:
+    return (
+        namespace,
+        {"app.kubernetes.io/name": f"{provider}-api", "app.kubernetes.io/component": "api"},
+        [(PROVIDER_PORT, "TCP")],
+    )
+
+
+def provider_targets(environment: str, namespace: str) -> dict[str, str]:
+    return {
+        f"{provider.upper()}_GRPC_TARGET": (
+            f"{environment}-{provider}-api.{namespace}.svc.cluster.local:{PROVIDER_PORT}"
+        )
+        for provider in ("product", "pricing")
+    }
+
+
+def expected_policy(environment: str, data_namespace: str, service_namespace: str) -> dict:
     destinations = (
-        (DNS_EGRESS, ALLOY_EGRESS)
-        if environment == "qa"
-        else (DNS_EGRESS, database_egress(environment, data_namespace))
+        DNS_EGRESS,
+        *((ALLOY_EGRESS,) if environment == "qa" else ()),
+        database_egress(environment, data_namespace),
+        provider_egress(service_namespace, "product"),
+        provider_egress(service_namespace, "pricing"),
     )
     egress = [
         {
@@ -162,7 +184,6 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "Policy resource name or namespace differs",
         )
 
-    database = environment == "local-dev"
     writer_secret = f"{environment}-postgres-policy-writer-creds"
     deployment = items["Deployment"]
     spec = deployment["spec"]
@@ -183,7 +204,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "terminationGracePeriodSeconds",
             "securityContext",
             "containers",
-            *(("volumes",) if database else ()),
+            "volumes",
         }
         and pod["automountServiceAccountToken"] is False
         and pod["enableServiceLinks"] is False
@@ -214,7 +235,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "startupProbe",
             "livenessProbe",
             "readinessProbe",
-            *(("volumeMounts",) if database else ()),
+            "volumeMounts",
         }
         and container["name"] == "policy-api"
         and container["imagePullPolicy"] == "IfNotPresent"
@@ -230,18 +251,10 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         ]
         and container["env"]
         == [
-            *(
-                [
-                    {
-                        "name": "POLICY_DATABASE_URL",
-                        "valueFrom": {
-                            "secretKeyRef": {"name": writer_secret, "key": "database-url"}
-                        },
-                    }
-                ]
-                if database
-                else []
-            ),
+            {
+                "name": "POLICY_DATABASE_URL",
+                "valueFrom": {"secretKeyRef": {"name": writer_secret, "key": "database-url"}},
+            },
             {
                 "name": "SERVICE_INSTANCE_ID",
                 "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
@@ -255,23 +268,22 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         },
         "Policy container security, ports, resources or identity binding differs",
     )
-    if database:
-        # Only the writer credential and its CA reach the serving Pod.
-        require(
-            container["volumeMounts"]
-            == [{"name": "postgres-ca", "mountPath": WRITER_CA_DIRECTORY, "readOnly": True}]
-            and pod["volumes"]
-            == [
-                {
-                    "name": "postgres-ca",
-                    "secret": {
-                        "secretName": writer_secret,
-                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
-                    },
-                }
-            ],
-            "Policy database credential or CA mount differs",
-        )
+    # Only the writer credential and its CA reach the serving Pod.
+    require(
+        container["volumeMounts"]
+        == [{"name": "postgres-ca", "mountPath": WRITER_CA_DIRECTORY, "readOnly": True}]
+        and pod["volumes"]
+        == [
+            {
+                "name": "postgres-ca",
+                "secret": {
+                    "secretName": writer_secret,
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                },
+            }
+        ],
+        "Policy database credential or CA mount differs",
+    )
     for name, path, period, failures in (
         ("startupProbe", "/livez", 2, 30),
         ("livenessProbe", "/livez", 10, 3),
@@ -298,8 +310,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         "SERVICE_VERSION": version,
         "OTEL_ENABLED": "true" if environment == "qa" else "false",
     }
-    if database:
-        expected_data.update(DATABASE_CONFIG)
+    expected_data.update(DATABASE_CONFIG)
+    expected_data.update(provider_targets(environment, target["namespace"]))
     if environment == "qa":
         expected_data["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
@@ -333,7 +345,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         )
     require(
         policy_spec(items["NetworkPolicy"]["spec"])
-        == expected_policy(environment, target["dataNamespace"]),
+        == expected_policy(environment, target["dataNamespace"], target["namespace"]),
         "Policy NetworkPolicy must deny Pod ingress and allow only the accepted egress",
     )
     return items
@@ -760,6 +772,7 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
     )
     if probe == "1":
         verify_denial(target, pod)
+        verify_provider_access(target, items)
     return pod
 
 
@@ -855,7 +868,13 @@ def verify_java_route(target: Target, pod: dict) -> None:
     print(f"Java Policy Service {service} selects ready Java Policy Pods: {names}")
 
 
-def run_probe(target: Target, name: str, description: str, args: list[str]) -> list[str]:
+def run_probe(
+    target: Target,
+    name: str,
+    description: str,
+    args: list[str],
+    labels: dict[str, str] | None = None,
+) -> list[str]:
     token = uuid.uuid4().hex
     require(
         not target.json("get", "pod", name, "--ignore-not-found"), "Policy probe name is occupied"
@@ -866,7 +885,7 @@ def run_probe(target: Target, name: str, description: str, args: list[str]) -> l
         "metadata": {
             "name": name,
             "namespace": target.namespace,
-            "labels": {PROBE_OWNER_LABEL: token},
+            "labels": {**(labels or {}), PROBE_OWNER_LABEL: token},
         },
         "spec": {
             "restartPolicy": "Never",
@@ -951,6 +970,34 @@ def verify_denial(target: Target, pod: dict) -> None:
         observed == [f"Policy port {port} denied" for port in PORTS.values()],
         "Policy workload denial result differs",
     )
+
+
+def verify_provider_access(target: Target, items: dict[str, dict]) -> None:
+    """Only the Policy identity reaches the configured Product and Pricing gRPC ports."""
+    data = items["ConfigMap"]["data"]
+    addresses = [data["PRODUCT_GRPC_TARGET"], data["PRICING_GRPC_TARGET"]]
+    allowed = run_probe(
+        target,
+        "policy-provider-allowed",
+        "provider allow",
+        ['for address do allowed "$address" || exit 1; echo "allowed $address"; done', *addresses],
+        labels={**SELECTOR, "environment": target.environment},
+    )
+    require(
+        allowed == [f"allowed {address}" for address in addresses],
+        "Policy identity cannot reach a provider",
+    )
+    denied = run_probe(
+        target,
+        "policy-provider-denied",
+        "provider denial",
+        ['for address do denied "$address" || exit 1; echo "denied $address"; done', *addresses],
+    )
+    require(
+        denied == [f"denied {address}" for address in addresses],
+        "an unrelated workload reaches a provider",
+    )
+    print("Policy provider access passed for the Policy identity and was denied otherwise")
 
 
 def main() -> int:

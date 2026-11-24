@@ -166,6 +166,16 @@ def broaden_network_ingress(values: Documents) -> None:
     del policy["spec"]["ingress"][0]["from"][0]["podSelector"]
 
 
+def broaden_policy_ingress(values: Documents) -> None:
+    policy = find(values["qa-go"], "NetworkPolicy", "qa-product-api")
+    del policy["spec"]["ingress"][1]["from"][0]["podSelector"]["matchLabels"]["environment"]
+
+
+def expose_product_http_to_policy(values: Documents) -> None:
+    policy = find(values["local-go"], "NetworkPolicy", "local-dev-product-api")
+    policy["spec"]["ingress"][1]["ports"].append({"port": 8080, "protocol": "TCP"})
+
+
 def allow_world_egress(values: Documents) -> None:
     policy = find(values["qa-go"], "NetworkPolicy", "qa-product-api")
     policy["spec"]["egress"].append({"to": [{}]})
@@ -251,6 +261,8 @@ CASES: list[tuple[str, Mutation, str]] = [
     ("missing QA Pod identity", missing_qa_instance, "PRODUCT_DATABASE_URL"),
     ("namespace-only Product ingress", broaden_network_ingress, "approved peers and ports"),
     ("world Product egress", allow_world_egress, "approved peers and ports"),
+    ("unscoped Policy ingress", broaden_policy_ingress, "approved peers and ports"),
+    ("Product HTTP exposed to Policy", expose_product_http_to_policy, "approved peers and ports"),
     (
         "missing Product gateway admission label",
         missing_gateway_product_label,

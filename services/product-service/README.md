@@ -372,7 +372,8 @@ The two business listeners are intentionally anonymous internal entries.
 They do not validate JWTs, enforce Product roles, or expose gRPC reflection or HTTP profiling.
 They must not be published directly. The legacy gateway authenticates the user-facing request and
 calls Product over the private HTTP service. NetworkPolicy admits HTTP 8080 and RPC 9090 only from
-that labeled gateway, denies management 8081 to ordinary Pods, and limits egress to DNS,
+that labeled gateway, admits RPC 9090 only from the same-environment `policy-api` Pods, denies
+management 8081 to ordinary Pods, and limits egress to DNS,
 PostgreSQL, and QA Alloy when telemetry is enabled.
 
 | Entry | Successful behavior | Bounded failure behavior |

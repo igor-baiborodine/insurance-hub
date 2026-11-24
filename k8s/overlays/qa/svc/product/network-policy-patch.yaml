@@ -20,6 +20,18 @@ spec:
           protocol: TCP
         - port: 9090
           protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-svc
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: policy-api
+              app.kubernetes.io/component: api
+              environment: qa
+      ports:
+        - port: 9090
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:

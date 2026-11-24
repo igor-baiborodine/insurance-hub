@@ -22,6 +22,8 @@ configMapGenerator:
       - DB_MAX_CONNS=4
       - DB_CONNECT_TIMEOUT=3s
       - DB_QUERY_TIMEOUT=1s
+      - PRODUCT_GRPC_TARGET=local-dev-product-api.local-dev-all.svc.cluster.local:9090
+      - PRICING_GRPC_TARGET=local-dev-pricing-api.local-dev-all.svc.cluster.local:9090
 patches:
   - path: deployment-patch.yaml
     target:

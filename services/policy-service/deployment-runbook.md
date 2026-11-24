@@ -6,7 +6,8 @@
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke and recovery](#private-smoke-and-recovery)
-  - [PostgreSQL storage (local-dev)](#postgresql-storage-local-dev)
+  - [Provider access](#provider-access)
+  - [PostgreSQL storage](#postgresql-storage)
     - [Target selection](#target-selection)
     - [Fresh installation order](#fresh-installation-order)
     - [Access contract](#access-contract)
@@ -22,9 +23,9 @@ Use catalog key `policy`. The Go workload is `<environment>-policy-api`, selecte
 `app.kubernetes.io/name=policy-api`; other Policy workloads keep their own selectors. The workload
 uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
 Operators use a loopback-bound Kubernetes API port-forward. The workload has no Kubernetes
-Service, ingress route or workload token. In local-dev only, it reads Policy PostgreSQL as
-`go_policy_writer`; QA receives no database settings until its own rollout (see
-[PostgreSQL storage](#postgresql-storage-local-dev)).
+Service, ingress route or workload token. In each environment it uses Policy PostgreSQL as
+`go_policy_writer` (see [PostgreSQL storage](#postgresql-storage)) and calls Product and Pricing
+over private gRPC (see [Provider access](#provider-access)).
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
@@ -48,9 +49,8 @@ below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
 It copies the exact local-dev writer Secret into that namespace so the workload meets the deployed
-startup contract, and supplies the local-dev Product and Pricing targets when the overlay does not.
-The workload runs only its read-only readiness query; its invalid-offer probes reach no provider
-and write nothing.
+startup contract. The workload runs only its read-only readiness query; its invalid-offer probes
+are rejected before any provider call and write nothing.
 It runs only the private workload checks (offer rejection, probes, identity, Pod denial and
 scale-to-zero).
 Shared routing checks run only through `go-svc-deploy-verify` against local-dev and QA.
@@ -151,8 +151,9 @@ curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz
 ```
 
-Local-dev permits only TCP and UDP 53 to kube-dns and disables telemetry. QA additionally
-permits OTLP/gRPC to the selected Alloy Pods. Inspect the six identity fields in the Policy
+Local-dev permits only TCP and UDP 53 to kube-dns, port 5432 of its Policy CNPG Pods and gRPC
+port 9090 of the Product and Pricing Pods, and disables telemetry. QA additionally permits
+OTLP/gRPC to the selected Alloy Pods. Inspect the six identity fields in the Policy
 startup record and verify corresponding telemetry by `service.name=policy-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
@@ -178,15 +179,29 @@ kubectl --context qa-insurance-hub -n qa-svc get deployment qa-policy-api --igno
 Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
 absent and the remaining shared inventory to stay healthy.
 
-## PostgreSQL storage (local-dev)
+## Provider access
+
+Policy egress admits only gRPC port 9090 of the `product-api` and `pricing-api` Pods in its own
+service namespace, addressed by `PRODUCT_GRPC_TARGET` and `PRICING_GRPC_TARGET`. Product admits
+the same-environment `policy-api` Pods on port 9090 only, and Pricing admits `policy-api` on port
+9090 only. Neither provider exposes its HTTP port to Policy. Provider calls are bounded by
+`PROVIDER_CALL_TIMEOUT`; provider availability is not part of readiness.
+
+## PostgreSQL storage
 
 The local-dev overlay injects `POLICY_DATABASE_URL` from Secret
 `local-dev-postgres-policy-writer-creds` and mounts only its `ca.crt` at
-`/etc/policy-service/postgres`. Egress is limited to DNS and port 5432 of the
+`/etc/policy-service/postgres`. Database egress is limited to port 5432 of the
 `local-dev-postgres-policy` CNPG Pods. Readiness fails until the writer's bounded query reads every
 Policy table, and the Pod logs `policy database ready` with `database_role=go_policy_writer`.
-`go-svc-deploy-verify` requires both. The base and QA overlay carry no database settings, so a
-release cannot break the QA workload before its own provisioning.
+`go-svc-deploy-verify` requires both.
+
+QA uses the same contract with Secret `qa-postgres-policy-writer-creds` in `qa-svc` and the
+`qa-postgres-policy` CNPG cluster in `qa-data`. A QA release carrying these settings starts only
+after that Secret exists and the schema is adopted, so run `resource-ensure`, migration `status`
+and `migrate`, then `resource-verify` with the QA coordinates before merging such a release.
+Adoption replaces a shared sequence allocator with table-local identities, so any writer that
+still allocates identifiers from that sequence can no longer insert into the adopted tables.
 
 ### Target selection
 

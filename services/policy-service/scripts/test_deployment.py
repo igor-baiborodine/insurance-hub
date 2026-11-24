@@ -74,44 +74,6 @@ def without_database(items: dict[str, dict]) -> dict[str, dict]:
     return items
 
 
-def disposable_smoke_items(items: dict[str, dict], environment: str) -> dict[str, dict]:
-    """Meet the deployed startup contract in a disposable namespace without reaching a provider.
-
-    The rendered database wiring is kept. Provider targets are only defaulted: the smoke's
-    invalid-offer probes are rejected before any provider call, and the rendered egress admits
-    only DNS and the Policy database.
-    """
-    data = items["ConfigMap"]["data"]
-    for name, service in (("PRODUCT_GRPC_TARGET", "product"), ("PRICING_GRPC_TARGET", "pricing")):
-        data.setdefault(
-            name, f"{environment}-{service}-api.{environment}-all.svc.cluster.local:9090"
-        )
-    return items
-
-
-def test_disposable_smoke_items_meet_the_deployed_startup_contract() -> None:
-    # given
-    items = policy.validate_render("local-dev", policy.render("local-dev"))
-    egress = json.dumps(items["NetworkPolicy"]["spec"]["egress"])
-
-    # when
-    smoke = disposable_smoke_items(items, "local-dev")
-
-    # then
-    container = smoke["Deployment"]["spec"]["template"]["spec"]["containers"][0]
-    data = smoke["ConfigMap"]["data"]
-    assert data["DEPLOYMENT_ENVIRONMENT"] == "local-dev"
-    assert any(item["name"] == "POLICY_DATABASE_URL" for item in container["env"])
-    assert data["PRODUCT_GRPC_TARGET"] == (
-        "local-dev-product-api.local-dev-all.svc.cluster.local:9090"
-    )
-    assert data["PRICING_GRPC_TARGET"] == (
-        "local-dev-pricing-api.local-dev-all.svc.cluster.local:9090"
-    )
-    assert json.dumps(smoke["NetworkPolicy"]["spec"]["egress"]) == egress
-    assert "9090" not in egress
-
-
 @pytest.mark.parametrize(
     "defect", ["migrator credential", "extra mount", "missing database egress"]
 )
@@ -129,6 +91,33 @@ def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
     # when / then
     with pytest.raises(DeploymentError):
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+@pytest.mark.parametrize(
+    "defect",
+    ["namespace-wide provider egress", "provider HTTP port", "missing provider target"],
+)
+def test_render_allows_only_the_provider_gRPC_identities(environment: str, defect: str) -> None:
+    # given
+    items = policy.validate_render(environment, policy.render(environment))
+    egress = items["NetworkPolicy"]["spec"]["egress"]
+    product = next(
+        rule
+        for rule in egress
+        if rule["to"][0]["podSelector"]["matchLabels"].get("app.kubernetes.io/name")
+        == "product-api"
+    )
+    if defect == "namespace-wide provider egress":
+        del product["to"][0]["podSelector"]
+    elif defect == "provider HTTP port":
+        product["ports"] = [{"port": 8080, "protocol": "TCP"}]
+    else:
+        del items["ConfigMap"]["data"]["PRICING_GRPC_TARGET"]
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        policy.validate_render(environment, yaml.safe_dump_all(items.values()))
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
@@ -365,6 +354,47 @@ def test_denial_cleanup_preserves_primary_error(
     with pytest.raises(DeploymentError, match="probe creation failed"):
         policy.verify_denial(target, {"status": {"podIP": "192.0.2.10"}})
     assert "cleanup failed: Policy denial probe ownership differs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("denied_output", [True, False])
+def test_provider_access_requires_identity_allow_and_ordinary_denial(
+    monkeypatch: pytest.MonkeyPatch, denied_output: bool
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = policy.Target()
+    items = policy.validate_render("local-dev", policy.render("local-dev"))
+    addresses = [
+        "local-dev-product-api.local-dev-all.svc.cluster.local:9090",
+        "local-dev-pricing-api.local-dev-all.svc.cluster.local:9090",
+    ]
+    probes: list[tuple[str, list[str], dict | None]] = []
+
+    def probe(_target: object, name: str, _description: str, args: list[str], labels=None):
+        probes.append((name, args[1:], labels))
+        verb = "allowed" if labels else ("denied" if denied_output else "reached")
+        return [f"{verb} {address}" for address in addresses]
+
+    monkeypatch.setattr(policy, "run_probe", probe)
+
+    # when / then
+    if denied_output:
+        policy.verify_provider_access(target, items)
+    else:
+        with pytest.raises(DeploymentError, match="unrelated workload reaches a provider"):
+            policy.verify_provider_access(target, items)
+    assert probes[0] == (
+        "policy-provider-allowed",
+        addresses,
+        {
+            "app.kubernetes.io/name": "policy-api",
+            "app.kubernetes.io/component": "api",
+            "environment": "local-dev",
+        },
+    )
+    assert probes[1][:2] == ("policy-provider-denied", addresses) and probes[1][2] is None
 
 
 def test_denial_probe_waits_for_network_policy_convergence(
@@ -719,7 +749,6 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "type": "Opaque",
         "data": secret_data,
     }
-    items = disposable_smoke_items(items, target.environment)
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 
