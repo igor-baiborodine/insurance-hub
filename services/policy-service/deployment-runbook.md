@@ -47,6 +47,10 @@ source-matched image to perform operations. For disposable qualification, build 
 below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
+It copies the exact local-dev writer Secret into that namespace so the workload meets the deployed
+startup contract, and supplies the local-dev Product and Pricing targets when the overlay does not.
+The workload runs only its read-only readiness query; its invalid-offer probes reach no provider
+and write nothing.
 It runs only the private workload checks (offer rejection, probes, identity, Pod denial and
 scale-to-zero).
 Shared routing checks run only through `go-svc-deploy-verify` against local-dev and QA.
