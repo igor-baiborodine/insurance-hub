@@ -68,6 +68,8 @@
       - [issue-439-N01 Repeat-safe termination commands](#issue-439-n01-repeat-safe-termination-commands)
       - [issue-439-N02 Concurrent termination protection](#issue-439-n02-concurrent-termination-protection)
       - [issue-439-N03 Explicit natural-expiry termination semantics](#issue-439-n03-explicit-natural-expiry-termination-semantics)
+    - [Issue 440 Adopt the Policy PostgreSQL schema and data](#issue-440-adopt-the-policy-postgresql-schema-and-data)
+      - [issue-440-N01 Align PostgreSQL CA and managed-Secret boundaries](#issue-440-n01-align-postgresql-ca-and-managed-secret-boundaries)
   - [Ad hoc repository improvements](#ad-hoc-repository-improvements)
     - [Commit-message policy enforcement](#commit-message-policy-enforcement)
       - [adhoc-commit-msg-N01 Commit-message hook](#adhoc-commit-msg-n01-commit-message-hook)
@@ -1206,8 +1208,8 @@ telemetry evidence distinguish the two transports and show no unapproved direct 
 
 Parent: [issue 437](https://github.com/igor-baiborodine/insurance-hub/issues/437).
 The migration preserves the accepted Policy lifecycle while establishing explicit Go persistence,
-transaction and event-publication ownership. The optional command and domain refinements below do
-not change the mandatory termination safeguards or baseline scope.
+transaction and event-publication ownership. The optional command, domain and administration
+refinements below do not change the mandatory termination safeguards or baseline scope.
 
 ### Issue 439 Establish Policy storage and failure baselines
 
@@ -1316,6 +1318,46 @@ application tests prove the selected equality outcome, no invalid version or cov
 the HTTP/Gateway mapping and event count match the approved contract. If `issue-439-N01` or
 `issue-439-N02` is also selected, combined checks prove that the equality rule preserves its
 accepted repeat and concurrency outcomes.
+
+### Issue 440 Adopt the Policy PostgreSQL schema and data
+
+Origin: issue-440 Step 5 fresh local-dev qualification, added on 2026-11-24 after comparing the
+Product, Pricing, Document and Policy PostgreSQL administration implementations. Policy was aligned
+within issue 440; this entry preserves the broader cross-service consistency improvement without
+expanding that ticket.
+
+Source ticket: [issue 440](https://github.com/igor-baiborodine/insurance-hub/issues/440).
+
+| Ledger ID | Improvement | Status | Follow-up ticket or disposition |
+| --- | --- | --- | --- |
+| [issue-440-N01](#issue-440-n01-align-postgresql-ca-and-managed-secret-boundaries) | Align PostgreSQL CA and managed-Secret boundaries | Deferred | Unassigned; use Pricing administration as the reference behavior |
+
+#### issue-440-N01 Align PostgreSQL CA and managed-Secret boundaries
+
+**Requirement:** Align every PostgreSQL-based service with the Pricing administration boundary.
+After validating the exact environment, context, namespaces, CNPG cluster and database endpoint,
+read the cluster-derived CA Secret by its canonical name without requiring application ownership
+labels. Apply service ownership and application labels only to target, role credential and other
+Secrets created and managed by that service. Preserve each service's distinct roles, grants,
+database contract and operational interfaces; alignment does not require copying unrelated Pricing
+behavior or introducing a shared abstraction.
+
+**Why deferred:** Issue 440 needed only the Policy correction required by its fresh local-dev
+qualification. Product and Document already read the canonical CNPG CA without application labels,
+but their managed-Secret checks and administration structures differ; reviewing and aligning every
+PostgreSQL service would cross multiple completed migration scopes without fixing a current blocker.
+
+**Reconsider when:** A PostgreSQL service next changes its resource-administration tooling, a fresh
+installation exposes inconsistent CA or Secret ownership behavior, or repeated implementations
+justify a separately scoped common contract.
+
+**Acceptance evidence:** A checked-in service matrix identifies every PostgreSQL administration
+owner and proves that each validates its exact cluster coordinates before reading the canonical CA.
+Focused tests accept an unlabeled CNPG-generated CA, reject a foreign or mislabeled service-managed
+Secret, preserve wrong-target refusal before mutation and cover fresh and split data/service
+namespace layouts where supported. The owning format, lint and fast-test gates pass for every
+changed service, and a bounded disposable or local fresh-cluster check confirms at least one
+representative end-to-end administration flow without changing QA or unrelated resources.
 
 ## Ad hoc repository improvements
 
