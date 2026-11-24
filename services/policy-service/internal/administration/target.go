@@ -17,9 +17,9 @@ const (
 	databaseName = "policy"
 	ownerRole    = "policy"
 	migratorRole = "go_policy_migrator"
-	// RuntimeRole is the only database identity the serving workload may use.
-	RuntimeRole = "go_policy_runtime"
-	fileLimit   = 16 * 1024
+	// writerRole is the only database identity the serving workload may use.
+	writerRole = "go_policy_writer"
+	fileLimit  = 16 * 1024
 )
 
 var uuidPattern = regexp.MustCompile(

@@ -15,7 +15,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
 )
 
-func TestRun_PolicyRuntimeAccess(t *testing.T) {
+func TestRun_PolicyWriterAccess(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
@@ -28,29 +28,29 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	fixture.Call(t, ctx, "migrate", "version=1")
 
 	// when
-	runtime := runtimeConnection(t, ctx, fixture.RuntimeURL("policy"))
+	writer := writerConnection(t, ctx, fixture.WriterURL("policy"))
 
 	// then
 	if !accessMatches(t, ctx, fixture) {
 		t.Fatal("migrated access differs from the contract")
 	}
 	var ids string
-	if err := runtime.QueryRow(ctx, postgresfixture.InsertGeneratedAggregate).
+	if err := writer.QueryRow(ctx, postgresfixture.InsertGeneratedAggregate).
 		Scan(&ids); err != nil ||
 		ids != "1,1,1,1:t" {
-		t.Fatalf("runtime aggregate insert: got %q (%v)", ids, err)
+		t.Fatalf("writer aggregate insert: got %q (%v)", ids, err)
 	}
 	var intent int64
-	if err := runtime.QueryRow(ctx, insertRuntimeOutboxIntentQuery).Scan(&intent); err != nil ||
+	if err := writer.QueryRow(ctx, insertWriterOutboxIntentQuery).Scan(&intent); err != nil ||
 		intent != 1 {
-		t.Fatalf("runtime outbox insert: got %d (%v)", intent, err)
+		t.Fatalf("writer outbox insert: got %d (%v)", intent, err)
 	}
-	if tag, err := runtime.Exec(
+	if tag, err := writer.Exec(
 		ctx,
-		updateRuntimeOfferQuery,
+		updateWriterOfferQuery,
 	); err != nil ||
 		tag.RowsAffected() != 1 {
-		t.Fatalf("runtime offer update: %v", err)
+		t.Fatalf("writer offer update: %v", err)
 	}
 
 	for _, test := range []struct{ name, statement string }{
@@ -64,7 +64,7 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	} {
 		t.Run("denies "+test.name, func(t *testing.T) {
 			// when
-			_, err := runtime.Exec(ctx, test.statement)
+			_, err := writer.Exec(ctx, test.statement)
 
 			// then
 			requirePermissionDenied(t, err)
@@ -72,7 +72,7 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	}
 	t.Run("denies another service database", func(t *testing.T) {
 		// when
-		connection, err := pgx.Connect(ctx, fixture.RuntimeURL("pricing"))
+		connection, err := pgx.Connect(ctx, fixture.WriterURL("pricing"))
 
 		// then
 		if connection != nil {
@@ -82,22 +82,22 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	})
 	t.Run("verification rejects extra privilege", func(t *testing.T) {
 		// given
-		t.Cleanup(func() { fixture.Exec(t, ctx, revokeRuntimeDeleteQuery) })
-		fixture.Exec(t, ctx, grantRuntimeDeleteQuery)
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeWriterDeleteQuery) })
+		fixture.Exec(t, ctx, grantWriterDeleteQuery)
 
 		// when / then
 		if accessMatches(t, ctx, fixture) {
-			t.Fatal("runtime DELETE grant passed access verification")
+			t.Fatal("writer DELETE grant passed access verification")
 		}
 	})
-	t.Run("verification rejects runtime owner membership", func(t *testing.T) {
+	t.Run("verification rejects writer owner membership", func(t *testing.T) {
 		// given
-		t.Cleanup(func() { fixture.Exec(t, ctx, revokeRuntimeOwnerQuery) })
-		fixture.Exec(t, ctx, grantRuntimeOwnerQuery)
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeWriterOwnerQuery) })
+		fixture.Exec(t, ctx, grantWriterOwnerQuery)
 
 		// when / then
 		if accessMatches(t, ctx, fixture) {
-			t.Fatal("runtime owner membership passed access verification")
+			t.Fatal("writer owner membership passed access verification")
 		}
 	})
 }
@@ -112,12 +112,12 @@ func accessMatches(t *testing.T, ctx context.Context, fixture *postgresfixture.F
 	return matches
 }
 
-// runtimeConnection logs in as the runtime role over verified TLS, as the workload does.
-func runtimeConnection(t *testing.T, ctx context.Context, databaseURL string) *pgx.Conn {
+// writerConnection logs in as the writer role over verified TLS, as the workload does.
+func writerConnection(t *testing.T, ctx context.Context, databaseURL string) *pgx.Conn {
 	t.Helper()
 	connection, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
-		t.Fatal("connect as Policy runtime:", err)
+		t.Fatal("connect as Policy writer:", err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

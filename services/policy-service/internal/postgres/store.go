@@ -77,12 +77,12 @@ type Issuance struct {
 	Intent     Intent
 }
 
-// Store reads and writes Policy aggregates through the runtime pool.
+// Store reads and writes Policy aggregates through the writer pool.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
-// NewStore wraps the process-owned runtime pool.
+// NewStore wraps the process-owned writer pool.
 func NewStore(pool *pgxpool.Pool) (*Store, error) {
 	if pool == nil {
 		return nil, errors.New("create Policy store: pool is required")

@@ -68,7 +68,7 @@ func TestMigrationConnection_RequiresVerifiedMigratorURL(t *testing.T) {
 	for _, test := range []struct{ name, url, diagnostic string }{
 		{"direct connection", base, ""},
 		{"loopback tunnel", base + "&hostaddr=127.0.0.1&port=15432", ""},
-		{"runtime credential", strings.Replace(base, "go_policy_migrator", RuntimeRole, 1), "does not match"},
+		{"writer credential", strings.Replace(base, "go_policy_migrator", writerRole, 1), "does not match"},
 		{"relaxed TLS", strings.Replace(base, "verify-full", "require", 1), "TLS verify-full"},
 		{"remote tunnel", base + "&hostaddr=10.0.0.1&port=15432", "loopback"},
 		{"privileged tunnel port", base + "&hostaddr=127.0.0.1&port=80", "loopback"},

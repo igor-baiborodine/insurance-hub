@@ -75,7 +75,7 @@ type Fixture struct {
 	TargetPath       string
 	URLPath          string
 	MigratorPassword string
-	RuntimePassword  string
+	WriterPassword   string
 }
 
 // New starts PostgreSQL with TLS and provisions it with the shared resource-ensure SQL.
@@ -84,12 +84,12 @@ func New(t *testing.T, ctx context.Context) *Fixture {
 	admin, address, ca := disposablePostgres(t, ctx)
 	fixture := &Fixture{
 		Admin: admin, Address: address, CA: ca,
-		MigratorPassword: rand.Text(), RuntimePassword: rand.Text(),
+		MigratorPassword: rand.Text(), WriterPassword: rand.Text(),
 		TargetPath: filepath.Join(t.TempDir(), "target.json"),
 		URLPath:    filepath.Join(t.TempDir(), "database-url"),
 	}
 	fixture.Exec(t, ctx, fmt.Sprintf(setupTargetIdentityQuery,
-		fixture.MigratorPassword, fixture.RuntimePassword, InstanceID, ClusterUID))
+		fixture.MigratorPassword, fixture.WriterPassword, InstanceID, ClusterUID))
 	fixture.Exec(t, ctx, provisioning.ProvisionAccess)
 	fixture.WriteTarget(t, InstanceID)
 	migratorURL := *address
@@ -139,13 +139,13 @@ func (f *Fixture) LoadJavaData(t *testing.T, ctx context.Context) {
 	}
 }
 
-// RuntimeURL is the runtime login over verified TLS for the named database.
-func (f *Fixture) RuntimeURL(database string) string {
-	runtimeURL := *f.Address
-	runtimeURL.Path = "/" + database
-	runtimeURL.User = url.UserPassword("go_policy_runtime", f.RuntimePassword)
-	runtimeURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {f.CA}}.Encode()
-	return runtimeURL.String()
+// WriterURL is the writer login over verified TLS for the named database.
+func (f *Fixture) WriterURL(database string) string {
+	writerURL := *f.Address
+	writerURL.Path = "/" + database
+	writerURL.User = url.UserPassword("go_policy_writer", f.WriterPassword)
+	writerURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {f.CA}}.Encode()
+	return writerURL.String()
 }
 
 // Exec runs fixture-owner SQL.

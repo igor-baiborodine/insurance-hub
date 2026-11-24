@@ -80,7 +80,7 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 		t.Fatalf("expected one base and one applied history row, got %q", history)
 	}
 	if got := generatedAggregate(t, ctx, fixture, true); got != "1,1,1,1:t" {
-		t.Fatalf("fresh runtime insert: got %q", got)
+		t.Fatalf("fresh writer insert: got %q", got)
 	}
 	migrated := snapshot(t, ctx, fixture)
 
@@ -213,7 +213,7 @@ func requireBusinessData(
 	}
 }
 
-// generatedAggregate inserts one aggregate as the runtime role and returns its generated IDs.
+// generatedAggregate inserts one aggregate as the writer role and returns its generated IDs.
 func generatedAggregate(
 	t *testing.T,
 	ctx context.Context,
@@ -226,13 +226,13 @@ func generatedAggregate(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE go_policy_runtime"); err != nil {
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE go_policy_writer"); err != nil {
 		t.Fatal(err)
 	}
 	var ids string
 	if err := tx.QueryRow(ctx, postgresfixture.InsertGeneratedAggregate).
 		Scan(&ids); err != nil {
-		t.Fatal("runtime insert failed:", err)
+		t.Fatal("writer insert failed:", err)
 	}
 	if commit {
 		if err := tx.Commit(ctx); err != nil {

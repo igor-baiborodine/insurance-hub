@@ -130,10 +130,10 @@ def test_interrupted_ensure_retries_with_published_credentials(monkeypatch):
 
 def test_existing_role_without_recoverable_secret_is_refused():
     # given
-    target = FakeTarget(roles="go_policy_runtime")
+    target = FakeTarget(roles="go_policy_writer")
 
     # when / then
-    with pytest.raises(resources.ResourceError, match="go_policy_runtime exists without"):
+    with pytest.raises(resources.ResourceError, match="go_policy_writer exists without"):
         resources.ensure(target)
     assert target.mutations == []
 
@@ -150,7 +150,7 @@ def test_existing_roles_keep_their_passwords():
     assert "synthetic-sensitive-password" not in sql
     assert sql.count("ALTER ROLE") == 2 and "CREATE ROLE" not in sql
     assert "GRANT policy TO go_policy_migrator WITH INHERIT FALSE, SET TRUE" in sql
-    assert "TO go_policy_runtime" in sql and sql.rstrip().endswith("COMMIT;")
+    assert "TO go_policy_writer" in sql and sql.rstrip().endswith("COMMIT;")
 
 
 def test_secret_owned_by_another_service_is_refused(monkeypatch):
@@ -159,7 +159,7 @@ def test_secret_owned_by_another_service_is_refused(monkeypatch):
     manager.svc_ns = "local-dev-all"
     record = {
         "metadata": {
-            "name": "local-dev-postgres-policy-runtime-creds",
+            "name": "local-dev-postgres-policy-writer-creds",
             "namespace": "local-dev-all",
             "labels": {
                 "insurance-hub.io/owner": "pricing",
@@ -172,7 +172,7 @@ def test_secret_owned_by_another_service_is_refused(monkeypatch):
 
     # when / then
     with pytest.raises(resources.ResourceError, match="not owned by Policy"):
-        manager.get_secret("local-dev-postgres-policy-runtime-creds", "local-dev-all")
+        manager.get_secret("local-dev-postgres-policy-writer-creds", "local-dev-all")
 
 
 def test_command_failure_redacts_subprocess_output(monkeypatch, capsys):

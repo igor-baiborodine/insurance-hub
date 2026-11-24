@@ -45,14 +45,14 @@ from scripts.go.service.tooling_process import run_cli
 from scripts.python.process_runner import CommandError, child_environment, run_command
 
 MIGRATOR = "go_policy_migrator"
-RUNTIME = "go_policy_runtime"
-ROLES = (MIGRATOR, RUNTIME)
+WRITER = "go_policy_writer"
+ROLES = (MIGRATOR, WRITER)
 CA_MOUNTS = {
     MIGRATOR: "/etc/policy-admin/migrator/ca.crt",
-    RUNTIME: "/etc/policy-service/postgres/ca.crt",
+    WRITER: "/etc/policy-service/postgres/ca.crt",
 }
-SECRET_SUFFIX = {MIGRATOR: "migrator-creds", RUNTIME: "runtime-creds"}
-COMPONENTS = {MIGRATOR: "postgres-migrator", RUNTIME: "postgres-runtime"}
+SECRET_SUFFIX = {MIGRATOR: "migrator-creds", WRITER: "writer-creds"}
+COMPONENTS = {MIGRATOR: "postgres-migrator", WRITER: "postgres-writer"}
 ENVIRONMENTS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-data", "qa-svc"),
@@ -62,7 +62,7 @@ PROBE_STATE = re.compile(r"policy-probe-state:([0-9A-Z]{5})")
 ADMINISTRATION = Path(__file__).resolve().parents[1] / "internal/administration"
 PROVISION_SQL = ADMINISTRATION / "provisioning/provision-access.sql"
 INSPECT_ACCESS_SQL = ADMINISTRATION / "provisioning/inspect-access.sql"
-RUNTIME_GRANTS_SQL = ADMINISTRATION / "queries/apply-runtime-grants.sql"
+WRITER_GRANTS_SQL = ADMINISTRATION / "queries/apply-writer-grants.sql"
 MANAGED_TABLES = (
     "offer",
     "offer_answers",
@@ -84,7 +84,7 @@ SELECT current_database() = 'policy'
   AND NOT EXISTS (
       SELECT FROM pg_roles WHERE rolcanlogin AND rolname !~ '^pg_'
       AND rolname NOT IN ('policy', 'postgres', 'streaming_replica',
-          'go_policy_migrator', 'go_policy_runtime')
+          'go_policy_migrator', 'go_policy_writer')
       AND has_database_privilege(oid, current_database(), 'CONNECT'))
   AND NOT EXISTS (
       SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -109,7 +109,7 @@ END;
 
 ROLES_SQL = (
     "SELECT coalesce(string_agg(rolname, ',' ORDER BY rolname), '') FROM pg_roles "
-    "WHERE rolname IN ('go_policy_migrator', 'go_policy_runtime');"
+    "WHERE rolname IN ('go_policy_migrator', 'go_policy_writer');"
 )
 MIGRATED_SQL = "SELECT to_regclass('public.policy_outbox') IS NOT NULL;"
 
@@ -459,7 +459,7 @@ def role_sql(passwords: dict[str, str], existing: set[str], target: dict[str, ob
         f"SET LOCAL policy.instance_id = {sql_literal(str(target['instanceID']))}",
         f"SET LOCAL policy.cluster_uid = {sql_literal(str(target['clusterUID']))}",
     ]
-    grants = RUNTIME_GRANTS_SQL.read_text()
+    grants = WRITER_GRANTS_SQL.read_text()
     return (
         ";\n".join(statements)
         + ";\n"

@@ -8,14 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PoolSettings bounds the process-owned runtime pool.
+// PoolSettings bounds the process-owned writer pool.
 type PoolSettings struct {
 	URL            string
 	MaxConnections int32
 	ConnectTimeout time.Duration
 }
 
-// OpenPool constructs and verifies the runtime pool. Only the Policy runtime login over
+// OpenPool constructs and verifies the writer pool. Only the Policy writer login over
 // certificate-verified TLS is accepted.
 func OpenPool(ctx context.Context, settings PoolSettings) (*pgxpool.Pool, error) {
 	configuration, err := pgxpool.ParseConfig(settings.URL)
@@ -23,10 +23,10 @@ func OpenPool(ctx context.Context, settings PoolSettings) (*pgxpool.Pool, error)
 		return nil, errInvalidConnection
 	}
 	connection := configuration.ConnConfig
-	if connection.User != "go_policy_runtime" || connection.Database != "policy" ||
+	if connection.User != "go_policy_writer" || connection.Database != "policy" ||
 		connection.TLSConfig == nil || connection.TLSConfig.InsecureSkipVerify ||
 		connection.TLSConfig.RootCAs == nil || len(connection.Fallbacks) != 0 {
-		return nil, errors.New("invalid Policy PostgreSQL runtime connection settings")
+		return nil, errors.New("invalid Policy PostgreSQL writer connection settings")
 	}
 	if settings.MaxConnections <= 0 || settings.ConnectTimeout <= 0 {
 		return nil, errors.New("invalid Policy PostgreSQL pool limits")
@@ -39,11 +39,11 @@ func OpenPool(ctx context.Context, settings PoolSettings) (*pgxpool.Pool, error)
 	defer cancel()
 	pool, err := pgxpool.NewWithConfig(dialCtx, configuration)
 	if err != nil {
-		return nil, errors.New("cannot create Policy PostgreSQL runtime pool")
+		return nil, errors.New("cannot create Policy PostgreSQL writer pool")
 	}
 	if err := pool.Ping(dialCtx); err != nil {
 		pool.Close()
-		return nil, errors.New("cannot connect to Policy PostgreSQL as runtime")
+		return nil, errors.New("cannot connect to Policy PostgreSQL as writer")
 	}
 	return pool, nil
 }

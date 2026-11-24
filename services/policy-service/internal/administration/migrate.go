@@ -82,8 +82,8 @@ func applyGrants(ctx context.Context, db *sql.DB, target Target) (resultErr erro
 	if status != AppliedStatus {
 		return fmt.Errorf("verify Policy migration: unexpected state %q", status)
 	}
-	if _, err := tx.ExecContext(ctx, applyRuntimeGrantsQuery); err != nil {
-		return fmt.Errorf("apply Policy runtime grants: %w", err)
+	if _, err := tx.ExecContext(ctx, applyWriterGrantsQuery); err != nil {
+		return fmt.Errorf("apply Policy writer grants: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit Policy grants; inspect and retry safely: %w", err)

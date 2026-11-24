@@ -3,8 +3,8 @@
 -- An existing enrollment marker is never rewritten.
 REVOKE ALL ON DATABASE policy FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
-GRANT CONNECT ON DATABASE policy TO go_policy_migrator, go_policy_runtime;
-GRANT USAGE ON SCHEMA public TO go_policy_runtime;
+GRANT CONNECT ON DATABASE policy TO go_policy_migrator, go_policy_writer;
+GRANT USAGE ON SCHEMA public TO go_policy_writer;
 GRANT policy TO go_policy_migrator WITH INHERIT FALSE, SET TRUE, ADMIN FALSE;
 CREATE SCHEMA IF NOT EXISTS policy_admin AUTHORIZATION postgres;
 REVOKE ALL ON SCHEMA policy_admin FROM PUBLIC;

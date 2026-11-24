@@ -209,7 +209,7 @@ test-integration: ## Run the service composition and disposable PostgreSQL migra
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyRuntimeAccess|PolicyStorageOnAdoptedData)$$' \
+		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData)$$' \
 		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 

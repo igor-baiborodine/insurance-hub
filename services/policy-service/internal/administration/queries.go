@@ -5,8 +5,8 @@ import _ "embed"
 //go:embed queries/acquire-administration-lock.sql
 var acquireAdministrationLockQuery string
 
-//go:embed queries/apply-runtime-grants.sql
-var applyRuntimeGrantsQuery string
+//go:embed queries/apply-writer-grants.sql
+var applyWriterGrantsQuery string
 
 //go:embed queries/inspect-history-rows.sql
 var inspectHistoryRowsQuery string

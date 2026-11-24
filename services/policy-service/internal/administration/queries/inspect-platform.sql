@@ -18,7 +18,7 @@ SELECT current_user = $4 AND session_user = $5
     )
     AND NOT EXISTS (
         SELECT FROM pg_roles
-        WHERE rolname IN ('policy', 'go_policy_migrator', 'go_policy_runtime')
+        WHERE rolname IN ('policy', 'go_policy_migrator', 'go_policy_writer')
           AND (
               has_any_column_privilege(oid, 'policy_admin.target_identity', 'INSERT,UPDATE,REFERENCES')
               OR has_table_privilege(oid, 'policy_admin.target_identity', 'DELETE,TRUNCATE,TRIGGER')

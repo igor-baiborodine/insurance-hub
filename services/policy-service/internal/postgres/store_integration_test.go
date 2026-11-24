@@ -35,7 +35,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	fixture.LoadJavaData(t, ctx)
 	fixture.Call(t, ctx, "migrate", "version=1")
 	pool, err := postgres.OpenPool(ctx, postgres.PoolSettings{
-		URL: fixture.RuntimeURL(
+		URL: fixture.WriterURL(
 			"policy",
 		),
 		MaxConnections: 4,

@@ -10,23 +10,23 @@ var setupUnrelatedServiceQuery string
 //go:embed testdata/sql/close-unrelated-service.sql
 var closeUnrelatedServiceQuery string
 
-//go:embed testdata/sql/grant-runtime-delete.sql
-var grantRuntimeDeleteQuery string
+//go:embed testdata/sql/grant-writer-delete.sql
+var grantWriterDeleteQuery string
 
-//go:embed testdata/sql/revoke-runtime-delete.sql
-var revokeRuntimeDeleteQuery string
+//go:embed testdata/sql/revoke-writer-delete.sql
+var revokeWriterDeleteQuery string
 
-//go:embed testdata/sql/grant-runtime-owner.sql
-var grantRuntimeOwnerQuery string
+//go:embed testdata/sql/grant-writer-owner.sql
+var grantWriterOwnerQuery string
 
-//go:embed testdata/sql/revoke-runtime-owner.sql
-var revokeRuntimeOwnerQuery string
+//go:embed testdata/sql/revoke-writer-owner.sql
+var revokeWriterOwnerQuery string
 
-//go:embed testdata/sql/insert-runtime-outbox-intent.sql
-var insertRuntimeOutboxIntentQuery string
+//go:embed testdata/sql/insert-writer-outbox-intent.sql
+var insertWriterOutboxIntentQuery string
 
-//go:embed testdata/sql/update-runtime-offer.sql
-var updateRuntimeOfferQuery string
+//go:embed testdata/sql/update-writer-offer.sql
+var updateWriterOfferQuery string
 
 //go:embed testdata/sql/read-catalog-snapshot.sql
 var readCatalogSnapshotQuery string
