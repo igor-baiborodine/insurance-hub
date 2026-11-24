@@ -143,29 +143,40 @@ def select_files(root: Path, cwd: Path, values: list[str]) -> list[Path]:
     return selected
 
 
-def run_doctoc(path: Path, *, quiet: bool = False) -> None:
+def doctoc_prefix() -> tuple[Path, bool]:
     provisioned = os.environ.get("AI_DOCTOC_DIR")
     if provisioned:
-        package = Path(provisioned).resolve() / "node_modules/doctoc"
-        try:
-            version = json.loads((package / "package.json").read_text())["version"]
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            raise MarkdownTocError("AI_DOCTOC_DIR needs explicitly provisioned doctoc") from error
-        if version != DOCTOC_VERSION or not (package / "doctoc.js").is_file():
-            raise MarkdownTocError(f"AI_DOCTOC_DIR requires doctoc {DOCTOC_VERSION}")
-        if shutil.which("node") is None:
-            raise MarkdownTocError("node is required for AI_DOCTOC_DIR")
-        command = ["node", str(package / "doctoc.js")]
-    else:
-        if shutil.which("npx") is None:
-            raise MarkdownTocError("npx is required")
-        command = ["npx", "--yes", "--package", f"doctoc@{DOCTOC_VERSION}", "doctoc"]
+        return Path(provisioned).resolve(), True
+    return Path(__file__).resolve().parents[1] / "ai/framework", False
+
+
+def run_doctoc(paths: list[Path], *, quiet: bool = False) -> None:
+    prefix, explicit_prefix = doctoc_prefix()
+    package = prefix / "node_modules/doctoc"
+    try:
+        version = json.loads((package / "package.json").read_text())["version"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        if explicit_prefix:
+            message = "AI_DOCTOC_DIR needs explicitly provisioned doctoc"
+        else:
+            message = "doctoc is not provisioned; run make -C ai/framework markdown-setup"
+        raise MarkdownTocError(message) from error
+    if version != DOCTOC_VERSION or not (package / "doctoc.js").is_file():
+        if explicit_prefix:
+            message = f"AI_DOCTOC_DIR requires doctoc {DOCTOC_VERSION}"
+        else:
+            message = (
+                f"ai/framework requires doctoc {DOCTOC_VERSION}; "
+                "run make -C ai/framework markdown-setup"
+            )
+        raise MarkdownTocError(message)
+    if shutil.which("node") is None:
+        raise MarkdownTocError("node is required for provisioned doctoc")
+    command = ["node", str(package / "doctoc.js")]
     managed_process_group = os.environ.get(MANAGED_PROCESS_GROUP_ENV) == "1"
     if managed_process_group and os.getpid() != os.getpgrp():
         raise MarkdownTocError("managed doctoc execution requires an owned process group")
     environment = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
-    if "npm_config_offline" in os.environ:
-        environment["npm_config_offline"] = os.environ["npm_config_offline"]
     process = subprocess.Popen(
         [
             *command,
@@ -173,7 +184,7 @@ def run_doctoc(path: Path, *, quiet: bool = False) -> None:
             "--notitle",
             "--mintocitems",
             "1",
-            str(path),
+            *map(str, paths),
         ],
         stdout=subprocess.DEVNULL if quiet else None,
         env=environment,
@@ -196,8 +207,8 @@ def run_doctoc(path: Path, *, quiet: bool = False) -> None:
 
 
 def format_files(files: list[Path]) -> int:
-    for path in files:
-        run_doctoc(path)
+    if files:
+        run_doctoc(files)
     return 0
 
 
@@ -207,10 +218,13 @@ def check_files(root: Path, files: list[Path]) -> int:
     stale: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="markdown-toc-check.") as directory:
         temporary = Path(directory)
+        candidates = []
         for index, path in enumerate(files, start=1):
             candidate = temporary / f"{index}.md"
             shutil.copyfile(path, candidate)
-            run_doctoc(candidate, quiet=True)
+            candidates.append(candidate)
+        run_doctoc(candidates, quiet=True)
+        for path, candidate in zip(files, candidates, strict=True):
             if path.read_bytes() != candidate.read_bytes():
                 stale.append(path)
     for path in stale:

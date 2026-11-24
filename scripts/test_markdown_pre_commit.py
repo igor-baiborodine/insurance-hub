@@ -18,33 +18,40 @@ from framework_runtime import CheckError
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_explicit_offline_markdown_never_drops_the_npx_setting(tmp_path: Path) -> None:
+def test_default_doctoc_batches_framework_package_without_npx(tmp_path: Path) -> None:
     # given
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    node = fake_bin / "node"
+    node.write_text('#!/bin/sh\nprintf "node:%s\\n" "$@"\n')
+    node.chmod(0o755)
     npx = fake_bin / "npx"
-    npx.write_text('#!/bin/sh\n[ "${npm_config_offline:-}" = true ]\n')
+    npx.write_text('#!/bin/sh\nprintf "npx-called\\n"\nexit 99\n')
     npx.chmod(0o755)
-    document = tmp_path / "guide.md"
-    document.write_text("# Offline fixture\n")
+    documents = [tmp_path / "guide.md", tmp_path / "runbook.md"]
+    for document in documents:
+        document.write_text("# Offline fixture\n")
     environment = {
         **os.environ,
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "npm_config_offline": "true",
     }
     environment.pop("AI_DOCTOC_DIR", None)
-    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc([Path(value) for value in sys.argv[1:]])"
 
     # when
     result = run(
-        [sys.executable, "-c", program, document],
+        [sys.executable, "-c", program, *documents],
         cwd=REPOSITORY_ROOT / "scripts",
         env=environment,
     )
 
     # then
     assert result.returncode == 0, result.stderr
-    assert document.read_text() == "# Offline fixture\n"
+    assert result.stdout.count("ai/framework/node_modules/doctoc/doctoc.js") == 1
+    for document in documents:
+        assert str(document) in result.stdout
+        assert document.read_text() == "# Offline fixture\n"
+    assert "npx-called" not in result.stdout
 
 
 @pytest.mark.parametrize("version,expected", [("2.5.0", 0), ("0.0.0", 1)])
@@ -62,7 +69,7 @@ def test_provisioned_doctoc_requires_exact_pin_before_execution(
     document = tmp_path / "guide.md"
     document.write_text("# Fixture\n")
     environment = {**os.environ, "AI_DOCTOC_DIR": str(tmp_path), "PATH": str(tmp_path)}
-    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc(Path(sys.argv[1]))"
+    program = "from pathlib import Path; from markdown_toc import run_doctoc; import sys; run_doctoc([Path(sys.argv[1])])"
 
     # when
     result = run(
@@ -101,7 +108,7 @@ def hook(repository: Path, *, path: str | None = None) -> subprocess.CompletedPr
     environment = {**os.environ, "PYTHON": sys.executable}
     if path is not None:
         environment["PATH"] = path
-        # Restricted-path cases exercise npx discovery, not a provisioned doctoc.
+        # Restricted-path cases exercise pre-tool guards without inheriting an explicit override.
         environment.pop("AI_DOCTOC_DIR", None)
     return run([repository / ".githooks" / "pre-commit"], cwd=repository, env=environment)
 
@@ -120,7 +127,7 @@ def assert_no_hook_temporary_files(repository: Path) -> None:
     assert not any(name.startswith(".markdown-toc-staged-paths.") for name in names)
 
 
-def install_blocking_npx(
+def install_blocking_doctoc(
     repository: Path, *, ignore_termination: bool = False
 ) -> tuple[Path, Path]:
     fake_bin = repository / "fake-bin"
@@ -128,7 +135,7 @@ def install_blocking_npx(
     state = repository / ".fake-doctoc-state"
     if ignore_termination:
         (repository / ".fake-doctoc-ignore-termination").touch()
-    executable = fake_bin / "npx"
+    executable = fake_bin / "node"
     executable.write_text(
         """#!/usr/bin/env python3
 import os
@@ -207,7 +214,9 @@ def start_hook_with_active_doctoc(
     checker_timeout: float | None = None,
     ignore_doctoc_termination: bool = False,
 ) -> tuple[subprocess.Popen[str], list[int], Path]:
-    fake_bin, state = install_blocking_npx(repository, ignore_termination=ignore_doctoc_termination)
+    fake_bin, state = install_blocking_doctoc(
+        repository, ignore_termination=ignore_doctoc_termination
+    )
     (repository / "interrupt.md").write_text("# Interrupt\n\n## Section\n", encoding="utf-8")
     git(repository, "add", "interrupt.md")
     environment = {
@@ -217,7 +226,7 @@ def start_hook_with_active_doctoc(
     }
     if checker_timeout is not None:
         environment["MARKDOWN_HOOK_TEST_CHECKER_TIMEOUT_SECONDS"] = str(checker_timeout)
-    # The fake npx owns this scenario's process and cleanup behavior.
+    # The fake Node process owns this scenario's doctoc child and cleanup behavior.
     environment.pop("AI_DOCTOC_DIR", None)
     process = subprocess.Popen(
         [str(repository / ".githooks" / "pre-commit")],
@@ -239,6 +248,10 @@ def fixture_repository(tmp_path: Path) -> tuple[Path, Path]:
     (repository / ".githooks").mkdir(parents=True)
     (repository / "scripts").mkdir()
     (repository / "scripts" / "python").mkdir()
+    (repository / "ai").mkdir()
+    (repository / "ai" / "framework").symlink_to(
+        REPOSITORY_ROOT / "ai/framework", target_is_directory=True
+    )
     restricted.mkdir()
     for source, destination in (
         (REPOSITORY_ROOT / ".python-version", repository / ".python-version"),
@@ -292,7 +305,7 @@ def fixture_repository(tmp_path: Path) -> tuple[Path, Path]:
     return repository, restricted
 
 
-def test_non_markdown_selection_does_not_require_npx(
+def test_non_markdown_selection_does_not_require_doctoc(
     fixture_repository: tuple[Path, Path],
 ) -> None:
     # given
@@ -308,7 +321,7 @@ def test_non_markdown_selection_does_not_require_npx(
     assert_no_hook_temporary_files(repository)
 
 
-def test_markdown_deletion_does_not_require_npx(
+def test_markdown_deletion_does_not_require_doctoc(
     fixture_repository: tuple[Path, Path],
 ) -> None:
     # given
@@ -605,9 +618,13 @@ def test_path_limited_commit_ignores_unrelated_markdown_in_ordinary_index(
     assert_no_hook_temporary_files(repository)
 
 
-def test_staged_markdown_reports_missing_npx(fixture_repository: tuple[Path, Path]) -> None:
+def test_staged_markdown_reports_missing_provisioned_doctoc(
+    fixture_repository: tuple[Path, Path],
+) -> None:
     # given
     repository, restricted = fixture_repository
+    (repository / "ai/framework").unlink()
+    (repository / "ai/framework").mkdir()
     (repository / "requires-checker.md").write_text(
         "# Requires checker\n\n## Section\n", encoding="utf-8"
     )
@@ -618,7 +635,7 @@ def test_staged_markdown_reports_missing_npx(fixture_repository: tuple[Path, Pat
 
     # then
     assert result.returncode == 1
-    assert "npx is required" in result.stderr
+    assert "doctoc is not provisioned; run make -C ai/framework markdown-setup" in result.stderr
     assert_no_hook_temporary_files(repository)
 
 

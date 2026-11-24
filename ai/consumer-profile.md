@@ -48,11 +48,11 @@ Adopt Go's underscore-separated test components, Given/When/Then, gofumpt/goimpo
 Owners keep pins, ordering, exclusions and local import prefixes. No incidental normalization.
 
 Use `./scripts/markdown-toc.sh format <task-owned-files>` and then `check` for every changed
-Markdown file. Node/npx and pinned doctoc are owned by that script. For prepared offline/client
-trials, set `AI_DOCTOC_DIR` to the absolute initialized framework root after explicitly running
-`make -C ai/framework markdown-setup`; the wrapper verifies doctoc 2.5.0 and executes local Node
-without npx. An explicit `npm_config_offline` setting is retained on the compatibility npx path. Name GitHub workflows by
-scope and purpose; retain filenames/job IDs unless the task changes them.
+Markdown file. After explicitly running `make -C ai/framework markdown-setup`, the script verifies
+and executes the pinned doctoc 2.5.0 package from the initialized framework root through Node. It
+never invokes npx or installs during format/check. `AI_DOCTOC_DIR` may select another explicitly
+provisioned package prefix. Name GitHub workflows by scope and purpose; retain filenames/job IDs
+unless the task changes them.
 
 The exact 12 generated adapter paths listed in
 [root conventions](../AGENTS.md#repository-conventions) are exempt from TOC transformation and

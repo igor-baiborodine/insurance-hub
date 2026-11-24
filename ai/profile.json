@@ -39,7 +39,7 @@
         "./scripts/markdown-toc.sh",
         "format"
       ],
-      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 via npx cache or explicit AI_DOCTOC_DIR pointing to a provisioned package prefix",
+      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 explicitly provisioned under ai/framework or the AI_DOCTOC_DIR package prefix",
       "effects": "Writes selected Markdown",
       "scope": "Append exact task-owned Markdown paths"
     },
@@ -50,7 +50,7 @@
         "./scripts/markdown-toc.sh",
         "check"
       ],
-      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 via npx cache or explicit AI_DOCTOC_DIR pointing to a provisioned package prefix",
+      "prerequisites": "Managed CPython and Node; doctoc 2.5.0 explicitly provisioned under ai/framework or the AI_DOCTOC_DIR package prefix",
       "effects": "Owned temporary copies only",
       "scope": "Append exact task-owned Markdown paths"
     },
