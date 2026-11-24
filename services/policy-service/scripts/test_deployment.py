@@ -93,43 +93,20 @@ def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
 
 
-@pytest.mark.parametrize(
-    ("environment", "namespace", "accepted"),
-    [
-        ("local-dev", policy.ISOLATED_NAMESPACE, True),
-        ("local-dev", "local-dev-policy-other", False),
-        ("qa", policy.ISOLATED_NAMESPACE, False),
-    ],
-)
-def test_isolated_binding_moves_workload_and_database_egress(
-    monkeypatch: pytest.MonkeyPatch, environment: str, namespace: str, accepted: bool
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_service_specific_namespace_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, environment: str
 ) -> None:
     # given
     monkeypatch.setenv("DEPLOY_ENV", environment)
     monkeypatch.setenv(
         "DEPLOY_CONTEXT", f"{'kind-' if environment != 'qa' else ''}{environment}-insurance-hub"
     )
-    monkeypatch.setenv("DEPLOY_SVC_NS", namespace)
-    if not accepted:
-        # when / then
-        with pytest.raises(DeploymentError, match="coordinates"):
-            policy.Target()
-        return
-    target = policy.Target()
-    items = policy.validate_render(environment, policy.render(environment))
+    monkeypatch.setenv("DEPLOY_SVC_NS", "policy-specific-namespace")
 
-    # when
-    policy.bind_namespace(items, environment, target.namespace)
-
-    # then
-    assert {item["metadata"]["namespace"] for item in items.values()} == {namespace}
-    database = items["NetworkPolicy"]["spec"]["egress"][1]["to"][0]
-    assert database["namespaceSelector"]["matchLabels"] == {
-        "kubernetes.io/metadata.name": namespace
-    }
-    assert database["podSelector"]["matchLabels"] == {
-        "cnpg.io/cluster": "local-dev-postgres-policy"
-    }
+    # when / then
+    with pytest.raises(DeploymentError, match="coordinates"):
+        policy.Target()
 
 
 def test_qa_refuses_placeholder_activation_and_runtime(

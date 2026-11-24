@@ -57,9 +57,6 @@ ENVIRONMENTS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-data", "qa-svc"),
 }
-# The only alternative binding: a disposable local-dev namespace holding a fresh Policy CNPG
-# cluster and the Go workload together while local-dev-all serves the Java database.
-ISOLATED_NAMESPACE = "local-dev-policy-isolated"
 COMMAND_SECONDS = 30
 PROBE_STATE = re.compile(r"policy-probe-state:([0-9A-Z]{5})")
 ADMINISTRATION = Path(__file__).resolve().parents[1] / "internal/administration"
@@ -193,13 +190,6 @@ class Kubernetes:
         require(environment in ENVIRONMENTS, "POLICY_RESOURCE_ENV must be local-dev or qa")
         self.environment = environment
         self.context, self.data_ns, self.svc_ns = ENVIRONMENTS[environment]
-        if (
-            environment == "local-dev"
-            and os.environ.get("POLICY_RESOURCE_DATA_NS")
-            == os.environ.get("POLICY_RESOURCE_SVC_NS")
-            == ISOLATED_NAMESPACE
-        ):
-            self.data_ns = self.svc_ns = ISOLATED_NAMESPACE
         self.kubectl_path = os.environ.get("KUBECTL", "kubectl")
         self.cluster = f"{environment}-postgres-policy"
         self.ca_name = f"{environment}-postgres-policy-ca"

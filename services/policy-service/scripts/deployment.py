@@ -41,9 +41,6 @@ ALLOY_EGRESS = (
 DATABASE_PORT = 5432
 DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
 WRITER_CA_DIRECTORY = "/etc/policy-service/postgres"
-# The only alternative binding: a disposable namespace holding a fresh Policy CNPG cluster and the
-# Go workload together, used when local-dev-all is occupied by the serving Java database.
-ISOLATED_NAMESPACE = "local-dev-policy-isolated"
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -392,8 +389,6 @@ class Target:
         self.context = self.configuration["context"]
         self.namespace = self.configuration["namespace"]
         requested = os.environ.get("DEPLOY_SVC_NS")
-        if self.environment == "local-dev" and requested == ISOLATED_NAMESPACE:
-            self.namespace = ISOLATED_NAMESPACE
         require(
             os.environ.get("DEPLOY_CONTEXT") == self.context and requested == self.namespace,
             "deployment coordinates differ from the catalog",
@@ -445,8 +440,6 @@ class Target:
             require(
                 config["SERVICE_VERSION"] == version, "QA Policy release is inactive or differs"
             )
-        if self.namespace != self.configuration["namespace"]:
-            bind_namespace(items, self.environment, self.namespace)
         self.template_labels = template["metadata"]["labels"]
         return yaml.safe_dump_all(items.values(), explicit_start=True), items, container["image"]
 
@@ -556,14 +549,6 @@ class Target:
             identity = f"{metadata['namespace']}_{metadata['name']}_{group}_{kind}"
             expected.add((identity, version))
         require(expected <= observed, "shared Flux inventory does not own all Policy resources")
-
-
-def bind_namespace(items: dict[str, dict], environment: str, namespace: str) -> None:
-    """Move a validated local-dev render, and its database egress, to the isolated namespace."""
-    for item in items.values():
-        item["metadata"]["namespace"] = namespace
-    spec = items["NetworkPolicy"]["spec"]
-    spec["egress"] = expected_policy(environment, namespace)["egress"]
 
 
 def running_image_matches(mode: str, image: str, digest: str, running: str) -> bool:
