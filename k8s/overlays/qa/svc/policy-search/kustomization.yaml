@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-policy-search-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/policy-search-api
-    newTag: 1.4.4
+    newTag: 1.4.5
 configMapGenerator:
   - name: policy-search-config
     behavior: merge
@@ -30,7 +30,7 @@ configMapGenerator:
       - KAFKA_TERMINATED_TOPIC=policy-terminated
       - KAFKA_CA_FILE=/etc/policy-search/kafka/ca.crt
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-8462c670b4d2
+      - SERVICE_VERSION=git-7ef578d0493d
 patches:
   - path: deployment-patch.yaml
     target:
