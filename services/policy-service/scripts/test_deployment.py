@@ -823,7 +823,10 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         policy.rollout(target)
 
         # then
-        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
+        # Provider ingress policy intentionally trusts only the real environment namespace.
+        # The disposable namespace qualifies the workload itself; the direct environment
+        # verification below owns the cross-workload allow/deny probes.
+        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "0")
         policy.verify_workload(target, items)
         policy.stop(target, items)
         assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0
