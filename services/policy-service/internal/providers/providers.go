@@ -75,7 +75,7 @@ func NewPricingCalculator(
 // text, and returns Pricing's exact amounts unchanged.
 func (calculator *PricingCalculator) CalculatePrice(
 	ctx context.Context,
-	request application.QuoteRequest,
+	request domain.OfferRequest,
 ) (domain.Quote, error) {
 	answers := make([]*pricingv1.Answer, 0, len(request.Answers))
 	for _, answer := range request.Answers {

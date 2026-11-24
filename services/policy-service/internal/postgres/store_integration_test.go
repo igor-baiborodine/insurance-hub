@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"maps"
 	"net/url"
 	"os"
@@ -19,12 +20,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
 )
 
 //go:embed testdata/sql/read-issuance-state.sql
 var readIssuanceStateQuery string
+
+//go:embed testdata/sql/read-offer-state.sql
+var readOfferStateQuery string
 
 //go:embed testdata/sql/insert-nullable-aggregates.sql
 var insertNullableAggregatesQuery string
@@ -179,6 +184,63 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 				current,
 				err,
 			)
+		}
+	})
+
+	t.Run("failed child row leaves no part of the offer", func(t *testing.T) {
+		// given
+		offer := newTestOffer(t, "0b6c7f1e-2d4a-4c3b-9e8f-7a6b5c4d3e21")
+		offer.Answers["NOTE"] = strings.Repeat("x", 256)
+		before := readOfferState(t, ctx, fixture, offer.Number)
+
+		// when
+		err := store.CreateOffer(ctx, offer)
+
+		// then
+		if err == nil {
+			t.Fatal("an oversized answer row was stored")
+		}
+		if after := readOfferState(t, ctx, fixture, offer.Number); after != before {
+			t.Fatalf("failed offer changed rows from %q to %q", before, after)
+		}
+	})
+
+	t.Run("committed offer reads back exactly", func(t *testing.T) {
+		// given
+		offer := newTestOffer(t, "9c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f")
+		before := readOfferState(t, ctx, fixture, offer.Number)
+
+		// when
+		err := store.CreateOffer(ctx, offer)
+		// then
+		if err != nil {
+			t.Fatal(err)
+		}
+		if delta := offerStateDelta(
+			t,
+			before,
+			readOfferState(t, ctx, fixture, offer.Number),
+		); delta !=
+			"offers=1;answers=2;covers=2;numbered=1" {
+			t.Fatalf("offer row delta = %s", delta)
+		}
+		stored, err := store.Offer(ctx, offer.Number)
+		if err != nil || stored.ID == 0 || stored.Number != offer.Number ||
+			optionalString(stored.ProductCode) != "TRI" ||
+			optionalString(stored.Status) != "NEW" ||
+			optionalDate(stored.CreationDate) != "2026-11-24" ||
+			optionalDate(stored.PolicyFrom) != "2017-04-16" ||
+			optionalDate(stored.PolicyTo) != "2018-04-15" ||
+			optionalString(stored.TotalPrice) != "123.45" ||
+			!optionalMapEqual(
+				stored.CoverPrices,
+				map[string]string{"C1": "100.10", "C2": "23.35"},
+			) ||
+			!optionalMapEqual(
+				stored.Answers,
+				map[string]string{"DESTINATION": "EUR", "NUM_OF_ADULTS": "1"},
+			) {
+			t.Fatalf("stored offer: %+v (%v)", stored, err)
 		}
 	})
 
@@ -458,4 +520,61 @@ func requireSQLCSchemaMatchesMigration(
 		!matches {
 		t.Fatalf("sqlc schema differs from the managed migration shape (%v)", err)
 	}
+}
+
+// newTestOffer prices the parent TRI request with the independent C02 fractional quote.
+func newTestOffer(t *testing.T, number string) domain.Offer {
+	t.Helper()
+	offer, err := domain.NewOffer(number, domain.OfferRequest{
+		ProductCode:    "TRI",
+		PolicyFrom:     time.Date(2017, 4, 16, 0, 0, 0, 0, time.UTC),
+		PolicyTo:       time.Date(2018, 4, 15, 0, 0, 0, 0, time.UTC),
+		SelectedCovers: []string{"C1", "C2"},
+		Answers: []domain.Answer{
+			{QuestionCode: "DESTINATION", Kind: domain.ChoiceAnswer, Value: "EUR"},
+			{QuestionCode: "NUM_OF_ADULTS", Kind: domain.NumericAnswer, Value: "1"},
+		},
+	}, domain.Quote{
+		TotalPrice:  "123.45",
+		CoverPrices: map[string]string{"C1": "100.10", "C2": "23.35"},
+	}, time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return offer
+}
+
+func readOfferState(
+	t *testing.T,
+	ctx context.Context,
+	fixture *postgresfixture.Fixture,
+	number string,
+) string {
+	t.Helper()
+	var state string
+	if err := fixture.Admin.QueryRow(ctx, readOfferStateQuery, number).
+		Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// offerStateDelta subtracts two readOfferState values field by field.
+func offerStateDelta(t *testing.T, before, after string) string {
+	t.Helper()
+	beforeFields, afterFields := strings.Split(before, ";"), strings.Split(after, ";")
+	deltas := make([]string, 0, len(afterFields))
+	for index, field := range afterFields {
+		name, afterValue, _ := strings.Cut(field, "=")
+		_, beforeValue, _ := strings.Cut(beforeFields[index], "=")
+		var from, to int
+		if _, err := fmt.Sscan(beforeValue, &from); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Sscan(afterValue, &to); err != nil {
+			t.Fatal(err)
+		}
+		deltas = append(deltas, fmt.Sprintf("%s=%d", name, to-from))
+	}
+	return strings.Join(deltas, ";")
 }

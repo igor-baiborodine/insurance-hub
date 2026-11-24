@@ -64,3 +64,20 @@ INSERT INTO public.policy_outbox (intent_id, policy_id, topic, message_key, payl
 VALUES (sqlc.arg(intent_id), sqlc.arg(policy_id), sqlc.arg(topic), sqlc.arg(message_key),
     sqlc.arg(payload))
 RETURNING id;
+
+-- name: InsertOffer :one
+INSERT INTO public.offer (
+    number, product_code, status, creation_date, policy_from, policy_to, total_price
+) VALUES (
+    sqlc.arg(number), sqlc.arg(product_code), sqlc.arg(status), sqlc.arg(creation_date),
+    sqlc.arg(policy_from), sqlc.arg(policy_to), sqlc.arg(total_price)::text::numeric
+)
+RETURNING id;
+
+-- name: InsertOfferAnswer :exec
+INSERT INTO public.offer_answers (offer_id, question_code, answer)
+VALUES (sqlc.arg(offer_id), sqlc.arg(question_code), sqlc.arg(answer));
+
+-- name: InsertOfferCover :exec
+INSERT INTO public.offer_cover (offer_id, cover_code, price)
+VALUES (sqlc.arg(offer_id), sqlc.arg(cover_code), sqlc.arg(price)::text::numeric);

@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres/dbgen"
 )
 
@@ -270,6 +273,46 @@ func (s *Store) InTransaction(
 	return nil
 }
 
+// CreateOffer commits the offer with its answers and cover prices together, or none of them.
+func (s *Store) CreateOffer(ctx context.Context, offer domain.Offer) error {
+	return s.InTransaction(ctx, func(ctx context.Context, tx Transaction) error {
+		_, err := tx.CreateOffer(ctx, offer)
+		return err
+	})
+}
+
+// CreateOffer writes the offer and its child rows. The table identity allocates the offer key;
+// amounts are written as numeric text, never through floating point.
+func (t Transaction) CreateOffer(ctx context.Context, offer domain.Offer) (int64, error) {
+	offerID, err := t.queries.InsertOffer(ctx, dbgen.InsertOfferParams{
+		Number:       text(offer.Number),
+		ProductCode:  text(offer.ProductCode),
+		Status:       text(offer.Status),
+		CreationDate: date(offer.CreationDate),
+		PolicyFrom:   date(offer.PolicyFrom),
+		PolicyTo:     date(offer.PolicyTo),
+		TotalPrice:   offer.TotalPrice,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("insert offer: %w", err)
+	}
+	for _, code := range slices.Sorted(maps.Keys(offer.Answers)) {
+		if err := t.queries.InsertOfferAnswer(ctx, dbgen.InsertOfferAnswerParams{
+			OfferID: offerID, QuestionCode: code, Answer: text(offer.Answers[code]),
+		}); err != nil {
+			return 0, fmt.Errorf("insert offer answer: %w", err)
+		}
+	}
+	for _, code := range slices.Sorted(maps.Keys(offer.CoverPrices)) {
+		if err := t.queries.InsertOfferCover(ctx, dbgen.InsertOfferCoverParams{
+			OfferID: offerID, CoverCode: code, Price: offer.CoverPrices[code],
+		}); err != nil {
+			return 0, fmt.Errorf("insert offer cover: %w", err)
+		}
+	}
+	return offerID, nil
+}
+
 // Issue commits a new policy, its first version and covers, and its event intent together.
 func (s *Store) Issue(ctx context.Context, issuance Issuance) (policyID int64, err error) {
 	err = s.InTransaction(ctx, func(ctx context.Context, tx Transaction) error {
@@ -333,6 +376,8 @@ func readError(record string, err error) error {
 }
 
 func text(value string) pgtype.Text { return pgtype.Text{String: value, Valid: true} }
+
+func date(value time.Time) pgtype.Date { return pgtype.Date{Time: value, Valid: true} }
 
 func textValue(value pgtype.Text) *string {
 	if !value.Valid {

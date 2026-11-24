@@ -33,7 +33,7 @@ func TestPricingCalculator_CalculatePrice_MapsAnswersAndExactAmounts(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := application.QuoteRequest{
+	request := domain.OfferRequest{
 		ProductCode:    "TRI",
 		PolicyFrom:     time.Date(2017, 4, 16, 0, 0, 0, 0, time.UTC),
 		PolicyTo:       time.Date(2018, 4, 15, 0, 0, 0, 0, time.UTC),
@@ -133,7 +133,7 @@ func TestPricingCalculator_CalculatePrice_MapsStatuses(t *testing.T) {
 			}
 
 			// when
-			_, err = calculator.CalculatePrice(t.Context(), application.QuoteRequest{})
+			_, err = calculator.CalculatePrice(t.Context(), domain.OfferRequest{})
 
 			// then
 			requireMappedError(t, err, test.err, test.want)
@@ -183,7 +183,7 @@ func TestPricingCalculator_CalculatePrice_PropagatesCallerCancellation(t *testin
 	}()
 
 	// when
-	_, err = calculator.CalculatePrice(ctx, application.QuoteRequest{})
+	_, err = calculator.CalculatePrice(ctx, domain.OfferRequest{})
 
 	// then
 	if !errors.Is(err, context.Canceled) {
