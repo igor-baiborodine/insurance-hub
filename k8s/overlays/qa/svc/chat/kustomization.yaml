@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-chat-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/chat-api
-    newTag: 1.2.0
+    newTag: 1.2.1
 configMapGenerator:
   - name: chat-config
     behavior: merge
@@ -20,7 +20,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-b1235ac2aa5e
+      - SERVICE_VERSION=git-ffff0aa531db
 patches:
   - path: deployment-patch.yaml
     target:
