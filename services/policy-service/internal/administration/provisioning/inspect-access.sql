@@ -5,6 +5,13 @@ WITH login AS (
 ), managed (relation) AS (
     VALUES ('public.offer'), ('public.offer_answers'), ('public.offer_cover'), ('public.policy'),
         ('public.policy_version'), ('public.cover'), ('public.policy_outbox')
+), managed_identity (relation) AS (
+    VALUES ('public.offer'), ('public.policy'), ('public.policy_version'), ('public.cover'),
+        ('public.policy_outbox')
+), identity_sequence (name) AS (
+    SELECT pg_get_serial_sequence(relation, 'id')
+    FROM managed_identity
+    WHERE to_regclass(relation) IS NOT NULL
 )
 SELECT (SELECT count(*) = 2 AND bool_and(
         rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
@@ -44,3 +51,10 @@ SELECT (SELECT count(*) = 2 AND bool_and(
     AND (to_regclass('public.goose_db_version') IS NULL OR NOT EXISTS (
         SELECT FROM login WHERE has_table_privilege(oid, 'public.goose_db_version',
             'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')))
+    AND NOT EXISTS (
+        SELECT FROM identity_sequence
+        WHERE name IS NOT NULL AND (
+            has_sequence_privilege('go_policy_writer', name, 'USAGE')
+            OR has_sequence_privilege('go_policy_writer', name, 'SELECT')
+            OR has_sequence_privilege('go_policy_writer', name, 'UPDATE')
+        ))

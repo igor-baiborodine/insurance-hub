@@ -61,6 +61,7 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 		{"read migration history", "SELECT count(*) FROM public.goose_db_version"},
 		{"change enrollment", "UPDATE policy_admin.target_identity SET environment = 'qa'"},
 		{"assume owner", "SET ROLE policy"},
+		{"reset identity allocator", "SELECT setval('public.offer_id_seq', 1, false)"},
 	} {
 		t.Run("denies "+test.name, func(t *testing.T) {
 			// when
@@ -98,6 +99,16 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 		// when / then
 		if accessMatches(t, ctx, fixture) {
 			t.Fatal("writer owner membership passed access verification")
+		}
+	})
+	t.Run("verification rejects writer sequence control", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeWriterSequenceUpdateQuery) })
+		fixture.Exec(t, ctx, grantWriterSequenceUpdateQuery)
+
+		// when / then
+		if accessMatches(t, ctx, fixture) {
+			t.Fatal("writer sequence UPDATE grant passed access verification")
 		}
 	})
 }

@@ -22,6 +22,12 @@ var grantWriterOwnerQuery string
 //go:embed testdata/sql/revoke-writer-owner.sql
 var revokeWriterOwnerQuery string
 
+//go:embed testdata/sql/grant-writer-sequence-update.sql
+var grantWriterSequenceUpdateQuery string
+
+//go:embed testdata/sql/revoke-writer-sequence-update.sql
+var revokeWriterSequenceUpdateQuery string
+
 //go:embed testdata/sql/insert-writer-outbox-intent.sql
 var insertWriterOutboxIntentQuery string
 
