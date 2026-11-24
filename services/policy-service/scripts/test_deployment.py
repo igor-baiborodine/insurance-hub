@@ -74,6 +74,44 @@ def without_database(items: dict[str, dict]) -> dict[str, dict]:
     return items
 
 
+def disposable_smoke_items(items: dict[str, dict], environment: str) -> dict[str, dict]:
+    """Meet the deployed startup contract in a disposable namespace without reaching a provider.
+
+    The rendered database wiring is kept. Provider targets are only defaulted: the smoke's
+    invalid-offer probes are rejected before any provider call, and the rendered egress admits
+    only DNS and the Policy database.
+    """
+    data = items["ConfigMap"]["data"]
+    for name, service in (("PRODUCT_GRPC_TARGET", "product"), ("PRICING_GRPC_TARGET", "pricing")):
+        data.setdefault(
+            name, f"{environment}-{service}-api.{environment}-all.svc.cluster.local:9090"
+        )
+    return items
+
+
+def test_disposable_smoke_items_meet_the_deployed_startup_contract() -> None:
+    # given
+    items = policy.validate_render("local-dev", policy.render("local-dev"))
+    egress = json.dumps(items["NetworkPolicy"]["spec"]["egress"])
+
+    # when
+    smoke = disposable_smoke_items(items, "local-dev")
+
+    # then
+    container = smoke["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    data = smoke["ConfigMap"]["data"]
+    assert data["DEPLOYMENT_ENVIRONMENT"] == "local-dev"
+    assert any(item["name"] == "POLICY_DATABASE_URL" for item in container["env"])
+    assert data["PRODUCT_GRPC_TARGET"] == (
+        "local-dev-product-api.local-dev-all.svc.cluster.local:9090"
+    )
+    assert data["PRICING_GRPC_TARGET"] == (
+        "local-dev-pricing-api.local-dev-all.svc.cluster.local:9090"
+    )
+    assert json.dumps(smoke["NetworkPolicy"]["spec"]["egress"]) == egress
+    assert "9090" not in egress
+
+
 @pytest.mark.parametrize(
     "defect", ["migrator credential", "extra mount", "missing database egress"]
 )
@@ -467,8 +505,8 @@ def test_workload_verification_does_not_depend_on_java_policy(
             return None
 
     def answer(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
-        if payload:
-            return 200, payload
+        if path == "/offers" and payload == b"{}":
+            return 400, b'{"code":3,"message":"invalid request","details":[]}'
         return 200, b"live\n" if path == "/livez" else b"ready\n"
 
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)
@@ -656,6 +694,15 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
     )
     _, items, selected = target.rendered()
     require(selected == image, "disposable image differs")
+    writer_secret_name = f"{target.environment}-postgres-policy-writer-creds"
+    source_secret = target.json("get", "secret", writer_secret_name)
+    secret_data = source_secret.get("data")
+    require(
+        source_secret.get("type") == "Opaque"
+        and isinstance(secret_data, dict)
+        and set(secret_data) == {"database-url", "ca.crt"},
+        "disposable smoke requires the exact Policy writer Secret",
+    )
     token = uuid.uuid4().hex[:12]
     target.namespace = f"policy-smoke-{token}"
     namespace = {
@@ -663,14 +710,23 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
-    # The throwaway namespace has no Policy database; Step 5 qualifies the database path.
-    items = without_database(items)
+    # The writer Secret is copied into the owned namespace and removed with it. The workload
+    # only runs its read-only readiness query; the invalid-offer probes write nothing.
+    writer_secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": writer_secret_name, "namespace": target.namespace},
+        "type": "Opaque",
+        "data": secret_data,
+    }
+    items = disposable_smoke_items(items, target.environment)
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 
     try:
         # when
         target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
+        target.kubectl("create", "-f", "-", input_text=json.dumps(writer_secret))
         policy.run(
             ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
             timeout=120,

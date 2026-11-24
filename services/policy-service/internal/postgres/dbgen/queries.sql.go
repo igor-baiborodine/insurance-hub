@@ -82,6 +82,73 @@ func (q *Queries) InsertCover(ctx context.Context, arg InsertCoverParams) error 
 	return err
 }
 
+const insertOffer = `-- name: InsertOffer :one
+INSERT INTO public.offer (
+    number, product_code, status, creation_date, policy_from, policy_to, total_price
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7::text::numeric
+)
+RETURNING id
+`
+
+type InsertOfferParams struct {
+	Number       pgtype.Text
+	ProductCode  pgtype.Text
+	Status       pgtype.Text
+	CreationDate pgtype.Date
+	PolicyFrom   pgtype.Date
+	PolicyTo     pgtype.Date
+	TotalPrice   string
+}
+
+func (q *Queries) InsertOffer(ctx context.Context, arg InsertOfferParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertOffer,
+		arg.Number,
+		arg.ProductCode,
+		arg.Status,
+		arg.CreationDate,
+		arg.PolicyFrom,
+		arg.PolicyTo,
+		arg.TotalPrice,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertOfferAnswer = `-- name: InsertOfferAnswer :exec
+INSERT INTO public.offer_answers (offer_id, question_code, answer)
+VALUES ($1, $2, $3)
+`
+
+type InsertOfferAnswerParams struct {
+	OfferID      int64
+	QuestionCode string
+	Answer       pgtype.Text
+}
+
+func (q *Queries) InsertOfferAnswer(ctx context.Context, arg InsertOfferAnswerParams) error {
+	_, err := q.db.Exec(ctx, insertOfferAnswer, arg.OfferID, arg.QuestionCode, arg.Answer)
+	return err
+}
+
+const insertOfferCover = `-- name: InsertOfferCover :exec
+INSERT INTO public.offer_cover (offer_id, cover_code, price)
+VALUES ($1, $2, $3::text::numeric)
+`
+
+type InsertOfferCoverParams struct {
+	OfferID   int64
+	CoverCode string
+	Price     string
+}
+
+func (q *Queries) InsertOfferCover(ctx context.Context, arg InsertOfferCoverParams) error {
+	_, err := q.db.Exec(ctx, insertOfferCover, arg.OfferID, arg.CoverCode, arg.Price)
+	return err
+}
+
 const insertOutboxIntent = `-- name: InsertOutboxIntent :one
 INSERT INTO public.policy_outbox (intent_id, policy_id, topic, message_key, payload)
 VALUES ($1, $2, $3, $4,

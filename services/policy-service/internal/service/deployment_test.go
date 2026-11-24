@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 )
 
-func TestDeployedDirectRPC_Echo(t *testing.T) {
+// TestDeployedDirectRPC_CreateOffer reaches the deployed gRPC listener with a request that schema
+// validation rejects, so it never calls a provider or writes an offer.
+func TestDeployedDirectRPC_CreateOffer(t *testing.T) {
 	// given
 	address := os.Getenv("POLICY_SMOKE_GRPC_ADDR")
 	host, port, err := net.SplitHostPort(address)
@@ -34,13 +38,14 @@ func TestDeployedDirectRPC_Echo(t *testing.T) {
 	defer cancel()
 
 	// when
-	result, err := policyv1.NewExampleServiceClient(conn).Echo(
+	result, err := policyv1.NewPolicyServiceClient(conn).CreateOffer(
 		ctx,
-		&policyv1.EchoRequest{Message: "hello"},
+		&policyv1.CreateOfferRequest{},
 	)
 
 	// then
-	if err != nil || result.GetMessage() != "hello" {
-		t.Fatalf("direct Policy Echo = (%v, %v)", result, err)
+	if result != nil || status.Code(err) != codes.InvalidArgument ||
+		status.Convert(err).Message() != "invalid request" {
+		t.Fatalf("direct invalid Policy offer = (%v, %v)", result, err)
 	}
 }

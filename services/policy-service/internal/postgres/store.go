@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres/dbgen"
 )
 
@@ -80,13 +84,18 @@ type Issuance struct {
 	Intent     Intent
 }
 
-// Store reads and writes Policy aggregates through the writer pool.
-type Store struct {
-	pool *pgxpool.Pool
+// TxBeginner starts transactions on the process-owned writer pool.
+type TxBeginner interface {
+	BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error)
 }
 
-// NewStore wraps the process-owned writer pool.
-func NewStore(pool *pgxpool.Pool) (*Store, error) {
+// Store reads and writes Policy aggregates through the writer pool.
+type Store struct {
+	pool TxBeginner
+}
+
+// NewStore wraps the process-owned writer pool; the caller owns closing it.
+func NewStore(pool TxBeginner) (*Store, error) {
 	if pool == nil {
 		return nil, errors.New("create Policy store: pool is required")
 	}
@@ -214,7 +223,7 @@ func (s *Store) readOnly(
 		IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {
-		return fmt.Errorf("begin Policy read transaction: %w", err)
+		return beginError(ctx, "begin Policy read transaction", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(
@@ -250,7 +259,7 @@ func (s *Store) InTransaction(
 ) (resultErr error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("begin Policy transaction: %w", err)
+		return beginError(ctx, "begin Policy transaction", err)
 	}
 	defer func() {
 		if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil &&
@@ -268,6 +277,46 @@ func (s *Store) InTransaction(
 		return fmt.Errorf("commit Policy transaction: %w", err)
 	}
 	return nil
+}
+
+// CreateOffer commits the offer with its answers and cover prices together, or none of them.
+func (s *Store) CreateOffer(ctx context.Context, offer domain.Offer) error {
+	return s.InTransaction(ctx, func(ctx context.Context, tx Transaction) error {
+		_, err := tx.CreateOffer(ctx, offer)
+		return err
+	})
+}
+
+// CreateOffer writes the offer and its child rows. The table identity allocates the offer key;
+// amounts are written as numeric text, never through floating point.
+func (t Transaction) CreateOffer(ctx context.Context, offer domain.Offer) (int64, error) {
+	offerID, err := t.queries.InsertOffer(ctx, dbgen.InsertOfferParams{
+		Number:       text(offer.Number),
+		ProductCode:  text(offer.ProductCode),
+		Status:       text(offer.Status),
+		CreationDate: date(offer.CreationDate),
+		PolicyFrom:   date(offer.PolicyFrom),
+		PolicyTo:     date(offer.PolicyTo),
+		TotalPrice:   offer.TotalPrice,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("insert offer: %w", err)
+	}
+	for _, code := range slices.Sorted(maps.Keys(offer.Answers)) {
+		if err := t.queries.InsertOfferAnswer(ctx, dbgen.InsertOfferAnswerParams{
+			OfferID: offerID, QuestionCode: code, Answer: text(offer.Answers[code]),
+		}); err != nil {
+			return 0, fmt.Errorf("insert offer answer: %w", err)
+		}
+	}
+	for _, code := range slices.Sorted(maps.Keys(offer.CoverPrices)) {
+		if err := t.queries.InsertOfferCover(ctx, dbgen.InsertOfferCoverParams{
+			OfferID: offerID, CoverCode: code, Price: offer.CoverPrices[code],
+		}); err != nil {
+			return 0, fmt.Errorf("insert offer cover: %w", err)
+		}
+	}
+	return offerID, nil
 }
 
 // Issue commits a new policy, its first version and covers, and its event intent together.
@@ -325,6 +374,18 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 	return policyID, nil
 }
 
+// beginError keeps cancellation and deadlines distinct and reports a failed connection attempt,
+// which happens before any statement runs, as unavailable storage.
+func beginError(ctx context.Context, operation string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%s: %w", operation, ctxErr)
+	}
+	if _, connect := errors.AsType[*pgconn.ConnectError](err); connect {
+		return fmt.Errorf("%s: %w: %w", operation, application.ErrStorageUnavailable, err)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
 func readError(record string, err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
@@ -333,6 +394,8 @@ func readError(record string, err error) error {
 }
 
 func text(value string) pgtype.Text { return pgtype.Text{String: value, Valid: true} }
+
+func date(value time.Time) pgtype.Date { return pgtype.Date{Time: value, Valid: true} }
 
 func textValue(value pgtype.Text) *string {
 	if !value.Valid {

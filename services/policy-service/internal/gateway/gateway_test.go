@@ -3,7 +3,6 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
@@ -40,29 +40,29 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"valid",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"hello"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json",
 			200,
 			1,
-			`{"message":"hello"}`,
+			`{"offerNumber":"offer-1","totalPrice":78,"coversPrices":{"C1":26}}`,
 		},
 		{
 			"valid charset",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"é"}`,
+			"/offers",
+			`{"productCode":"é"}`,
 			"application/json; charset=utf-8",
 			"*/*",
 			200,
 			1,
-			`{"message":"é"}`,
+			`{"offerNumber":"offer-1","totalPrice":78,"coversPrices":{"C1":26}}`,
 		},
 		{
 			"missing value reaches RPC",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			`{}`,
 			"application/json",
 			"",
@@ -73,7 +73,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"malformed",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			`{`,
 			"application/json",
 			"",
@@ -84,8 +84,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"duplicate",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","message":"b"}`,
+			"/offers",
+			`{"productCode":"A","productCode":"B"}`,
 			"application/json",
 			"",
 			400,
@@ -95,8 +95,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unknown member",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","secret":"b"}`,
+			"/offers",
+			`{"productCode":"TRI","secret":"b"}`,
 			"application/json",
 			"",
 			400,
@@ -106,8 +106,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"wrong type",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":7}`,
+			"/offers",
+			`{"productCode":7}`,
 			"application/json",
 			"",
 			400,
@@ -117,8 +117,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"query",
 			http.MethodPost,
-			"/v1/example/echo?secret=value",
-			`{"message":"a"}`,
+			"/offers?secret=value",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"",
 			400,
@@ -139,7 +139,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"trailing slash",
 			http.MethodPost,
-			"/v1/example/echo/",
+			"/offers/",
 			`{}`,
 			"application/json",
 			"",
@@ -150,7 +150,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"method",
 			http.MethodGet,
-			"/v1/example/echo",
+			"/offers",
 			"",
 			"",
 			"",
@@ -161,8 +161,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unacceptable",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"text/plain",
 			406,
@@ -172,8 +172,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"zero quality response",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json;q=0",
 			406,
@@ -183,8 +183,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"parameterized response",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"application/json",
 			"application/json;profile=private",
 			406,
@@ -194,8 +194,8 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"unsupported",
 			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
+			"/offers",
+			`{"productCode":"TRI"}`,
 			"text/plain",
 			"",
 			415,
@@ -205,7 +205,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 		{
 			"too large",
 			http.MethodPost,
-			"/v1/example/echo",
+			"/offers",
 			strings.Repeat("x", 65),
 			"application/json",
 			"",
@@ -254,7 +254,197 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 	}
 }
 
-func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
+func TestHandler_CreateOffer_MapsLegacyRequestToRPC(t *testing.T) {
+	// given
+	body := `{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":[2018,4,15],` +
+		`"selectedCovers":["C1","C2"],"answers":[` +
+		`{"type":"choice","questionCode":"DESTINATION","answer":"EUR"},` +
+		`{"questionCode":"NOTE","answer":"first trip","type":"text"},` +
+		`{"type":"numeric","questionCode":"NUM_OF_ADULTS","answer":1},` +
+		`{"type":"numeric","questionCode":"LUGGAGE","answer":100.10}]}`
+	want := &policyv1.CreateOfferRequest{
+		ProductCode:    "TRI",
+		PolicyFrom:     "2017-04-16",
+		PolicyTo:       "2018-04-15",
+		SelectedCovers: []string{"C1", "C2"},
+		Answers: []*policyv1.OfferAnswer{
+			{
+				QuestionCode: "DESTINATION",
+				Value:        &policyv1.OfferAnswer_Choice{Choice: "EUR"},
+			},
+			{
+				QuestionCode: "NOTE",
+				Value:        &policyv1.OfferAnswer_Text{Text: "first trip"},
+			},
+			{
+				QuestionCode: "NUM_OF_ADULTS",
+				Value:        &policyv1.OfferAnswer_Number{Number: "1"},
+			},
+			{
+				QuestionCode: "LUGGAGE",
+				Value:        &policyv1.OfferAnswer_Number{Number: "100.10"},
+			},
+		},
+	}
+	client := &fakeClient{offer: &policyv1.CreateOfferResponse{
+		OfferNumber:  "offer-1",
+		TotalPrice:   "78",
+		CoversPrices: map[string]string{"C1": "26"},
+	}}
+	handler := newTestHandler(t, client, 4096)
+
+	// when
+	recorder := postOffer(handler, body)
+
+	// then
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", recorder.Code, recorder.Body.String())
+	}
+	if got := client.lastOfferRequest(); !proto.Equal(got, want) {
+		t.Errorf("RPC request = %v, want %v", got, want)
+	}
+}
+
+func TestHandler_CreateOffer_SendsNumericAnswersAsPlainDecimals(t *testing.T) {
+	// given
+	for _, test := range []struct{ name, answer, want string }{
+		{"plain decimal keeps its text", "1.50", "1.50"},
+		{"positive exponent", "1e2", "100"},
+		{"upper-case exponent with fraction", "2.5E+1", "25"},
+		{"exponent keeping trailing zero", "1.50e1", "15.0"},
+		{"negative exponent", "1.5e-3", "0.0015"},
+		{"negative number", "-2.50e1", "-25.0"},
+		{"leading zero mantissa", "0.5e1", "5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			body := `{"productCode":"TRI","answers":[` +
+				`{"type":"numeric","questionCode":"N","answer":` + test.answer + `}]}`
+
+			// when
+			recorder := postOffer(handler, body)
+
+			// then
+			got := client.lastOfferRequest().GetAnswers()[0].GetNumber()
+			if recorder.Code != http.StatusOK || got != test.want {
+				t.Errorf(
+					"status %d, RPC number %q, want %q",
+					recorder.Code,
+					got,
+					test.want,
+				)
+			}
+		})
+	}
+}
+
+func TestHandler_CreateOffer_RejectsNumericAnswerBeyondStoredLength(t *testing.T) {
+	for _, answer := range []string{"1e300", "1e-300", "1" + strings.Repeat("0", 255)} {
+		t.Run(answer[:4], func(t *testing.T) {
+			// given
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			body := `{"productCode":"TRI","answers":[` +
+				`{"type":"numeric","questionCode":"N","answer":` + answer + `}]}`
+
+			// when
+			recorder := postOffer(handler, body)
+
+			// then
+			if recorder.Code != http.StatusBadRequest || client.callCount() != 0 {
+				t.Errorf("status %d, calls %d", recorder.Code, client.callCount())
+			}
+		})
+	}
+}
+
+func TestHandler_CreateOffer_WritesExactNumericAmounts(t *testing.T) {
+	// given
+	client := &fakeClient{offer: &policyv1.CreateOfferResponse{
+		OfferNumber:  "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66",
+		TotalPrice:   "123.45",
+		CoversPrices: map[string]string{"C2": "23.35", "C1": "100.10"},
+	}}
+	handler := newTestHandler(t, client, 4096)
+
+	// when
+	recorder := postOffer(handler, `{"productCode":"TRI","policyFrom":"2017-04-16",`+
+		`"policyTo":"2018-04-15","selectedCovers":["C1","C2"]}`)
+
+	// then
+	want := `{"offerNumber":"5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66","totalPrice":123.45,` +
+		`"coversPrices":{"C1":100.10,"C2":23.35}}`
+	if recorder.Code != http.StatusOK || recorder.Body.String() != want {
+		t.Errorf(
+			"response = (%d, %s), want %s",
+			recorder.Code,
+			recorder.Body.String(),
+			want,
+		)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("content type = %q", got)
+	}
+}
+
+func TestHandler_CreateOffer_RejectsInvalidAmountWithoutLeakingIt(t *testing.T) {
+	// given
+	client := &fakeClient{offer: &policyv1.CreateOfferResponse{
+		OfferNumber: "offer-1", TotalPrice: "not-a-number",
+	}}
+	handler := newTestHandler(t, client, 4096)
+
+	// when
+	recorder := postOffer(handler, `{"productCode":"TRI"}`)
+
+	// then
+	if recorder.Code != http.StatusInternalServerError ||
+		strings.Contains(recorder.Body.String(), "not-a-number") {
+		t.Errorf("response = (%d, %q)", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandler_CreateOffer_RejectsMalformedLegacyRequests(t *testing.T) {
+	// given
+	valid := `"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15",` +
+		`"selectedCovers":["C1"]`
+	for _, test := range []struct{ name, body string }{
+		{"unknown member", `{` + valid + `,"agent":"x"}`},
+		{"duplicate member", `{` + valid + `,"productCode":"TRI"}`},
+		{"numeric answer as string", `{` + valid +
+			`,"answers":[{"type":"numeric","questionCode":"N","answer":"1"}]}`},
+		{"choice answer as number", `{` + valid +
+			`,"answers":[{"type":"choice","questionCode":"C","answer":1}]}`},
+		{"unknown answer type", `{` + valid +
+			`,"answers":[{"type":"date","questionCode":"D","answer":"2017-01-01"}]}`},
+		{"missing answer type", `{` + valid + `,"answers":[{"questionCode":"T","answer":"x"}]}`},
+		{"unknown answer member", `{` + valid +
+			`,"answers":[{"type":"text","questionCode":"T","answer":"x","extra":1}]}`},
+		{"invalid date array month", `{"policyFrom":[2017,13,1]}`},
+		{"short date array", `{"policyFrom":[2017,4]}`},
+		{"date number", `{"policyFrom":20170416}`},
+		{"trailing data", `{` + valid + `} {}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+
+			// when
+			recorder := postOffer(handler, test.body)
+
+			// then
+			if recorder.Code != http.StatusBadRequest ||
+				recorder.Body.String() != errorBody(3, "invalid request") ||
+				client.callCount() != 0 {
+				t.Errorf("response = (%d, %q), calls %d",
+					recorder.Code, recorder.Body.String(), client.callCount())
+			}
+		})
+	}
+}
+
+func TestHandler_CreateOffer_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	// given
 	privateMarker := "private-upstream-marker"
 	for _, test := range []struct {
@@ -263,30 +453,25 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 		want int
 		body string
 	}{
+		{"invalid", status.Error(codes.InvalidArgument, privateMarker), 400, errorBody(3, "invalid request")},
+		{"not found", status.Error(codes.NotFound, privateMarker), 404, errorBody(5, "not found")},
 		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
 		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
 		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
-		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
 		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
-		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
+		{"unimplemented", status.Error(codes.Unimplemented, privateMarker), 500, errorBody(13, "internal error")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeClient{err: test.err}
 			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"hello"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
+
 			// when
-			handler.ServeHTTP(recorder, request)
+			recorder := postOffer(handler, `{"productCode":"TRI"}`)
+
 			// then
-			if recorder.Code != test.want || recorder.Body.String() != test.body ||
-				strings.Contains(recorder.Body.String(), privateMarker) {
+			if recorder.Code != test.want || recorder.Body.String() != test.body {
 				t.Errorf(
-					"unsafe response = (%d, %q)",
+					"response = (%d, %q)",
 					recorder.Code,
 					recorder.Body.String(),
 				)
@@ -295,45 +480,12 @@ func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	}
 }
 
-func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
-	// given
-	for _, test := range []struct {
-		name    string
-		message string
-		status  int
-	}{
-		{"ASCII maximum", strings.Repeat("a", 128), http.StatusOK},
-		{"ASCII over", strings.Repeat("a", 129), http.StatusBadRequest},
-		{"UTF-8 maximum", strings.Repeat("é", 64), http.StatusOK},
-		{"UTF-8 over", strings.Repeat("é", 64) + "a", http.StatusBadRequest},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"`+test.message+`"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.status || client.callCount() != 1 {
-				t.Errorf(
-					"result = (status %d, calls %d), want (%d, 1)",
-					recorder.Code,
-					client.callCount(),
-					test.status,
-				)
-			}
-			if test.status == http.StatusOK &&
-				recorder.Body.String() != `{"message":"`+test.message+`"}` {
-				t.Errorf("Echo changed value: %q", recorder.Body.String())
-			}
-		})
-	}
+func postOffer(handler http.Handler, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	return recorder
 }
 
 func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
@@ -355,7 +507,7 @@ func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
 				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
 				defer cancel()
 			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
+			request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(`{"productCode":"TRI"}`)).
 				WithContext(ctx)
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Grpc-Timeout", "999H")
@@ -384,7 +536,7 @@ func TestHandler_PropagatesCallerCancellation(t *testing.T) {
 	client := &fakeClient{waitForContext: true, started: started}
 	handler := newTestHandlerWithTimeout(t, client, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
+	request := httptest.NewRequest(http.MethodPost, "/offers", strings.NewReader(`{"productCode":"TRI"}`)).
 		WithContext(ctx)
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -417,8 +569,8 @@ func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		"/offers",
+		strings.NewReader(`{"productCode":"TRI"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer private")
@@ -481,8 +633,8 @@ func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
 	handler := newTestHandler(t, client, 4096)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		"/offers",
+		strings.NewReader(`{"productCode":"TRI"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("TE", "trailers")
@@ -529,8 +681,8 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	handler.ServeHTTP(httptest.NewRecorder(), unknown)
 	malformed := httptest.NewRequest(
 		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"`+marker),
+		"/offers",
+		strings.NewReader(`{"productCode":"`+marker),
 	)
 	malformed.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), malformed)
@@ -547,7 +699,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if strings.Contains(combined, marker) {
 		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
 	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
+	if !strings.Contains(combined, "POST /offers") ||
 		!strings.Contains(combined, "unmatched") ||
 		!strings.Contains(combined, "insurance_hub.service.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
@@ -578,7 +730,7 @@ func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	// when
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/offers", nil))
 
 	// then
 	if recorder.Code != http.StatusServiceUnavailable ||
@@ -607,7 +759,7 @@ func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
 
 func newTestHandler(
 	t *testing.T,
-	client policyv1.ExampleServiceClient,
+	client *fakeClient,
 	maxBody int,
 ) http.Handler {
 	return newTestHandlerWithSettings(t, client, maxBody, time.Second)
@@ -615,7 +767,7 @@ func newTestHandler(
 
 func newTestHandlerWithTimeout(
 	t *testing.T,
-	client policyv1.ExampleServiceClient,
+	client *fakeClient,
 	timeout time.Duration,
 ) http.Handler {
 	return newTestHandlerWithSettings(t, client, 4096, timeout)
@@ -623,7 +775,7 @@ func newTestHandlerWithTimeout(
 
 func newTestHandlerWithSettings(
 	t *testing.T,
-	client policyv1.ExampleServiceClient,
+	client *fakeClient,
 	maxBody int,
 	timeout time.Duration,
 ) http.Handler {
@@ -654,16 +806,19 @@ type fakeClient struct {
 	responseMetadata metadata.MD
 	waitForContext   bool
 	started          chan struct{}
+	offer            *policyv1.CreateOfferResponse
+	offerRequest     *policyv1.CreateOfferRequest
 }
 
-func (client *fakeClient) Echo(
+func (client *fakeClient) CreateOffer(
 	ctx context.Context,
-	request *policyv1.EchoRequest,
+	request *policyv1.CreateOfferRequest,
 	options ...grpc.CallOption,
-) (*policyv1.EchoResponse, error) {
+) (*policyv1.CreateOfferResponse, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.calls++
+	client.offerRequest = request
 	client.metadata, _ = metadata.FromOutgoingContext(ctx)
 	for _, option := range options {
 		switch selected := option.(type) {
@@ -680,13 +835,30 @@ func (client *fakeClient) Echo(
 		if client.started != nil {
 			close(client.started)
 		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
+		select {
+		case <-ctx.Done():
+			return nil, status.FromContextError(ctx.Err()).Err()
+		case <-time.After(5 * time.Second):
+			return nil, status.Error(codes.Internal, "fake RPC had no deadline")
+		}
 	}
-	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
+	if request.GetProductCode() == "" {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
-	return &policyv1.EchoResponse{Message: request.GetMessage()}, nil
+	if client.offer == nil {
+		return &policyv1.CreateOfferResponse{
+			OfferNumber:  "offer-1",
+			TotalPrice:   "78",
+			CoversPrices: map[string]string{"C1": "26"},
+		}, nil
+	}
+	return client.offer, nil
+}
+
+func (client *fakeClient) lastOfferRequest() *policyv1.CreateOfferRequest {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.offerRequest
 }
 
 func (client *fakeClient) callCount() int {

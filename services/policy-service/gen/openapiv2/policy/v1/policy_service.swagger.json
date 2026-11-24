@@ -1,12 +1,13 @@
 {
   "swagger": "2.0",
   "info": {
-    "title": "policy/v1/example_service.proto",
+    "title": "policy/v1/policy_service.proto",
     "version": "version not set"
   },
   "tags": [
     {
-      "name": "ExampleService"
+      "name": "PolicyService",
+      "description": "PolicyService exposes the private offer boundary."
     }
   ],
   "consumes": [
@@ -16,23 +17,29 @@
     "application/json"
   ],
   "paths": {
-    "/v1/example/echo": {
+    "/offers": {
       "post": {
-        "operationId": "ExampleService_Echo",
+        "summary": "CreateOffer checks the product, prices the selected covers and stores a new offer.",
+        "operationId": "PolicyService_CreateOffer",
         "responses": {
           "200": {
-            "description": "The unchanged Echo message.",
+            "description": "The stored offer with numeric total and cover prices.",
             "schema": {
-              "$ref": "#/definitions/v1EchoResponse"
+              "$ref": "#/definitions/v1CreateOfferHTTPResponse"
             },
             "examples": {
               "application/json": {
-                "message": "hello"
+                "offerNumber": "8f0e2c1a-5b7d-4e3f-9a6c-2d1b0e9f8a7c",
+                "totalPrice": 78,
+                "coversPrices": {
+                  "C1": 26,
+                  "C2": 52
+                }
               }
             }
           },
           "400": {
-            "description": "The request is invalid.",
+            "description": "The request or the quote input is invalid.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -40,6 +47,19 @@
               "application/json": {
                 "code": 3,
                 "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "404": {
+            "description": "The product does not exist.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 5,
+                "message": "not found",
                 "details": []
               }
             }
@@ -110,7 +130,7 @@
             }
           },
           "503": {
-            "description": "The RPC service is unavailable.",
+            "description": "Product, Pricing or offer storage is unavailable.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -123,7 +143,7 @@
             }
           },
           "504": {
-            "description": "The RPC deadline was exceeded.",
+            "description": "A deadline was exceeded.",
             "schema": {
               "$ref": "#/definitions/rpcStatus"
             },
@@ -142,12 +162,12 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/v1EchoRequest"
+              "$ref": "#/definitions/v1CreateOfferRequest"
             }
           }
         ],
         "tags": [
-          "ExampleService"
+          "PolicyService"
         ],
         "consumes": [
           "application/json"
@@ -187,21 +207,89 @@
         }
       }
     },
-    "v1EchoRequest": {
+    "v1CreateOfferHTTPRequest": {
       "type": "object",
       "properties": {
-        "message": {
+        "productCode": {
           "type": "string"
+        },
+        "policyFrom": {
+          "description": "Coverage start as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
+        },
+        "policyTo": {
+          "description": "Coverage end as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
+        },
+        "selectedCovers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1OfferHTTPAnswer"
+          }
+        }
+      },
+      "description": "CreateOfferHTTPRequest is documentation-only: the HTTP body that the gateway maps to CreateOfferRequest."
+    },
+    "v1CreateOfferHTTPResponse": {
+      "type": "object",
+      "properties": {
+        "offerNumber": {
+          "type": "string"
+        },
+        "totalPrice": {
+          "type": "number",
+          "format": "double"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "description": "CreateOfferHTTPResponse is documentation-only; RPC amounts remain exact decimal strings."
+    },
+    "v1CreateOfferRequest": {
+      "$ref": "#/definitions/v1CreateOfferHTTPRequest"
+    },
+    "v1CreateOfferResponse": {
+      "type": "object",
+      "properties": {
+        "offerNumber": {
+          "type": "string"
+        },
+        "totalPrice": {
+          "type": "string"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
-    "v1EchoResponse": {
+    "v1OfferHTTPAnswer": {
       "type": "object",
       "properties": {
-        "message": {
+        "type": {
+          "type": "string",
+          "description": "Answer variant: \"choice\", \"text\" or \"numeric\"."
+        },
+        "questionCode": {
           "type": "string"
+        },
+        "answer": {
+          "description": "A JSON string for \"choice\" and \"text\" answers; a JSON number for \"numeric\" answers."
         }
-      }
+      },
+      "description": "OfferHTTPAnswer is documentation-only: one typed questionnaire answer in the HTTP body."
     }
   }
 }

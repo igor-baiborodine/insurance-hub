@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -22,6 +23,10 @@ const (
 	databaseMaxConnsSetting = "DB_MAX_CONNS"
 	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
 	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
+	productTargetSetting    = "PRODUCT_GRPC_TARGET"
+	pricingTargetSetting    = "PRICING_GRPC_TARGET"
+	providerTimeoutSetting  = "PROVIDER_CALL_TIMEOUT"
+	businessZoneSetting     = "BUSINESS_TIME_ZONE"
 )
 
 // Database holds the optional Policy writer connection and pool limits. An absent URL leaves the
@@ -45,9 +50,23 @@ func (DatabaseURL) GoString() string { return "[REDACTED]" }
 // Configured reports whether a database connection was supplied.
 func (database Database) Configured() bool { return database.URL.value != "" }
 
+// Providers holds the private Product and Pricing gRPC targets used to create offers. Both are
+// supplied together or neither is; without them the service cannot create offers.
+type Providers struct {
+	ProductTarget string
+	PricingTarget string
+	CallTimeout   time.Duration
+}
+
+// Configured reports whether both provider targets were supplied.
+func (providers Providers) Configured() bool { return providers.ProductTarget != "" }
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
-	Database Database
+	Database  Database
+	Providers Providers
+	// BusinessTimeZone defines the calendar date of a new offer.
+	BusinessTimeZone *time.Location
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -282,9 +301,19 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	providers, err := loadProviders(lookup, runtime.RequestTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	businessZone, err := loadBusinessZone(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Database:           database,
+		Providers:          providers,
+		BusinessTimeZone:   businessZone,
 		Runtime:            runtime,
 		GRPC:               grpc,
 		HTTPServer:         httpServer,
@@ -468,4 +497,67 @@ func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
 		)
 	}
 	return DatabaseURL{value: value}, nil
+}
+
+func loadProviders(lookup lookupEnv, requestTimeout time.Duration) (Providers, error) {
+	productTarget, err := loadTarget(lookup, productTargetSetting)
+	if err != nil {
+		return Providers{}, err
+	}
+	pricingTarget, err := loadTarget(lookup, pricingTargetSetting)
+	if err != nil {
+		return Providers{}, err
+	}
+	if (productTarget == "") != (pricingTarget == "") {
+		return Providers{}, kitconfig.Invalid(
+			productTargetSetting,
+			"must be supplied together with "+pricingTargetSetting,
+		)
+	}
+	callTimeout, err := kitconfig.LoadPositiveDuration(lookup, providerTimeoutSetting, "3s")
+	if err != nil {
+		return Providers{}, err
+	}
+	// Product and Pricing run in sequence inside one request.
+	if productTarget != "" && 2*callTimeout >= requestTimeout {
+		return Providers{}, kitconfig.Invalid(
+			providerTimeoutSetting,
+			"must leave both provider calls within REQUEST_TIMEOUT",
+		)
+	}
+	return Providers{
+		ProductTarget: productTarget,
+		PricingTarget: pricingTarget,
+		CallTimeout:   callTimeout,
+	}, nil
+}
+
+// loadBusinessZone accepts an IANA time zone name. The process-local zone is rejected so the
+// business date cannot depend on the host.
+func loadBusinessZone(lookup lookupEnv) (*time.Location, error) {
+	name, err := kitconfig.ValueOrDefault(lookup, businessZoneSetting, "UTC")
+	if err != nil {
+		return nil, err
+	}
+	zone, err := time.LoadLocation(name)
+	if err != nil || name == "Local" {
+		return nil, kitconfig.Invalid(businessZoneSetting, "must be an IANA time zone name")
+	}
+	return zone, nil
+}
+
+// loadTarget accepts an optional host:port gRPC target with an explicit nonzero port.
+func loadTarget(lookup lookupEnv, setting string) (string, error) {
+	value, ok := lookup(setting)
+	if !ok {
+		return "", nil
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || !kitconfig.ValidHost(host) {
+		return "", kitconfig.Invalid(setting, "must be a host:port gRPC target")
+	}
+	if number, err := strconv.ParseUint(port, 10, 16); err != nil || number == 0 {
+		return "", kitconfig.Invalid(setting, "must use a valid port")
+	}
+	return value, nil
 }

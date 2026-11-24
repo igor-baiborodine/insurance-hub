@@ -37,6 +37,7 @@ import (
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 )
@@ -44,7 +45,7 @@ import (
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -57,21 +58,22 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	releaseHandler := make(chan struct{})
 	metadataSeen := make(chan metadata.MD, 8)
 	var startOnce sync.Once
-	deps.echo = func(ctx context.Context, message string) (string, error) {
+	deps.createOffer = func(ctx context.Context, request domain.OfferRequest) (domain.Offer, error) {
+		message := request.ProductCode
 		md, _ := metadata.FromIncomingContext(ctx)
 		metadataSeen <- md.Copy()
 		if message == "failure" {
-			return "", errors.New("private-upstream-marker")
+			return domain.Offer{}, errors.New("private-upstream-marker")
 		}
 		if message == "drain" {
 			startOnce.Do(func() { close(handlerStarted) })
 			select {
 			case <-releaseHandler:
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return domain.Offer{}, ctx.Err()
 			}
 		}
-		return message, nil
+		return testOffer(message), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
@@ -85,8 +87,8 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	// when
 	request, err := http.NewRequest(
 		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		"http://"+httpAddress+"/offers",
+		strings.NewReader(offerJSON("TRI")),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -100,24 +102,24 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatal(err)
 	}
 	// then
-	assertResponse(t, response, http.StatusOK, `{"message":"hello"}`)
+	assertResponse(t, response, http.StatusOK, offerResponse("TRI"))
 	assertNoIdentityMetadata(t, <-metadataSeen)
 	assertOversizedHeaderRejected(t, httpAddress, settings.HTTPMaxHeaderBytes+5000)
-	maximum := strings.Repeat("a", 128)
+	maximum := strings.Repeat("a", 64)
 	assertResponse(
 		t,
-		postEcho(t, client, httpAddress, maximum),
+		postOffer(t, client, httpAddress, maximum),
 		http.StatusOK,
-		`{"message":"`+maximum+`"}`,
+		offerResponse(maximum),
 	)
 	assertNoIdentityMetadata(t, <-metadataSeen)
 	assertResponse(
 		t,
-		postEcho(t, client, httpAddress, maximum+"a"),
+		postOffer(t, client, httpAddress, maximum+"a"),
 		http.StatusBadRequest,
 		`{"code":3,"message":"invalid request","details":[]}`,
 	)
-	failureResponse := postEcho(t, client, httpAddress, "failure")
+	failureResponse := postOffer(t, client, httpAddress, "failure")
 	assertResponse(
 		t,
 		failureResponse,
@@ -135,24 +137,24 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close() }()
-	direct, err := policyv1.NewExampleServiceClient(connection).Echo(
+	direct, err := policyv1.NewPolicyServiceClient(connection).CreateOffer(
 		context.Background(),
-		&policyv1.EchoRequest{Message: "direct"},
+		offerRequest("direct"),
 	)
 	// then
-	if err != nil || direct.GetMessage() != "direct" {
-		t.Fatalf("direct Echo = (%v, %v)", direct, err)
+	if err != nil || direct.GetOfferNumber() != "direct" {
+		t.Fatalf("direct CreateOffer = (%v, %v)", direct, err)
 	}
-	directMaximum, err := policyv1.NewExampleServiceClient(connection).Echo(
+	directMaximum, err := policyv1.NewPolicyServiceClient(connection).CreateOffer(
 		context.Background(),
-		&policyv1.EchoRequest{Message: maximum},
+		offerRequest(maximum),
 	)
-	if err != nil || directMaximum.GetMessage() != maximum {
-		t.Fatalf("direct maximum Echo = (%v, %v)", directMaximum, err)
+	if err != nil || directMaximum.GetOfferNumber() != maximum {
+		t.Fatalf("direct maximum CreateOffer = (%v, %v)", directMaximum, err)
 	}
-	_, err = policyv1.NewExampleServiceClient(connection).Echo(
+	_, err = policyv1.NewPolicyServiceClient(connection).CreateOffer(
 		context.Background(),
-		&policyv1.EchoRequest{Message: maximum + "a"},
+		offerRequest(maximum+"a"),
 	)
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("direct oversized status = %v, want invalid argument", status.Code(err))
@@ -164,8 +166,8 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	go func() {
 		req, requestErr := http.NewRequest(
 			http.MethodPost,
-			"http://"+httpAddress+"/v1/example/echo",
-			strings.NewReader(`{"message":"drain"}`),
+			"http://"+httpAddress+"/offers",
+			strings.NewReader(offerJSON("drain")),
 		)
 		if requestErr != nil {
 			drainError <- requestErr
@@ -199,7 +201,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	close(releaseHandler)
 	select {
 	case response := <-drainResult:
-		assertResponse(t, response, http.StatusOK, `{"message":"drain"}`)
+		assertResponse(t, response, http.StatusOK, offerResponse("drain"))
 	case err := <-drainError:
 		t.Fatalf("drained HTTP request: %v", err)
 	case <-time.After(time.Second):
@@ -213,7 +215,7 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -238,39 +240,39 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close() }()
-	directClient := policyv1.NewExampleServiceClient(connection)
-	validMessages := make([]string, 0, 130)
-	for size := 1; size <= 128; size++ {
+	directClient := policyv1.NewPolicyServiceClient(connection)
+	validMessages := make([]string, 0, 66)
+	for size := 1; size <= 64; size++ {
 		validMessages = append(validMessages, strings.Repeat("a", size))
 	}
-	validMessages = append(validMessages, "é", strings.Repeat("é", 64))
+	validMessages = append(validMessages, "é", strings.Repeat("é", 32))
 
 	// when
 	for _, message := range validMessages {
-		response, callErr := directClient.Echo(
+		response, callErr := directClient.CreateOffer(
 			context.Background(),
-			&policyv1.EchoRequest{Message: message},
+			offerRequest(message),
 		)
 		// then
-		if callErr != nil || response.GetMessage() != message {
+		if callErr != nil || response.GetOfferNumber() != message {
 			t.Fatalf(
-				"direct differential Echo(%d bytes) = (%q, %v)",
+				"direct differential CreateOffer(%d bytes) = (%q, %v)",
 				len(message),
-				response.GetMessage(),
+				response.GetOfferNumber(),
 				callErr,
 			)
 		}
 		assertResponse(
 			t,
-			postEcho(t, httpClient, httpAddress, message),
+			postOffer(t, httpClient, httpAddress, message),
 			http.StatusOK,
-			`{"message":"`+message+`"}`,
+			offerResponse(message),
 		)
 	}
-	for _, message := range []string{strings.Repeat("a", 129), strings.Repeat("é", 64) + "a"} {
-		_, callErr := directClient.Echo(
+	for _, message := range []string{strings.Repeat("a", 65), strings.Repeat("é", 32) + "a"} {
+		_, callErr := directClient.CreateOffer(
 			context.Background(),
-			&policyv1.EchoRequest{Message: message},
+			offerRequest(message),
 		)
 		if status.Code(callErr) != codes.InvalidArgument {
 			t.Fatalf(
@@ -280,20 +282,24 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 		}
 		assertResponse(
 			t,
-			postEcho(t, httpClient, httpAddress, message),
+			postOffer(t, httpClient, httpAddress, message),
 			http.StatusBadRequest,
 			`{"code":3,"message":"invalid request","details":[]}`,
 		)
 	}
-	for _, body := range []string{`{}`, `{"message":null}`, `{"message":""}`} {
+	for _, body := range []string{
+		`{}`,
+		strings.Replace(offerJSON("x"), `"x"`, `null`, 1),
+		offerJSON(""),
+	} {
 		assertResponse(
 			t,
-			postEchoBody(t, httpClient, httpAddress, body),
+			postOfferBody(t, httpClient, httpAddress, body),
 			http.StatusBadRequest,
 			`{"code":3,"message":"invalid request","details":[]}`,
 		)
 	}
-	_, err = directClient.Echo(context.Background(), &policyv1.EchoRequest{})
+	_, err = directClient.CreateOffer(context.Background(), offerRequest(""))
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("direct empty status = %v, want invalid argument", status.Code(err))
 	}
@@ -313,7 +319,7 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	}
 	unavailable := closed.Addr().String()
 	_ = closed.Close()
-	deps := productionDependencies()
+	deps := testDependencies()
 	deps.newConnection = func(_ string, provider telemetryProvider, settings config.Config) (gatewayConnection, error) {
 		return newGatewayConnection(unavailable, provider, settings)
 	}
@@ -338,12 +344,12 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	connection := newStatefulGatewayConnection(connectivity.Ready)
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return connection, nil
 	}
-	deps.newGateway = func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusNoContent)
 		}), nil
@@ -432,7 +438,7 @@ func TestHandlerTracker_UsesUnavailableHandlerAfterDrain(t *testing.T) {
 func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	recorder := tracetest.NewSpanRecorder()
 	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 	provider := &recordingProvider{
@@ -461,8 +467,8 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	// when
 	request, err := http.NewRequest(
 		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"trace"}`),
+		"http://"+httpAddress+"/offers",
+		strings.NewReader(offerJSON("trace")),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +479,7 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertResponse(t, response, http.StatusOK, `{"message":"trace"}`)
+	assertResponse(t, response, http.StatusOK, offerResponse("trace"))
 	cancel()
 	if err := receiveError(t, runResult, "traced service did not stop"); err != nil {
 		t.Fatal(err)
@@ -486,11 +492,11 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 			continue
 		}
 		switch {
-		case span.Name() == "POST /v1/example/echo":
+		case span.Name() == "POST /offers":
 			httpSpan = span
 		case span.SpanKind() == trace.SpanKindClient:
 			clientSpan = span
-		case span.SpanKind() == trace.SpanKindServer && strings.Contains(span.Name(), "ExampleService"):
+		case span.SpanKind() == trace.SpanKindServer && strings.Contains(span.Name(), "PolicyService"):
 			serverSpan = span
 		}
 	}
@@ -512,7 +518,7 @@ func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.MaxReceiveBytes = 1
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -531,7 +537,7 @@ func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "a")
+	response := postOffer(t, client, httpAddress, "a")
 
 	// then
 	assertResponse(
@@ -550,7 +556,7 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	// given
 	settings := testConfig(t)
 	settings.RequestTimeout = 80 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -561,11 +567,12 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	}
 	started := make(chan string, 2)
 	finished := make(chan error, 2)
-	deps.echo = func(ctx context.Context, message string) (string, error) {
+	deps.createOffer = func(ctx context.Context, request domain.OfferRequest) (domain.Offer, error) {
+		message := request.ProductCode
 		started <- message
 		<-ctx.Done()
 		finished <- ctx.Err()
-		return "", ctx.Err()
+		return domain.Offer{}, ctx.Err()
 	}
 	ctx, cancelService := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
@@ -577,7 +584,7 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "budget")
+	response := postOffer(t, client, httpAddress, "budget")
 
 	// then
 	if receiveString(t, started) != "budget" {
@@ -603,8 +610,8 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	request, err := http.NewRequestWithContext(
 		requestCtx,
 		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"caller"}`),
+		"http://"+httpAddress+"/offers",
+		strings.NewReader(offerJSON("caller")),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -654,7 +661,7 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.MaxSendBytes = 1
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -673,7 +680,7 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "a")
+	response := postOffer(t, client, httpAddress, "a")
 
 	// then
 	assertResponse(
@@ -692,7 +699,7 @@ func TestRun_BoundsSlowHTTPBodyWithReadTimeout(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.ReadTimeout = 60 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -722,7 +729,7 @@ func TestRun_BoundsSlowHTTPBodyWithReadTimeout(t *testing.T) {
 	started := time.Now()
 	_, err = io.WriteString(
 		connection,
-		"POST /v1/example/echo HTTP/1.1\r\nHost: example\r\n"+
+		"POST /offers HTTP/1.1\r\nHost: example\r\n"+
 			"Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{",
 	)
 	if err != nil {
@@ -758,7 +765,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	// given
 	const marker = "private-http-rpc-marker"
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	reader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	spanRecorder := tracetest.NewSpanRecorder()
@@ -767,7 +774,9 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.echo = func(context.Context, string) (string, error) { return "", errors.New(marker) }
+	deps.createOffer = func(context.Context, domain.OfferRequest) (domain.Offer, error) {
+		return domain.Offer{}, errors.New(marker)
+	}
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -787,7 +796,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "failure")
+	response := postOffer(t, client, httpAddress, "failure")
 	cancel()
 	if err := receiveError(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run service: %v", err)
@@ -811,7 +820,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	if strings.Contains(combined, marker) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
+	if !strings.Contains(combined, "POST /offers") ||
 		!strings.Contains(combined, "insurance_hub.service.requests") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
@@ -823,7 +832,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	settings.RequestTimeout = 50 * time.Millisecond
 	settings.ShutdownTimeout = 200 * time.Millisecond
 	settings.ExporterTimeout = 50 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -834,10 +843,10 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	deps.echo = func(context.Context, string) (string, error) {
+	deps.createOffer = func(context.Context, domain.OfferRequest) (domain.Offer, error) {
 		close(started)
 		<-release
-		return "stall", nil
+		return testOffer("stall"), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
@@ -853,8 +862,8 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 		defer close(requestDone)
 		request, _ := http.NewRequest(
 			http.MethodPost,
-			"http://"+httpAddress+"/v1/example/echo",
-			strings.NewReader(`{"message":"stall"}`),
+			"http://"+httpAddress+"/offers",
+			strings.NewReader(offerJSON("stall")),
 		)
 		request.Header.Set("Content-Type", "application/json")
 		response, err := client.Do(request)
@@ -885,7 +894,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	bindFailure := errors.New("management bind failed")
 	var listeners []net.Listener
 	deps.listen = func(network, address string) (net.Listener, error) {
@@ -1004,7 +1013,7 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
 	_, err = io.WriteString(
 		connection,
-		"POST /v1/example/echo HTTP/1.1\r\nHost: example\r\nX-Large: "+
+		"POST /offers HTTP/1.1\r\nHost: example\r\nX-Large: "+
 			strings.Repeat("x", size)+"\r\nContent-Length: 0\r\n\r\n",
 	)
 	if err != nil {
@@ -1023,16 +1032,16 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 	}
 }
 
-func postEcho(t *testing.T, client *http.Client, address, message string) *http.Response {
+func postOffer(t *testing.T, client *http.Client, address, productCode string) *http.Response {
 	t.Helper()
-	return postEchoBody(t, client, address, `{"message":"`+message+`"}`)
+	return postOfferBody(t, client, address, offerJSON(productCode))
 }
 
-func postEchoBody(t *testing.T, client *http.Client, address, body string) *http.Response {
+func postOfferBody(t *testing.T, client *http.Client, address, body string) *http.Response {
 	t.Helper()
 	request, err := http.NewRequest(
 		http.MethodPost,
-		"http://"+address+"/v1/example/echo",
+		"http://"+address+"/offers",
 		strings.NewReader(body),
 	)
 	if err != nil {
@@ -1192,7 +1201,10 @@ func (provider *recordingProvider) Shutdown(ctx context.Context) error {
 type fakePool struct{ closed atomic.Bool }
 
 func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
-func (pool *fakePool) Close()                                      { pool.closed.Store(true) }
+func (*fakePool) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	return nil, errors.New("fake pool has no transactions")
+}
+func (pool *fakePool) Close() { pool.closed.Store(true) }
 
 func databaseConfig(t *testing.T) config.Config {
 	t.Helper()
@@ -1219,7 +1231,7 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	pool := &fakePool{}
 	var available atomic.Bool
 	available.Store(true)
-	deps := productionDependencies()
+	deps := testDependencies()
 	var opened postgres.PoolSettings
 	deps.openPool = func(_ context.Context, settings postgres.PoolSettings) (databasePool, error) {
 		opened = settings
@@ -1234,7 +1246,7 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return newStatefulGatewayConnection(connectivity.Ready), nil
 	}
-	deps.newGateway = func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.NotFoundHandler(), nil
 	}
 	addresses := make(chan string, 3)
@@ -1285,7 +1297,7 @@ func TestRun_RefusesToStartWithoutAVerifiedDatabase(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// given
 			pool := &fakePool{}
-			deps := productionDependencies()
+			deps := testDependencies()
 			deps.openPool = func(context.Context, postgres.PoolSettings) (databasePool, error) {
 				if test.openErr != nil {
 					return nil, test.openErr
@@ -1312,5 +1324,102 @@ func TestRun_RefusesToStartWithoutAVerifiedDatabase(t *testing.T) {
 				t.Fatal("rejected database pool was not closed")
 			}
 		})
+	}
+}
+
+// testDependencies injects an offer use case that numbers each offer after its product code.
+func testDependencies() dependencies {
+	deps := productionDependencies()
+	deps.createOffer = numberedOffer
+	return deps
+}
+
+func numberedOffer(ctx context.Context, request domain.OfferRequest) (domain.Offer, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Offer{}, err
+	}
+	return testOffer(request.ProductCode), nil
+}
+
+func testOffer(productCode string) domain.Offer {
+	return domain.Offer{
+		Number: productCode, TotalPrice: "78", CoverPrices: map[string]string{"C1": "26"},
+	}
+}
+
+func offerJSON(productCode string) string {
+	return `{"productCode":"` + productCode + `","policyFrom":"2017-04-16",` +
+		`"policyTo":"2018-04-15","selectedCovers":["C1"]}`
+}
+
+func offerResponse(productCode string) string {
+	return `{"offerNumber":"` + productCode + `","totalPrice":78,"coversPrices":{"C1":26}}`
+}
+
+func offerRequest(productCode string) *policyv1.CreateOfferRequest {
+	return &policyv1.CreateOfferRequest{
+		ProductCode: productCode, PolicyFrom: "2017-04-16", PolicyTo: "2018-04-15",
+		SelectedCovers: []string{"C1"},
+	}
+}
+
+func TestRequireDeployedDependencies(t *testing.T) {
+	// given
+	database := loadTestDatabase(t)
+	providers := config.Providers{
+		ProductTarget: "product-service:9090", PricingTarget: "pricing-service:9090",
+		CallTimeout: time.Second,
+	}
+	for _, test := range []struct {
+		name, environment, want string
+		database                bool
+		providers               bool
+	}{
+		{"deployed without database", "qa", "POLICY_DATABASE_URL", false, true},
+		{"deployed without providers", "local-dev", "PRODUCT_GRPC_TARGET", true, false},
+		{"deployed with every dependency", "qa", "", true, true},
+		{"development without dependencies", "development", "", false, false},
+		{"unlabelled test runtime", "", "", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			settings := testConfig(t)
+			settings.Identity.Environment = test.environment
+			if test.database {
+				settings.Database = database
+			}
+			if test.providers {
+				settings.Providers = providers
+			}
+
+			// when
+			err := requireDeployedDependencies(settings)
+
+			// then
+			if (test.want == "") != (err == nil) ||
+				(err != nil && !strings.Contains(err.Error(), test.want)) {
+				t.Errorf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestRun_RefusesDeployedInstanceWithoutProvidersBeforeStarting(t *testing.T) {
+	// given
+	settings := databaseConfig(t)
+	settings.Identity.Environment = "qa"
+	deps := testDependencies()
+	started := false
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		started = true
+		return nil, errors.New("unexpected telemetry start")
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "PRODUCT_GRPC_TARGET is required") ||
+		started {
+		t.Fatalf("expected refusal before startup, got %v (started %t)", err, started)
 	}
 }
