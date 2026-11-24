@@ -29,7 +29,8 @@ GOLANGCI_CONFIG := .golangci.yml
 GO_VERSION := 1.27.4
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
-GORILLA_WEBSOCKET_VERSION := v1.5.3
+GORILLA_WEBSOCKET_VERSION := v1.5.4-0.20240701034025-d67f41855da4
+OTEL_VERSION := v1.47.0
 SERVICEKIT_VERSION := v1.1.0
 BUILD_EXECUTABLES := server
 TEST_PACKAGES ?= ./...
@@ -102,6 +103,11 @@ format-check: verify-tools
 update-deps:
 	GOWORK=off $(GO) get github.com/gorilla/websocket@$(GORILLA_WEBSOCKET_VERSION)
 	GOWORK=off $(GO) get github.com/igor-baiborodine/insurance-hub/libs/servicekit@$(SERVICEKIT_VERSION)
+	GOWORK=off $(GO) get go.opentelemetry.io/otel@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/sdk@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/sdk/metric@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@$(OTEL_VERSION) \
+		go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc@$(OTEL_VERSION)
 	GOWORK=off $(GO) mod tidy
 
 check-deps: verify-tools
