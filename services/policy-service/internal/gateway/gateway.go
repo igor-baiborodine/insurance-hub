@@ -36,7 +36,8 @@ const (
 	issueRoute     = "POST " + policiesPath
 	terminatePath  = policiesPath + "/terminate"
 	terminateRoute = "POST " + terminatePath
-	policyRoute    = "GET " + policiesPath + "/{policyNumber}"
+	policyPath     = policiesPath + "/{policyNumber}"
+	policyRoute    = "GET " + policyPath
 	// maxNumericAnswer bounds a numeric answer's plain-decimal text to its stored length.
 	maxNumericAnswer = 255
 )
@@ -125,14 +126,19 @@ type Handler struct {
 }
 
 type requestFacts struct {
-	originalPath string
-	hadQuery     bool
+	originalPath    string
+	originalRawPath string
+	hadQuery        bool
 }
 
 type factsKey struct{}
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	facts := requestFacts{originalPath: request.URL.Path, hadQuery: request.URL.RawQuery != ""}
+	facts := requestFacts{
+		originalPath:    request.URL.Path,
+		originalRawPath: request.URL.RawPath,
+		hadQuery:        request.URL.RawQuery != "",
+	}
 	request = sanitizeRequest(
 		request.WithContext(context.WithValue(request.Context(), factsKey{}, facts)),
 	)
@@ -151,6 +157,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	case path == terminatePath && post:
 		handler.terminate.ServeHTTP(writer, request)
 	case isPolicyPath(path) && request.Method == http.MethodGet:
+		request.URL.Path = policyPath
+		request.URL.RawPath = ""
 		handler.lookup.ServeHTTP(writer, request)
 	default:
 		request.URL.Path = "/unmatched"
@@ -224,6 +232,10 @@ func (handler *Handler) serveLookup(writer http.ResponseWriter, request *http.Re
 	if !acceptedRequest(writer, request) {
 		return
 	}
+	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
+	request = request.Clone(request.Context())
+	request.URL.Path = facts.originalPath
+	request.URL.RawPath = facts.originalRawPath
 	handler.mux.ServeHTTP(writer, request)
 }
 
