@@ -65,11 +65,19 @@ func (observer *RequestObserver) StartGRPC(ctx context.Context, operation string
 	}
 }
 
+// httpOperations names the operation of each fixed HTTP route.
+var httpOperations = map[string]string{
+	"POST /offers":                 "create_offer",
+	"POST /policies":               "issue_policy",
+	"GET /policies/{policyNumber}": "get_policy",
+	"POST /policies/terminate":     "terminate_policy",
+}
+
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
-	operation := "unknown"
-	if route == "POST /offers" {
-		operation = "create_offer"
+	operation, known := httpOperations[route]
+	if !known {
+		operation = "unknown"
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),

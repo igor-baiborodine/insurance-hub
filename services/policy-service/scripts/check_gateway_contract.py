@@ -115,6 +115,39 @@ def check_operation(
         require(operation.get(media_field) == expected, f"Swagger {path} {media_field} differs")
 
     parameters = operation.get("parameters")
+    path_parameters = operation_contract.get("path_parameters")
+    if path_parameters is not None:
+        check_path_parameters(path, parameters, path_parameters)
+    else:
+        check_body(operation_contract, path, parameters, schemas, definitions, operation_id)
+    check_responses(operation_contract, operation, path)
+
+
+def check_path_parameters(path: str, parameters: Any, expected: Any) -> None:
+    # A bodiless operation publishes only its required string path parameters, in path order.
+    require(
+        isinstance(expected, list) and bool(expected),
+        f"HTTP contract {path} path parameters must be a non-empty list",
+    )
+    require(
+        parameters
+        == [{"name": name, "in": "path", "required": True, "type": "string"} for name in expected],
+        f"Swagger {path} path parameters differ",
+    )
+    require(
+        all(f"{{{name}}}" in path for name in expected),
+        f"HTTP contract {path} path lacks a declared parameter",
+    )
+
+
+def check_body(
+    operation_contract: dict[str, Any],
+    path: str,
+    parameters: Any,
+    schemas: dict[str, Any],
+    definitions: dict[str, Any],
+    operation_id: Any,
+) -> None:
     require(isinstance(parameters, list) and len(parameters) == 1, "Swagger must have one body")
     assert isinstance(parameters, list)
     body = require_object(parameters[0], "Swagger body parameter must be an object")
@@ -138,6 +171,10 @@ def check_operation(
         definitions,
     )
 
+
+def check_responses(
+    operation_contract: dict[str, Any], operation: dict[str, Any], path: str
+) -> None:
     responses_contract = require_object(
         operation_contract.get("responses"), f"HTTP contract {path} responses must be an object"
     )

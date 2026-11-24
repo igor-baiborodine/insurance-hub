@@ -155,13 +155,427 @@ service PolicyService {
   }
 
   // IssuePolicy issues a policy from a stored, unexpired offer at its saved price.
-  rpc IssuePolicy(IssuePolicyRequest) returns (IssuePolicyResponse);
+  rpc IssuePolicy(IssuePolicyRequest) returns (IssuePolicyResponse) {
+    option (google.api.http) = {
+      post: "/policies"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      consumes: "application/json"
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The issued policy number."
+          schema: {
+            json_schema: {ref: ".policy.v1.IssuePolicyResponse"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"policyNumber\":\"5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66\"}"
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "The request is malformed."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"invalid request\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "404"
+        value: {
+          description: "The offer does not exist."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":5,\"message\":\"not found\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "The offer has expired."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":9,\"message\":\"conflict\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "413"
+        value: {
+          description: "The request body is too large."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":8,\"message\":\"request body too large\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "415"
+        value: {
+          description: "The request media type is not supported."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"unsupported media type\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "406"
+        value: {
+          description: "The requested response media type is not available."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"not acceptable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "499"
+        value: {
+          description: "The request was canceled."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":1,\"message\":\"request canceled\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The request failed unexpectedly."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":13,\"message\":\"internal error\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "503"
+        value: {
+          description: "Policy storage is unavailable."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "504"
+        value: {
+          description: "A deadline was exceeded."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}"
+          }
+        }
+      }
+    };
+  }
 
   // GetPolicy returns the details of a policy's latest version.
-  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse) {
+    option (google.api.http) = {get: "/policies/{policy_number}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      consumes: "application/json"
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The latest version of the policy, with date arrays and a numeric premium."
+          schema: {
+            json_schema: {ref: ".policy.v1.GetPolicyHTTPResponse"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"policy\":{\"number\":\"5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66\",\"dateFrom\":[2026,7,1],\"dateTo\":[2026,12,31],\"policyHolder\":\"Synthetic Holder\",\"totalPremium\":59.51,\"productCode\":\"HSI\",\"accountNumber\":\"8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c22\",\"covers\":[\"C1 - 59.51\"]}}"
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "The policy number is malformed."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"invalid request\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "404"
+        value: {
+          description: "The policy does not exist."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":5,\"message\":\"not found\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "406"
+        value: {
+          description: "The requested response media type is not available."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"not acceptable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "499"
+        value: {
+          description: "The request was canceled."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":1,\"message\":\"request canceled\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The request failed unexpectedly."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":13,\"message\":\"internal error\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "503"
+        value: {
+          description: "Policy storage is unavailable."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "504"
+        value: {
+          description: "A deadline was exceeded."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}"
+          }
+        }
+      }
+    };
+  }
 
   // TerminatePolicy ends a policy's coverage on the business date with a terminal version.
-  rpc TerminatePolicy(TerminatePolicyRequest) returns (TerminatePolicyResponse);
+  rpc TerminatePolicy(TerminatePolicyRequest) returns (TerminatePolicyResponse) {
+    option (google.api.http) = {
+      post: "/policies/terminate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      consumes: "application/json"
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The terminated policy number."
+          schema: {
+            json_schema: {ref: ".policy.v1.TerminatePolicyResponse"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"policyNumber\":\"5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66\"}"
+          }
+        }
+      }
+      responses: {
+        key: "400"
+        value: {
+          description: "The request is malformed."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"invalid request\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "404"
+        value: {
+          description: "The policy does not exist."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":5,\"message\":\"not found\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "409"
+        value: {
+          description: "The termination date is outside the policy coverage."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":9,\"message\":\"conflict\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "413"
+        value: {
+          description: "The request body is too large."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":8,\"message\":\"request body too large\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "415"
+        value: {
+          description: "The request media type is not supported."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"unsupported media type\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "406"
+        value: {
+          description: "The requested response media type is not available."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":3,\"message\":\"not acceptable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "499"
+        value: {
+          description: "The request was canceled."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":1,\"message\":\"request canceled\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The request failed unexpectedly."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":13,\"message\":\"internal error\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "503"
+        value: {
+          description: "Policy storage is unavailable."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":14,\"message\":\"service unavailable\",\"details\":[]}"
+          }
+        }
+      }
+      responses: {
+        key: "504"
+        value: {
+          description: "A deadline was exceeded."
+          schema: {
+            json_schema: {ref: ".google.rpc.Status"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}"
+          }
+        }
+      }
+    };
+  }
 }
 
 message CreateOfferRequest {
@@ -278,6 +692,24 @@ message GetPolicyRequest {
 
 message GetPolicyResponse {
   PolicyDetails policy = 1;
+}
+
+// GetPolicyHTTPResponse is documentation-only: the HTTP lookup response.
+message GetPolicyHTTPResponse {
+  PolicyDetailsHTTP policy = 1;
+}
+
+// PolicyDetailsHTTP is documentation-only: dates are [year, month, day] integer arrays and the
+// premium is a JSON number with the stored scale.
+message PolicyDetailsHTTP {
+  string number = 1;
+  repeated int32 date_from = 2;
+  repeated int32 date_to = 3;
+  string policy_holder = 4;
+  double total_premium = 5;
+  string product_code = 6;
+  string account_number = 7;
+  repeated string covers = 8;
 }
 
 // PolicyDetails describes a policy's latest version. Dates are "YYYY-MM-DD" text and the
