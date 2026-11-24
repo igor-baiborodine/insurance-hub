@@ -61,6 +61,32 @@ func TestPolicy_Terminate_RoundsEachCoverBeforeSumming(t *testing.T) {
 	}
 }
 
+func TestPolicy_Terminate_CountsCalendarDaysBeyondDurationRange(t *testing.T) {
+	// given
+	policy := coveredPolicy(
+		day(1800, 1, 1),
+		day(2199, 12, 31),
+		domain.Cover{Code: "C1", Price: "146097.00"},
+	)
+
+	// when
+	terminal, err := policy.Terminate(day(1999, 12, 31))
+
+	// then
+	// The 400-year Gregorian cycle has 146097 days; the first 200 years have 73048.
+	if err != nil || terminal.TotalPremium != "73048.00" ||
+		!reflect.DeepEqual(
+			terminal.Covers,
+			[]domain.Cover{{Code: "C1", Price: "73048.00"}},
+		) {
+		t.Errorf(
+			"terminal = %+v (%v), want one 73048.00 cover over 73048/146097 days",
+			terminal,
+			err,
+		)
+	}
+}
+
 func TestPolicy_Terminate_AcceptsBothCoverageEndpoints(t *testing.T) {
 	for _, test := range []struct {
 		name    string

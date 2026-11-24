@@ -12,6 +12,8 @@ const (
 	correctionFactorScale = 20
 	// amountScale is the decimal scale of every stored amount.
 	amountScale = 2
+	// secondsPerDay converts normalized UTC calendar dates to integer day ordinals.
+	secondsPerDay int64 = 24 * 60 * 60
 )
 
 // ErrTerminationOutsideCoverage reports a termination date outside the latest coverage.
@@ -88,7 +90,9 @@ func TerminationEvent(intentID [16]byte, number string, terminal PolicyVersion) 
 
 // inclusiveDays counts the calendar days from start to end, both included.
 func inclusiveDays(start, end time.Time) int64 {
-	return int64(end.Sub(start).Hours()/24) + 1
+	startDay := start.Unix() / secondsPerDay
+	endDay := end.Unix() / secondsPerDay
+	return endDay - startDay + 1
 }
 
 // roundHalfUp rounds to the decimal scale, with ties away from zero.
