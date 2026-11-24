@@ -12,9 +12,9 @@ from unittest.mock import Mock, patch
 
 import document_deployment_checks as checks
 import pytest
+from scripts.go.service import deployment as lifecycle
 
 import deployment
-from scripts.go.service import deployment as lifecycle
 
 
 def target_environment(name: str = "local-dev") -> dict[str, str]:
