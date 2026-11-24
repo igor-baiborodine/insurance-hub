@@ -1,7 +1,7 @@
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-- [Policy foundation deployment](#policy-foundation-deployment)
+- [Policy deployment](#policy-deployment)
   - [Candidate checks](#candidate-checks)
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
@@ -10,19 +10,17 @@
     - [Target selection](#target-selection)
     - [Fresh installation order](#fresh-installation-order)
     - [Access contract](#access-contract)
-    - [Populated adoption and replay](#populated-adoption-and-replay)
+    - [Populated compatibility and replay](#populated-compatibility-and-replay)
     - [Refusals and retry](#refusals-and-retry)
-    - [Isolated cleanup](#isolated-cleanup)
+    - [Post-qualification disposition](#post-qualification-disposition)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-# Policy foundation deployment
+# Policy deployment
 
 Use catalog key `policy`. The Go workload is `<environment>-policy-api`, selected by
-`app.kubernetes.io/name=policy-api`; Java Policy (`policy-api-legacy`) and Go Policy Search
-(`policy-search-api`) keep their own selectors. The agent portal gateway keeps its
-environment-specific `http://<environment>-policy-api-legacy:80` upstream, so agents continue to
-use Java Policy. Go Policy serves only the bootstrap Echo. It uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
+`app.kubernetes.io/name=policy-api`; other Policy workloads keep their own selectors. The workload
+uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
 Operators use a loopback-bound Kubernetes API port-forward. The workload has no Kubernetes
 Service, ingress route or workload token. In local-dev only, it reads Policy PostgreSQL as
 `go_policy_writer`; QA receives no database settings until its own rollout (see
@@ -43,15 +41,15 @@ make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=qa
 ```
 
-The initial QA overlay contains an inactive release placeholder. The parent Kustomization
-includes only `./policy/legacy` until release preparation adds `./policy`. An activated
-placeholder fails the check. Local-dev requires an explicit, source-matched image to perform
-operations. For disposable qualification, build a local image as below, then run
+The QA overlay uses an inactive release placeholder until release preparation activates the Policy
+resources. An activated placeholder fails the check. Local-dev requires an explicit,
+source-matched image to perform operations. For disposable qualification, build a local image as
+below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
 It runs only the private workload checks (Echo, probes, identity, Pod denial and scale-to-zero).
-It has no Java Policy, so the gateway and Java endpoint coexistence check runs only through
-`go-svc-deploy-verify` against local-dev and QA.
+Shared routing and coexistence checks run only through `go-svc-deploy-verify` against local-dev and
+QA.
 
 ## Direct local-dev
 
@@ -123,31 +121,9 @@ to match the ready Pod image ID.
 `go-svc-deploy-verify` resolves the ready Policy Pod and uses private port-forwards for all
 three listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. It then reads each ready `<environment>-agent-portal-gateway-legacy` Pod without mutation. The
-Pod must select the `<environment>` Micronaut profile, which routes `policy-service` to
-`http://<environment>-policy-api-legacy:80`. No environment variable or `envFrom` may override it,
-and no file in `MICRONAUT_CONFIG_FILES` (resolved through its mounted ConfigMap) may define
-`policy-service`. Finally, the `<environment>-policy-api-legacy` Service EndpointSlices must list
-only ready Java Policy Pods. `go-svc-deploy-check` separately confirms that the checked-in gateway
-profile and route override keep the Java upstream. The profile itself is part of the gateway image,
-so the live check relies on that image being built from the reviewed profile.
-
-For a manual read-only view of the same inputs:
-
-```bash
-kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get pods \
-  -l app.kubernetes.io/name=agent-portal-gateway-legacy \
-  -o 'custom-columns=POD:.metadata.name,ENV:.spec.containers[0].env[*].name,CONFIG:.spec.volumes[*].configMap.name'
-for config in $(kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get pods \
-  -l app.kubernetes.io/name=agent-portal-gateway-legacy \
-  -o jsonpath='{.items[*].spec.volumes[*].configMap.name}' | tr ' ' '\n' | sort -u); do
-  kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" get configmap "$config" \
-    -o jsonpath='{.data}'; echo
-done
-```
-
-Expect `MICRONAUT_ENVIRONMENTS` among the names, no `*POLICY_SERVICE*` variable and no
-`policy-service` key in the printed configuration. For manual troubleshooting, forward the exact Pod selected by status.
+UID. It also reads the configured gateway and external Policy endpoint contract without mutation
+to ensure this private workload does not change shared routing. For manual troubleshooting, forward
+the exact Pod selected by status.
 
 ```bash
 : "${POLICY_POD:?set the ready Go Policy Pod name from status}"
@@ -182,22 +158,19 @@ with the same coordinates and image selection scales only the Go Deployment to z
 Redeploy the approved previous Go image by selecting its full source revision and tag and
 rerunning the direct deployment steps.
 
-If first activation in QA stalls the shared owner, prepare a reviewed recovery commit that removes
+If activation in QA stalls the shared owner, prepare a reviewed recovery commit that removes
 `./policy` from `k8s/overlays/qa/svc/kustomization.yaml` and restores
 `newTag: 0.0.0-unpublished` and `SERVICE_VERSION=git-000000000000` in the Go Policy QA overlay.
-Keep `./policy/legacy` in the parent. Run `make go-svc-deploy-check SVC_NAME=policy` before
-publishing that correction. After Flux applies it, verify the applied revision and pruning.
+Run `make go-svc-deploy-check SVC_NAME=policy` before publishing that correction. After Flux
+applies it, verify the applied revision and pruning.
 
 ```bash
 kubectl --context qa-insurance-hub -n flux-system get kustomization qa-svc -o yaml
 kubectl --context qa-insurance-hub -n qa-svc get deployment qa-policy-api --ignore-not-found
-kubectl --context qa-insurance-hub -n qa-svc get endpointslice \
-  -l kubernetes.io/service-name=qa-policy-api-legacy \
-  -o 'custom-columns=POD:.endpoints[*].targetRef.name,READY:.endpoints[*].conditions.ready'
 ```
 
 Expect the shared owner to be Ready at the reviewed correction commit, the Go Deployment to be
-absent, and the Java Policy endpoint to remain ready.
+absent and the remaining shared inventory to stay healthy.
 
 ## PostgreSQL storage (local-dev)
 
@@ -211,16 +184,13 @@ release cannot break the QA workload before its own provisioning.
 
 ### Target selection
 
-| Binding | Namespace (data and workload) | Use |
-| --- | --- | --- |
-| Normal | `local-dev-all` | The established local-dev environment. It already serves the Java Policy database, so it cannot provide an empty target. |
-| Isolated | `local-dev-policy-isolated` | A fresh Policy CNPG cluster and Go workload together, for fresh-install qualification. Only Policy may select it (`SVC_NAME=policy`), and only in local-dev. |
-
-Every owner accepts the isolated namespace only when both coordinates name it. Set the same value
-everywhere and never point a mutating command at `local-dev-all` to obtain an empty database.
+The only local-dev binding is context `kind-local-dev-insurance-hub`, namespace `local-dev-all`.
+Fresh qualification deliberately replaces the deployed Policy database, storage, administration
+Secrets and private Go workload in that namespace. This manual reset is limited to Policy-owned
+resources and is never run in QA or against unrelated resources.
 
 ```bash
-export NS=local-dev-policy-isolated   # or local-dev-all for the normal binding
+export NS=local-dev-all
 export POLICY_RESOURCE_ENV=local-dev POLICY_RESOURCE_CONTEXT=kind-local-dev-insurance-hub \
   POLICY_RESOURCE_DATA_NS="$NS" POLICY_RESOURCE_SVC_NS="$NS" \
   POLICY_RESOURCE_CLUSTER=local-dev-postgres-policy \
@@ -231,8 +201,15 @@ kubectl config use-context kind-local-dev-insurance-hub
 
 ### Fresh installation order
 
-1. Confirm the empty start: no `local-dev-postgres-policy` cluster, PVCs, Policy Secrets or
-   `local-dev-policy-api` Deployment in `$NS`.
+1. Record the existing Policy Cluster UID, PVCs, Secrets and private Go resources. Manually delete
+   only `cluster.postgresql.cnpg.io/local-dev-postgres-policy`, PVCs labeled
+   `cnpg.io/cluster=local-dev-postgres-policy`, Secrets
+   `local-dev-postgres-policy-user-creds`, `local-dev-postgres-policy-admin-target`,
+   `local-dev-postgres-policy-migrator-creds` and
+   `local-dev-postgres-policy-writer-creds`, plus Deployment
+   `local-dev-policy-api`, ConfigMap `local-dev-policy-config` and NetworkPolicy
+   `local-dev-policy-api`. Wait for deletion and confirm the empty Policy start. Do not turn this
+   one-time reset into a Make target or delete any unrelated resource.
 2. Create the bootstrap owner credential from a mode-0600 file, then the cluster:
    `make -C k8s postgres-svc-secret-create SVC_NAME=policy DATA_NS="$NS" SVC_NS="$NS"
    PG_SVC_USER_PWD_FILE=/absolute/path` and `make -C k8s postgres-svc-deploy SVC_NAME=policy
@@ -268,13 +245,13 @@ kubectl config use-context kind-local-dev-insurance-hub
 every run, so fresh and adopted schemas converge on the same access. Credentials stay in their
 Secrets and temporary 0600 files; never place a value in arguments, logs or evidence.
 
-### Populated adoption and replay
+### Populated compatibility and replay
 
-Adoption of populated Java data is qualified on disposable PostgreSQL rather than a serving
-database. `make -C services/policy-service test-integration` loads an independent C02 Java-shaped
-fixture, checks its baseline and adopts it. It compares all six table fingerprints, verifies the
-generated IDs `2/3/7/9`, replays without rewinding an allocator, and then exercises reads, atomic
-issuance and rollback under the writer login. Adopting a serving Java database is a separate
+Populated compatibility is qualified on disposable PostgreSQL rather than a serving database.
+`make -C services/policy-service test-integration` loads an independent compatibility fixture,
+checks its baseline and adopts it. It compares all six table fingerprints, verifies the generated
+IDs `2/3/7/9`, replays without rewinding an allocator, and then exercises reads, atomic issuance
+and rollback under the writer login. Applying adoption to a serving database is a separate
 operation outside this runbook.
 
 ### Refusals and retry
@@ -288,8 +265,7 @@ operation outside this runbook.
   writer Secret's CA equals `local-dev-postgres-policy-ca` and that the NetworkPolicy reaches the
   CNPG Pods.
 
-### Isolated cleanup
+### Post-qualification disposition
 
-After qualification, record the evidence, then delete only the isolated namespace:
-`kubectl --context kind-local-dev-insurance-hub delete namespace local-dev-policy-isolated`.
-`local-dev-all`, its Java Policy database and the gateway route are never touched.
+Retain the newly qualified Policy cluster, administration resources and private Go workload for
+ongoing local-dev use. Do not restore the replaced database state after qualification.

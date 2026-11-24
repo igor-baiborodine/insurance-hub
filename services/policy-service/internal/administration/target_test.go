@@ -30,13 +30,14 @@ func TestReadTarget_ValidatesProtectedEnrollment(t *testing.T) {
 			"invalid target enrollment", 0o600,
 		},
 		{
-			"isolated namespace", "kind-local-dev-insurance-hub",
-			strings.ReplaceAll(content, "local-dev-all", isolatedNamespace), "", 0o600,
+			"service-specific namespace", "kind-local-dev-insurance-hub",
+			strings.ReplaceAll(content, "local-dev-all", "policy-specific-namespace"),
+			"coordinates differ from environment policy", 0o600,
 		},
 		{
-			"split isolated namespace", "kind-local-dev-insurance-hub",
+			"split service-specific namespace", "kind-local-dev-insurance-hub",
 			strings.Replace(content, `"dataNamespace":"local-dev-all"`,
-				`"dataNamespace":"`+isolatedNamespace+`"`, 1),
+				`"dataNamespace":"policy-specific-namespace"`, 1),
 			"coordinates differ from environment policy", 0o600,
 		},
 		{"readable enrollment", "kind-local-dev-insurance-hub", content, "private regular file", 0o644},

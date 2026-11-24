@@ -11,7 +11,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -103,9 +103,6 @@ TARGETS = {
     ),
     "qa": Target("qa", "qa-insurance-hub", "qa-data", "qa-svc", "qa-monitoring"),
 }
-# Disposable local-dev namespaces that hold one service's fresh database and workload together,
-# used when the shared local-dev namespace already serves that service's Java database.
-ISOLATED_LOCAL_DEV_NAMESPACES = {"policy": "local-dev-policy-isolated"}
 SAFE_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 SAFE_CHILD_ENV = {
     "DOCKER_HOST",
@@ -143,15 +140,9 @@ def selected_target(
     service_namespace: str | None = None,
     monitoring_namespace: str | None = None,
     flux_namespace: str | None = None,
-    service_name: str = "",
 ) -> Target:
     require(environment in TARGETS, "environment must be local-dev or qa")
     expected = TARGETS[environment]
-    isolated = (
-        ISOLATED_LOCAL_DEV_NAMESPACES.get(service_name) if environment == "local-dev" else None
-    )
-    if isolated is not None and data_namespace == service_namespace == isolated:
-        expected = replace(expected, data_namespace=isolated, service_namespace=isolated)
     selected = Target(
         environment,
         context,

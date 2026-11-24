@@ -230,20 +230,12 @@ def test_verify_requires_permission_denied_sqlstate(monkeypatch):
         resources.verify(target)
 
 
-@pytest.mark.parametrize(
-    ("environment", "namespace", "accepted"),
-    [
-        ("local-dev", resources.ISOLATED_NAMESPACE, True),
-        ("local-dev", "local-dev-policy-other", False),
-        ("qa", resources.ISOLATED_NAMESPACE, False),
-    ],
-)
-def test_isolated_binding_selects_only_its_own_coordinates(
-    monkeypatch, environment, namespace, accepted
-):
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_service_specific_namespace_is_rejected(monkeypatch, environment):
     # given
     context = resources.ENVIRONMENTS[environment][0]
     cluster = f"{environment}-postgres-policy"
+    namespace = "policy-specific-namespace"
     for key, value in {
         "POLICY_RESOURCE_CONTEXT": context,
         "POLICY_RESOURCE_DATA_NS": namespace,
@@ -263,11 +255,7 @@ def test_isolated_binding_selects_only_its_own_coordinates(
     # when / then
     with pytest.raises(resources.ResourceError) as raised:
         resources.Kubernetes(environment)
-    if accepted:
-        assert "stop before cluster contact" in str(raised.value)
-        assert f"get namespace {namespace}" in " ".join(contacted[0])
-    else:
-        assert "must explicitly equal" in str(raised.value) and not contacted
+    assert "must explicitly equal" in str(raised.value) and not contacted
 
 
 @pytest.mark.parametrize(

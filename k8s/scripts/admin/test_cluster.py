@@ -991,37 +991,17 @@ while True:
                 pass
 
 
-@pytest.mark.parametrize(
-    ("environment", "service", "namespace", "accepted"),
-    [
-        ("local-dev", "policy", "local-dev-policy-isolated", True),
-        ("local-dev", "pricing", "local-dev-policy-isolated", False),
-        ("local-dev", "policy", "local-dev-policy-other", False),
-        ("qa", "policy", "local-dev-policy-isolated", False),
-    ],
-)
-def test_isolated_namespace_is_accepted_only_for_its_local_dev_service(
-    environment, service, namespace, accepted
-):
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+def test_service_specific_namespace_is_rejected(environment):
     # given
     context = runtime.TARGETS[environment].context
+    namespace = "policy-specific-namespace"
 
     # when / then
-    if not accepted:
-        with pytest.raises(AdminError, match="data namespace must explicitly equal"):
-            runtime.selected_target(
-                environment,
-                context,
-                data_namespace=namespace,
-                service_namespace=namespace,
-                service_name=service,
-            )
-        return
-    target = runtime.selected_target(
-        environment,
-        context,
-        data_namespace=namespace,
-        service_namespace=namespace,
-        service_name=service,
-    )
-    assert (target.data_namespace, target.service_namespace) == (namespace, namespace)
+    with pytest.raises(AdminError, match="data namespace must explicitly equal"):
+        runtime.selected_target(
+            environment,
+            context,
+            data_namespace=namespace,
+            service_namespace=namespace,
+        )
