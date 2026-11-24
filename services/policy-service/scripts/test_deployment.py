@@ -356,6 +356,47 @@ def test_denial_cleanup_preserves_primary_error(
     assert "cleanup failed: Policy denial probe ownership differs" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("denied_output", [True, False])
+def test_provider_access_requires_identity_allow_and_ordinary_denial(
+    monkeypatch: pytest.MonkeyPatch, denied_output: bool
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = policy.Target()
+    items = policy.validate_render("local-dev", policy.render("local-dev"))
+    addresses = [
+        "local-dev-product-api.local-dev-all.svc.cluster.local:9090",
+        "local-dev-pricing-api.local-dev-all.svc.cluster.local:9090",
+    ]
+    probes: list[tuple[str, list[str], dict | None]] = []
+
+    def probe(_target: object, name: str, _description: str, args: list[str], labels=None):
+        probes.append((name, args[1:], labels))
+        verb = "allowed" if labels else ("denied" if denied_output else "reached")
+        return [f"{verb} {address}" for address in addresses]
+
+    monkeypatch.setattr(policy, "run_probe", probe)
+
+    # when / then
+    if denied_output:
+        policy.verify_provider_access(target, items)
+    else:
+        with pytest.raises(DeploymentError, match="unrelated workload reaches a provider"):
+            policy.verify_provider_access(target, items)
+    assert probes[0] == (
+        "policy-provider-allowed",
+        addresses,
+        {
+            "app.kubernetes.io/name": "policy-api",
+            "app.kubernetes.io/component": "api",
+            "environment": "local-dev",
+        },
+    )
+    assert probes[1][:2] == ("policy-provider-denied", addresses) and probes[1][2] is None
+
+
 def test_denial_probe_waits_for_network_policy_convergence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
