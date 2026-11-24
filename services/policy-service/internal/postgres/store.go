@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,45 +21,45 @@ var ErrNotFound = errors.New("policy storage record not found")
 type Offer struct {
 	ID           int64
 	Number       string
-	ProductCode  string
-	Status       string
-	CreationDate time.Time
-	PolicyFrom   time.Time
-	PolicyTo     time.Time
-	TotalPrice   string
-	Answers      map[string]string
-	CoverPrices  map[string]string
+	ProductCode  *string
+	Status       *string
+	CreationDate *time.Time
+	PolicyFrom   *time.Time
+	PolicyTo     *time.Time
+	TotalPrice   *string
+	Answers      map[string]*string
+	CoverPrices  map[string]*string
 }
 
 // Policy is a stored policy with its versions in version-number order.
 type Policy struct {
 	ID         int64
 	Number     string
-	AgentLogin string
+	AgentLogin *string
 	Versions   []Version
 }
 
 // Version is one policy version with its covers.
 type Version struct {
 	ID            int64
-	Number        int64
-	ProductCode   string
-	FirstName     string
-	LastName      string
-	Pesel         string
-	AccountNumber string
-	CoverFrom     time.Time
-	CoverTo       time.Time
-	VersionFrom   time.Time
-	VersionTo     time.Time
-	TotalPremium  string
+	Number        *int64
+	ProductCode   *string
+	FirstName     *string
+	LastName      *string
+	Pesel         *string
+	AccountNumber *string
+	CoverFrom     *time.Time
+	CoverTo       *time.Time
+	VersionFrom   *time.Time
+	VersionTo     *time.Time
+	TotalPremium  *string
 	Covers        []Cover
 }
 
 // Cover is one priced cover of a policy version.
 type Cover struct {
-	Code  string
-	Price string
+	Code  *string
+	Price *string
 }
 
 // Intent is one logical event intent, stored with the aggregate change that caused it.
@@ -72,7 +73,7 @@ type Intent struct {
 // Issuance is a new policy with its first version and registration intent.
 type Issuance struct {
 	Number     string
-	AgentLogin string
+	AgentLogin *string
 	Version    Version
 	Intent     Intent
 }
@@ -105,23 +106,31 @@ func (s *Store) Offer(ctx context.Context, number string) (Offer, error) {
 	if err != nil {
 		return Offer{}, readError("offer covers", err)
 	}
+	totalPrice, err := decimalValue(row.TotalPrice)
+	if err != nil {
+		return Offer{}, readError("offer total price", err)
+	}
 	offer := Offer{
 		ID:           row.ID,
 		Number:       row.Number.String,
-		ProductCode:  row.ProductCode.String,
-		Status:       row.Status.String,
-		CreationDate: row.CreationDate.Time,
-		PolicyFrom:   row.PolicyFrom.Time,
-		PolicyTo:     row.PolicyTo.Time,
-		TotalPrice:   row.TotalPrice,
-		Answers:      make(map[string]string, len(answers)),
-		CoverPrices:  make(map[string]string, len(covers)),
+		ProductCode:  textValue(row.ProductCode),
+		Status:       textValue(row.Status),
+		CreationDate: dateValue(row.CreationDate),
+		PolicyFrom:   dateValue(row.PolicyFrom),
+		PolicyTo:     dateValue(row.PolicyTo),
+		TotalPrice:   totalPrice,
+		Answers:      make(map[string]*string, len(answers)),
+		CoverPrices:  make(map[string]*string, len(covers)),
 	}
 	for _, answer := range answers {
-		offer.Answers[answer.QuestionCode] = answer.Answer.String
+		offer.Answers[answer.QuestionCode] = textValue(answer.Answer)
 	}
 	for _, cover := range covers {
-		offer.CoverPrices[cover.CoverCode] = cover.Price
+		price, err := decimalValue(cover.Price)
+		if err != nil {
+			return Offer{}, readError("offer cover price", err)
+		}
+		offer.CoverPrices[cover.CoverCode] = price
 	}
 	return offer, nil
 }
@@ -141,29 +150,41 @@ func (s *Store) Policy(ctx context.Context, number string) (Policy, error) {
 	if err != nil {
 		return Policy{}, readError("policy covers", err)
 	}
-	policy := Policy{ID: row.ID, Number: row.Number.String, AgentLogin: row.AgentLogin.String}
+	policy := Policy{
+		ID:         row.ID,
+		Number:     row.Number.String,
+		AgentLogin: textValue(row.AgentLogin),
+	}
 	index := make(map[int64]int, len(versions))
 	for _, version := range versions {
+		totalPremium, err := decimalValue(version.TotalPremiumAmount)
+		if err != nil {
+			return Policy{}, readError("policy version total premium", err)
+		}
 		index[version.ID] = len(policy.Versions)
 		policy.Versions = append(policy.Versions, Version{
 			ID:            version.ID,
-			Number:        version.VersionNumber.Int64,
-			ProductCode:   version.ProductCode.String,
-			FirstName:     version.FirstName.String,
-			LastName:      version.LastName.String,
-			Pesel:         version.Pesel.String,
-			AccountNumber: version.AccountNumber.String,
-			CoverFrom:     version.CoverFrom.Time,
-			CoverTo:       version.CoverTo.Time,
-			VersionFrom:   version.VersionFrom.Time,
-			VersionTo:     version.VersionTo.Time,
-			TotalPremium:  version.TotalPremiumAmount,
+			Number:        int64Value(version.VersionNumber),
+			ProductCode:   textValue(version.ProductCode),
+			FirstName:     textValue(version.FirstName),
+			LastName:      textValue(version.LastName),
+			Pesel:         textValue(version.Pesel),
+			AccountNumber: textValue(version.AccountNumber),
+			CoverFrom:     dateValue(version.CoverFrom),
+			CoverTo:       dateValue(version.CoverTo),
+			VersionFrom:   dateValue(version.VersionFrom),
+			VersionTo:     dateValue(version.VersionTo),
+			TotalPremium:  totalPremium,
 		})
 	}
 	for _, cover := range covers {
+		price, err := decimalValue(cover.Price)
+		if err != nil {
+			return Policy{}, readError("policy cover price", err)
+		}
 		position := index[cover.PolicyVersionID.Int64]
 		policy.Versions[position].Covers = append(policy.Versions[position].Covers,
-			Cover{Code: cover.Code.String, Price: cover.Price})
+			Cover{Code: textValue(cover.Code), Price: price})
 	}
 	return policy, nil
 }
@@ -212,7 +233,7 @@ func (s *Store) Issue(ctx context.Context, issuance Issuance) (policyID int64, e
 // Issue writes the policy, version, covers and intent. Generated keys link dependent rows.
 func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error) {
 	policyID, err := t.queries.InsertPolicy(ctx, dbgen.InsertPolicyParams{
-		Number: text(issuance.Number), AgentLogin: optionalText(issuance.AgentLogin),
+		Number: text(issuance.Number), AgentLogin: nullableText(issuance.AgentLogin),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert policy: %w", err)
@@ -220,12 +241,19 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 	version := issuance.Version
 	versionID, err := t.queries.InsertPolicyVersion(ctx, dbgen.InsertPolicyVersionParams{
 		PolicyID:      pgtype.Int8{Int64: policyID, Valid: true},
-		VersionNumber: pgtype.Int8{Int64: version.Number, Valid: true},
-		ProductCode:   text(version.ProductCode), FirstName: text(version.FirstName),
-		LastName: text(version.LastName), Pesel: text(version.Pesel),
-		AccountNumber: text(version.AccountNumber), CoverFrom: date(version.CoverFrom),
-		CoverTo: date(version.CoverTo), VersionFrom: date(version.VersionFrom),
-		VersionTo: date(version.VersionTo), TotalPremiumAmount: version.TotalPremium,
+		VersionNumber: nullableInt64(version.Number),
+		ProductCode:   nullableText(version.ProductCode),
+		FirstName:     nullableText(version.FirstName),
+		LastName:      nullableText(version.LastName),
+		Pesel:         nullableText(version.Pesel),
+		AccountNumber: nullableText(version.AccountNumber),
+		CoverFrom:     nullableDate(version.CoverFrom),
+		CoverTo:       nullableDate(version.CoverTo),
+		VersionFrom:   nullableDate(version.VersionFrom),
+		VersionTo:     nullableDate(version.VersionTo),
+		TotalPremiumAmount: nullableText(
+			version.TotalPremium,
+		),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("insert policy version: %w", err)
@@ -233,7 +261,7 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 	for _, cover := range version.Covers {
 		if err := t.queries.InsertCover(ctx, dbgen.InsertCoverParams{
 			PolicyVersionID: pgtype.Int8{Int64: versionID, Valid: true},
-			Code:            text(cover.Code), Price: cover.Price,
+			Code:            nullableText(cover.Code), Price: nullableText(cover.Price),
 		}); err != nil {
 			return 0, fmt.Errorf("insert cover: %w", err)
 		}
@@ -257,10 +285,67 @@ func readError(record string, err error) error {
 
 func text(value string) pgtype.Text { return pgtype.Text{String: value, Valid: true} }
 
-func optionalText(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
+func textValue(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }
 
-func date(value time.Time) pgtype.Date {
-	return pgtype.Date{Time: value, Valid: !value.IsZero()}
+func dateValue(value pgtype.Date) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+func int64Value(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Int64
+}
+
+func decimalValue(value pgtype.Numeric) (*string, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	encoded, err := value.Value()
+	if err != nil {
+		return nil, err
+	}
+	decimal, ok := encoded.(string)
+	if !ok {
+		return nil, errors.New("numeric value has unexpected representation")
+	}
+	if value.NaN || value.InfinityModifier != pgtype.Finite {
+		return &decimal, nil
+	}
+	number, ok := new(big.Rat).SetString(decimal)
+	if !ok {
+		return nil, errors.New("numeric value cannot be represented exactly")
+	}
+	decimal = number.FloatString(2)
+	return &decimal, nil
+}
+
+func nullableText(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *value, Valid: true}
+}
+
+func nullableDate(value *time.Time) pgtype.Date {
+	if value == nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: *value, Valid: true}
+}
+
+func nullableInt64(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
 }

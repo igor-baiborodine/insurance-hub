@@ -25,6 +25,9 @@ import (
 //go:embed testdata/sql/read-issuance-state.sql
 var readIssuanceStateQuery string
 
+//go:embed testdata/sql/insert-nullable-aggregates.sql
+var insertNullableAggregatesQuery string
+
 //go:embed sql/schema.sql
 var sqlcSchema string
 
@@ -59,22 +62,27 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	existing, policyErr := store.Policy(ctx, postgresfixture.JavaPolicyNumber)
 
 	// then
-	if offerErr != nil || offer.TotalPrice != "123.45" || offer.Status != "NEW" ||
-		!maps.Equal(offer.CoverPrices, map[string]string{"C1": "100.00", "C2": "23.45"}) ||
-		!maps.Equal(
+	if offerErr != nil || optionalString(offer.TotalPrice) != "123.45" ||
+		optionalString(offer.Status) != "NEW" ||
+		!optionalMapEqual(
+			offer.CoverPrices,
+			map[string]string{"C1": "100.00", "C2": "23.45"},
+		) ||
+		!optionalMapEqual(
 			offer.Answers,
 			map[string]string{"NUM_OF_CLAIM": "0", "TYPE": "APARTMENT"},
 		) {
 		t.Fatalf("stored offer: %+v (%v)", offer, offerErr)
 	}
 	// Java expires an offer 30 days after creation.
-	if offer.CreationDate.AddDate(0, 0, 30).Before(businessDate) {
+	if offer.CreationDate == nil || offer.CreationDate.AddDate(0, 0, 30).Before(businessDate) {
 		t.Fatal("the controlled business date does not keep the stored offer valid")
 	}
 	requireJavaPolicy(t, existing, policyErr)
 	if _, err := store.Policy(ctx, "missing"); !errors.Is(err, postgres.ErrNotFound) {
 		t.Fatalf("missing policy: %v", err)
 	}
+	requireNullableAggregates(t, ctx, fixture, store)
 	issuance := issuanceFrom(offer, "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66")
 
 	t.Run("forced rollback exposes no write", func(t *testing.T) {
@@ -111,7 +119,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		issued, err := store.Policy(ctx, issuance.Number)
 		if err != nil || issued.ID != policyID || len(issued.Versions) != 1 ||
 			!reflect.DeepEqual(issued.Versions[0].Covers, issuance.Version.Covers) ||
-			issued.Versions[0].TotalPremium != "123.45" {
+			optionalString(issued.Versions[0].TotalPremium) != "123.45" {
 			t.Fatalf("issued policy: %+v (%v)", issued, err)
 		}
 		requireUnchangedPolicy(t, ctx, store, existing)
@@ -176,19 +184,27 @@ func requireJavaPolicy(t *testing.T, policy postgres.Policy, err error) {
 		t.Fatalf("existing Java policy: %+v (%v)", policy, err)
 	}
 	first, second := policy.Versions[0], policy.Versions[1]
-	if first.Number != 1 || first.TotalPremium != "123.45" ||
+	if optionalInt64(first.Number) != 1 || optionalString(first.TotalPremium) != "123.45" ||
 		!reflect.DeepEqual(
 			first.Covers,
-			[]postgres.Cover{{"C1", "100.00"}, {"C2", "23.45"}},
+			[]postgres.Cover{
+				{Code: stringPointer("C1"), Price: stringPointer("100.00")},
+				{Code: stringPointer("C2"), Price: stringPointer("23.45")},
+			},
 		) ||
-		second.Number != 2 || second.TotalPremium != "3.71" ||
+		optionalInt64(
+			second.Number,
+		) != 2 || optionalString(second.TotalPremium) != "3.71" ||
 		!reflect.DeepEqual(
 			second.Covers,
-			[]postgres.Cover{{"C1", "3.01"}, {"C2", "0.70"}},
+			[]postgres.Cover{
+				{Code: stringPointer("C1"), Price: stringPointer("3.01")},
+				{Code: stringPointer("C2"), Price: stringPointer("0.70")},
+			},
 		) ||
-		first.AccountNumber != second.AccountNumber ||
-		second.CoverTo.Format(time.DateOnly) != "2026-11-23" ||
-		second.VersionFrom.Format(time.DateOnly) != "2026-11-24" {
+		optionalString(first.AccountNumber) != optionalString(second.AccountNumber) ||
+		optionalDate(second.CoverTo) != "2026-11-23" ||
+		optionalDate(second.VersionFrom) != "2026-11-24" {
 		t.Fatalf("existing Java policy history differs from the C02 fixture: %+v", policy)
 	}
 }
@@ -227,14 +243,19 @@ func requireIssuanceState(
 func issuanceFrom(offer postgres.Offer, number string) postgres.Issuance {
 	covers := make([]postgres.Cover, 0, len(offer.CoverPrices))
 	for _, code := range slices.Sorted(maps.Keys(offer.CoverPrices)) {
-		covers = append(covers, postgres.Cover{Code: code, Price: offer.CoverPrices[code]})
+		covers = append(
+			covers,
+			postgres.Cover{Code: stringPointer(code), Price: offer.CoverPrices[code]},
+		)
 	}
+	versionNumber := int64(1)
 	return postgres.Issuance{
-		Number: number, AgentLogin: "synthetic.agent",
+		Number: number, AgentLogin: stringPointer("synthetic.agent"),
 		Version: postgres.Version{
-			Number: 1, ProductCode: offer.ProductCode, FirstName: "Synthetic",
-			LastName: "Issuer", Pesel: "00000000000",
-			AccountNumber: "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c22",
+			Number: &versionNumber, ProductCode: offer.ProductCode,
+			FirstName: stringPointer("Synthetic"), LastName: stringPointer("Issuer"),
+			Pesel:         stringPointer("00000000000"),
+			AccountNumber: stringPointer("8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c22"),
 			CoverFrom:     offer.PolicyFrom, CoverTo: offer.PolicyTo,
 			VersionFrom: offer.PolicyFrom, VersionTo: offer.PolicyTo,
 			TotalPremium: offer.TotalPrice, Covers: covers,
@@ -246,6 +267,75 @@ func issuanceFrom(offer postgres.Offer, number string) postgres.Issuance {
 			Payload: []byte(`{"policy":{"number":"` + number + `"}}`),
 		},
 	}
+}
+
+func requireNullableAggregates(
+	t *testing.T,
+	ctx context.Context,
+	fixture *postgresfixture.Fixture,
+	store *postgres.Store,
+) {
+	t.Helper()
+	fixture.Exec(t, ctx, insertNullableAggregatesQuery)
+	nullableOffer, err := store.Offer(ctx, "nullable-offer")
+	if err != nil || nullableOffer.ProductCode != nil || nullableOffer.Status != nil ||
+		nullableOffer.CreationDate != nil || nullableOffer.PolicyFrom != nil ||
+		nullableOffer.PolicyTo != nil || nullableOffer.TotalPrice != nil ||
+		nullableOffer.Answers["nullable-answer"] != nil ||
+		nullableOffer.CoverPrices["nullable-cover"] != nil {
+		t.Fatalf("nullable offer values were not preserved: %+v (%v)", nullableOffer, err)
+	}
+	zeroOffer, err := store.Offer(ctx, "zero-offer")
+	if err != nil || optionalString(zeroOffer.TotalPrice) != "0.00" {
+		t.Fatalf("zero offer amount differs from NULL: %+v (%v)", zeroOffer, err)
+	}
+	nullablePolicy, err := store.Policy(ctx, "nullable-policy")
+	if err != nil || nullablePolicy.AgentLogin != nil || len(nullablePolicy.Versions) != 1 {
+		t.Fatalf("nullable policy values were not preserved: %+v (%v)", nullablePolicy, err)
+	}
+	version := nullablePolicy.Versions[0]
+	if version.Number != nil || version.ProductCode != nil || version.FirstName != nil ||
+		version.LastName != nil || version.Pesel != nil || version.AccountNumber != nil ||
+		version.CoverFrom != nil || version.CoverTo != nil || version.VersionFrom != nil ||
+		version.VersionTo != nil || version.TotalPremium != nil || len(version.Covers) != 1 ||
+		version.Covers[0].Code != nil || version.Covers[0].Price != nil {
+		t.Fatalf("nullable version values were not preserved: %+v", version)
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalInt64(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func optionalDate(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Format(time.DateOnly)
+}
+
+func optionalMapEqual(got map[string]*string, want map[string]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for key, value := range want {
+		if optionalString(got[key]) != value {
+			return false
+		}
+	}
+	return true
 }
 
 // requireSQLCSchemaMatchesMigration applies the sqlc input to an empty database and checks it

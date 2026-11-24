@@ -14,7 +14,7 @@ import (
 const getOffer = `-- name: GetOffer :one
 
 SELECT id, number, product_code, status, creation_date, policy_from, policy_to,
-    total_price::text AS total_price
+    total_price
 FROM public.offer
 WHERE number = $1
 `
@@ -27,7 +27,7 @@ type GetOfferRow struct {
 	CreationDate pgtype.Date
 	PolicyFrom   pgtype.Date
 	PolicyTo     pgtype.Date
-	TotalPrice   string
+	TotalPrice   pgtype.Numeric
 }
 
 // Exact decimals cross the boundary as PostgreSQL numeric text, never as floating point.
@@ -74,7 +74,7 @@ VALUES ($1, $2, $3::text::numeric)
 type InsertCoverParams struct {
 	PolicyVersionID pgtype.Int8
 	Code            pgtype.Text
-	Price           string
+	Price           pgtype.Text
 }
 
 func (q *Queries) InsertCover(ctx context.Context, arg InsertCoverParams) error {
@@ -153,7 +153,7 @@ type InsertPolicyVersionParams struct {
 	CoverTo            pgtype.Date
 	VersionFrom        pgtype.Date
 	VersionTo          pgtype.Date
-	TotalPremiumAmount string
+	TotalPremiumAmount pgtype.Text
 }
 
 func (q *Queries) InsertPolicyVersion(ctx context.Context, arg InsertPolicyVersionParams) (int64, error) {
@@ -209,7 +209,7 @@ func (q *Queries) ListOfferAnswers(ctx context.Context, offerID int64) ([]ListOf
 }
 
 const listOfferCovers = `-- name: ListOfferCovers :many
-SELECT cover_code, price::text AS price
+SELECT cover_code, price
 FROM public.offer_cover
 WHERE offer_id = $1
 ORDER BY cover_code
@@ -217,7 +217,7 @@ ORDER BY cover_code
 
 type ListOfferCoversRow struct {
 	CoverCode string
-	Price     string
+	Price     pgtype.Numeric
 }
 
 func (q *Queries) ListOfferCovers(ctx context.Context, offerID int64) ([]ListOfferCoversRow, error) {
@@ -241,7 +241,7 @@ func (q *Queries) ListOfferCovers(ctx context.Context, offerID int64) ([]ListOff
 }
 
 const listPolicyCovers = `-- name: ListPolicyCovers :many
-SELECT c.policy_version_id, c.code, c.price::text AS price
+SELECT c.policy_version_id, c.code, c.price
 FROM public.cover AS c
 JOIN public.policy_version AS v ON v.id = c.policy_version_id
 WHERE v.policy_id = $1
@@ -251,7 +251,7 @@ ORDER BY c.policy_version_id, c.id
 type ListPolicyCoversRow struct {
 	PolicyVersionID pgtype.Int8
 	Code            pgtype.Text
-	Price           string
+	Price           pgtype.Numeric
 }
 
 func (q *Queries) ListPolicyCovers(ctx context.Context, policyID pgtype.Int8) ([]ListPolicyCoversRow, error) {
@@ -277,7 +277,7 @@ func (q *Queries) ListPolicyCovers(ctx context.Context, policyID pgtype.Int8) ([
 const listPolicyVersions = `-- name: ListPolicyVersions :many
 SELECT id, version_number, product_code, first_name, last_name, pesel, account_number,
     cover_from, cover_to, version_from, version_to,
-    total_premium_amount::text AS total_premium_amount
+    total_premium_amount
 FROM public.policy_version
 WHERE policy_id = $1
 ORDER BY version_number, id
@@ -295,7 +295,7 @@ type ListPolicyVersionsRow struct {
 	CoverTo            pgtype.Date
 	VersionFrom        pgtype.Date
 	VersionTo          pgtype.Date
-	TotalPremiumAmount string
+	TotalPremiumAmount pgtype.Numeric
 }
 
 func (q *Queries) ListPolicyVersions(ctx context.Context, policyID pgtype.Int8) ([]ListPolicyVersionsRow, error) {
