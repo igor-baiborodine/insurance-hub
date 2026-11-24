@@ -32,6 +32,8 @@ import (
 const (
 	offersPath = "/offers"
 	offerRoute = "POST " + offersPath
+	// maxNumericAnswer bounds a numeric answer's plain-decimal text to its stored length.
+	maxNumericAnswer = 255
 )
 
 type Settings struct {
@@ -433,11 +435,51 @@ func decodeHTTPAnswer(data []byte) (*policyv1.OfferAnswer, bool) {
 	case kind == "text" && isText:
 		answer.Value = &policyv1.OfferAnswer_Text{Text: text}
 	case kind == "numeric" && isNumber:
-		answer.Value = &policyv1.OfferAnswer_Number{Number: number.String()}
+		decimal, valid := plainDecimal(number.String())
+		if !valid {
+			return nil, false
+		}
+		answer.Value = &policyv1.OfferAnswer_Number{Number: decimal}
 	default:
 		return nil, false
 	}
 	return answer, true
+}
+
+// plainDecimal rewrites a JSON number in exponent notation as the same exact value in plain
+// decimal text, for example 1.5e-3 as 0.0015. Numbers without an exponent keep their text.
+func plainDecimal(number string) (string, bool) {
+	mantissa, exponentText, hasExponent := strings.Cut(strings.ToLower(number), "e")
+	if !hasExponent {
+		return number, len(number) <= maxNumericAnswer
+	}
+	exponent, err := strconv.Atoi(exponentText)
+	if err != nil || exponent < -maxNumericAnswer || exponent > maxNumericAnswer {
+		return "", false
+	}
+	sign, unsigned := "", mantissa
+	if strings.HasPrefix(unsigned, "-") {
+		sign, unsigned = "-", unsigned[1:]
+	}
+	integer, fraction, _ := strings.Cut(unsigned, ".")
+	digits := integer + fraction
+	point := len(integer) + exponent
+	if point < 1 {
+		digits = strings.Repeat("0", 1-point) + digits
+		point = 1
+	}
+	if point > len(digits) {
+		digits += strings.Repeat("0", point-len(digits))
+	}
+	whole := strings.TrimLeft(digits[:point], "0")
+	if whole == "" {
+		whole = "0"
+	}
+	decimal := sign + whole
+	if point < len(digits) {
+		decimal += "." + digits[point:]
+	}
+	return decimal, len(decimal) <= maxNumericAnswer
 }
 
 type policyMarshaler struct{ *runtime.JSONPb }

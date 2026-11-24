@@ -298,7 +298,8 @@ reserved interval within the one overall deadline.
 command with `productCode`, `policyFrom` and `policyTo` as
 `YYYY-MM-DD` strings or `[year, month, day]` arrays, `selectedCovers`, and `answers` with `type`
 (`choice`, `text` or `numeric`), `questionCode` and `answer`. Choice and text answers are JSON strings;
-numeric answers are JSON numbers whose exact text is kept. Unknown or duplicate members are rejected.
+numeric answers are JSON numbers, sent to Pricing and stored as exact plain-decimal text
+(exponent notation is expanded, for example `1e2` as `100`). Unknown or duplicate members are rejected.
 
 ```sh
 curl --fail-with-body -H 'Content-Type: application/json' -d '{"productCode":"TRI",

@@ -305,6 +305,60 @@ func TestHandler_CreateOffer_MapsLegacyRequestToRPC(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateOffer_SendsNumericAnswersAsPlainDecimals(t *testing.T) {
+	// given
+	for _, test := range []struct{ name, answer, want string }{
+		{"plain decimal keeps its text", "1.50", "1.50"},
+		{"positive exponent", "1e2", "100"},
+		{"upper-case exponent with fraction", "2.5E+1", "25"},
+		{"exponent keeping trailing zero", "1.50e1", "15.0"},
+		{"negative exponent", "1.5e-3", "0.0015"},
+		{"negative number", "-2.50e1", "-25.0"},
+		{"leading zero mantissa", "0.5e1", "5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			body := `{"productCode":"TRI","answers":[` +
+				`{"type":"numeric","questionCode":"N","answer":` + test.answer + `}]}`
+
+			// when
+			recorder := postOffer(handler, body)
+
+			// then
+			got := client.lastOfferRequest().GetAnswers()[0].GetNumber()
+			if recorder.Code != http.StatusOK || got != test.want {
+				t.Errorf(
+					"status %d, RPC number %q, want %q",
+					recorder.Code,
+					got,
+					test.want,
+				)
+			}
+		})
+	}
+}
+
+func TestHandler_CreateOffer_RejectsNumericAnswerBeyondStoredLength(t *testing.T) {
+	for _, answer := range []string{"1e300", "1e-300", "1" + strings.Repeat("0", 255)} {
+		t.Run(answer[:4], func(t *testing.T) {
+			// given
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			body := `{"productCode":"TRI","answers":[` +
+				`{"type":"numeric","questionCode":"N","answer":` + answer + `}]}`
+
+			// when
+			recorder := postOffer(handler, body)
+
+			// then
+			if recorder.Code != http.StatusBadRequest || client.callCount() != 0 {
+				t.Errorf("status %d, calls %d", recorder.Code, client.callCount())
+			}
+		})
+	}
+}
+
 func TestHandler_CreateOffer_WritesExactNumericAmounts(t *testing.T) {
 	// given
 	client := &fakeClient{offer: &policyv1.CreateOfferResponse{

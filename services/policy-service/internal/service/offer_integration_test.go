@@ -44,7 +44,7 @@ const (
 		`"selectedCovers":["C1","C2"],"answers":[` +
 		`{"type":"choice","questionCode":"DESTINATION","answer":"EUR"},` +
 		`{"type":"numeric","questionCode":"NUM_OF_ADULTS","answer":1},` +
-		`{"type":"numeric","questionCode":"NUM_OF_CHILDREN","answer":1}]}`
+		`{"type":"numeric","questionCode":"NUM_OF_CHILDREN","answer":1e0}]}`
 )
 
 var uuidV4 = regexp.MustCompile(
