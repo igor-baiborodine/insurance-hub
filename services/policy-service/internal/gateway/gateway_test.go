@@ -444,6 +444,53 @@ func TestHandler_CreateOffer_RejectsMalformedLegacyRequests(t *testing.T) {
 	}
 }
 
+func TestHandler_Command_RejectsMultipleJSONValues(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{
+			"issue",
+			"/policies",
+			`{"offerNumber":"offer-1","policyHolder":{}} {}`,
+		},
+		{
+			"terminate",
+			"/policies/terminate",
+			`{"policyNumber":"policy-1"} {}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				test.path,
+				strings.NewReader(test.body),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			// when
+			handler.ServeHTTP(recorder, request)
+
+			// then
+			if recorder.Code != http.StatusBadRequest ||
+				recorder.Body.String() != errorBody(3, "invalid request") ||
+				client.callCount() != 0 {
+				t.Errorf(
+					"response = (%d, %q), calls %d",
+					recorder.Code,
+					recorder.Body.String(),
+					client.callCount(),
+				)
+			}
+		})
+	}
+}
+
 func TestHandler_CreateOffer_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	// given
 	privateMarker := "private-upstream-marker"
@@ -855,6 +902,28 @@ func (client *fakeClient) CreateOffer(
 		}, nil
 	}
 	return client.offer, nil
+}
+
+func (client *fakeClient) IssuePolicy(
+	_ context.Context,
+	_ *policyv1.IssuePolicyRequest,
+	_ ...grpc.CallOption,
+) (*policyv1.IssuePolicyResponse, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.calls++
+	return &policyv1.IssuePolicyResponse{PolicyNumber: "policy-1"}, client.err
+}
+
+func (client *fakeClient) TerminatePolicy(
+	_ context.Context,
+	_ *policyv1.TerminatePolicyRequest,
+	_ ...grpc.CallOption,
+) (*policyv1.TerminatePolicyResponse, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.calls++
+	return &policyv1.TerminatePolicyResponse{PolicyNumber: "policy-1"}, client.err
 }
 
 func (client *fakeClient) lastOfferRequest() *policyv1.CreateOfferRequest {

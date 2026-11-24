@@ -210,6 +210,10 @@ func (handler *Handler) serveCommand(writer http.ResponseWriter, request *http.R
 	if !ok {
 		return
 	}
+	if !isSingleJSONValue(body) {
+		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
+		return
+	}
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	handler.mux.ServeHTTP(writer, request)
 }
@@ -370,6 +374,15 @@ func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
 	return data, len(data) > maximum, err
+}
+
+func isSingleJSONValue(data []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var value json.RawMessage
+	if err := decoder.Decode(&value); err != nil {
+		return false
+	}
+	return errors.Is(decoder.Decode(&value), io.EOF)
 }
 
 func normalizeOfferJSON(data []byte) ([]byte, bool) {
