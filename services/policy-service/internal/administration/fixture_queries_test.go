@@ -4,12 +4,6 @@ package administration_test
 
 import _ "embed"
 
-//go:embed provisioning/provision-access.sql
-var provisionAccessQuery string
-
-//go:embed provisioning/inspect-access.sql
-var inspectAccessQuery string
-
 //go:embed testdata/sql/setup-unrelated-service.sql
 var setupUnrelatedServiceQuery string
 
@@ -33,21 +27,6 @@ var insertRuntimeOutboxIntentQuery string
 
 //go:embed testdata/sql/update-runtime-offer.sql
 var updateRuntimeOfferQuery string
-
-//go:embed testdata/sql/setup-target-identity.sql
-var setupTargetIdentityQuery string
-
-//go:embed testdata/sql/setup-java-fixture.sql
-var setupJavaFixtureQuery string
-
-//go:embed testdata/sql/read-business-facts.sql
-var readBusinessFactsQuery string
-
-//go:embed testdata/sql/read-row-fingerprints.sql
-var readRowFingerprintsQuery string
-
-//go:embed testdata/sql/insert-generated-aggregate.sql
-var insertGeneratedAggregateQuery string
 
 //go:embed testdata/sql/read-catalog-snapshot.sql
 var readCatalogSnapshotQuery string

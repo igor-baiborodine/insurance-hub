@@ -5,35 +5,38 @@ package administration_test
 import (
 	"context"
 	"errors"
-	"net/url"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/administration/provisioning"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
 )
 
 func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	fixture := newFixture(t, ctx)
-	fixture.exec(t, ctx, setupUnrelatedServiceQuery)
-	fixture.exec(t, ctx, closeUnrelatedServiceQuery)
-	if !fixture.accessMatches(t, ctx) {
+	fixture := postgresfixture.New(t, ctx)
+	fixture.Exec(t, ctx, setupUnrelatedServiceQuery)
+	fixture.Exec(t, ctx, closeUnrelatedServiceQuery)
+	if !accessMatches(t, ctx, fixture) {
 		t.Fatal("provisioned access before migration differs from the contract")
 	}
-	fixture.call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=1")
 
 	// when
-	runtime := fixture.runtimeConnection(t, ctx, "policy")
+	runtime := runtimeConnection(t, ctx, fixture.RuntimeURL("policy"))
 
 	// then
-	if !fixture.accessMatches(t, ctx) {
+	if !accessMatches(t, ctx, fixture) {
 		t.Fatal("migrated access differs from the contract")
 	}
 	var ids string
-	if err := runtime.QueryRow(ctx, insertGeneratedAggregateQuery).Scan(&ids); err != nil ||
+	if err := runtime.QueryRow(ctx, postgresfixture.InsertGeneratedAggregate).
+		Scan(&ids); err != nil ||
 		ids != "1,1,1,1:t" {
 		t.Fatalf("runtime aggregate insert: got %q (%v)", ids, err)
 	}
@@ -69,7 +72,7 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	}
 	t.Run("denies another service database", func(t *testing.T) {
 		// when
-		connection, err := fixture.connectRuntime(ctx, "pricing")
+		connection, err := pgx.Connect(ctx, fixture.RuntimeURL("pricing"))
 
 		// then
 		if connection != nil {
@@ -79,43 +82,40 @@ func TestRun_PolicyRuntimeAccess(t *testing.T) {
 	})
 	t.Run("verification rejects extra privilege", func(t *testing.T) {
 		// given
-		t.Cleanup(func() { fixture.exec(t, ctx, revokeRuntimeDeleteQuery) })
-		fixture.exec(t, ctx, grantRuntimeDeleteQuery)
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeRuntimeDeleteQuery) })
+		fixture.Exec(t, ctx, grantRuntimeDeleteQuery)
 
 		// when / then
-		if fixture.accessMatches(t, ctx) {
+		if accessMatches(t, ctx, fixture) {
 			t.Fatal("runtime DELETE grant passed access verification")
 		}
 	})
 	t.Run("verification rejects runtime owner membership", func(t *testing.T) {
 		// given
-		t.Cleanup(func() { fixture.exec(t, ctx, revokeRuntimeOwnerQuery) })
-		fixture.exec(t, ctx, grantRuntimeOwnerQuery)
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeRuntimeOwnerQuery) })
+		fixture.Exec(t, ctx, grantRuntimeOwnerQuery)
 
 		// when / then
-		if fixture.accessMatches(t, ctx) {
+		if accessMatches(t, ctx, fixture) {
 			t.Fatal("runtime owner membership passed access verification")
 		}
 	})
 }
 
-func (f *migrationFixture) accessMatches(t *testing.T, ctx context.Context) bool {
+func accessMatches(t *testing.T, ctx context.Context, fixture *postgresfixture.Fixture) bool {
 	t.Helper()
 	var matches bool
-	if err := f.admin.QueryRow(ctx, inspectAccessQuery).Scan(&matches); err != nil {
+	if err := fixture.Admin.QueryRow(ctx, provisioning.InspectAccess).
+		Scan(&matches); err != nil {
 		t.Fatal(err)
 	}
 	return matches
 }
 
 // runtimeConnection logs in as the runtime role over verified TLS, as the workload does.
-func (f *migrationFixture) runtimeConnection(
-	t *testing.T,
-	ctx context.Context,
-	database string,
-) *pgx.Conn {
+func runtimeConnection(t *testing.T, ctx context.Context, databaseURL string) *pgx.Conn {
 	t.Helper()
-	connection, err := f.connectRuntime(ctx, database)
+	connection, err := pgx.Connect(ctx, databaseURL)
 	if err != nil {
 		t.Fatal("connect as Policy runtime:", err)
 	}
@@ -125,14 +125,6 @@ func (f *migrationFixture) runtimeConnection(
 		_ = connection.Close(ctx)
 	})
 	return connection
-}
-
-func (f *migrationFixture) connectRuntime(ctx context.Context, database string) (*pgx.Conn, error) {
-	runtimeURL := *f.address
-	runtimeURL.Path = "/" + database
-	runtimeURL.User = url.UserPassword("go_policy_runtime", f.runtimePassword)
-	runtimeURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {f.ca}}.Encode()
-	return pgx.Connect(ctx, runtimeURL.String())
 }
 
 func requirePermissionDenied(t *testing.T, err error) {

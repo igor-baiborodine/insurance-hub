@@ -25,6 +25,7 @@ PROTOC_GEN_GRPC_GATEWAY := $(TOOLS_BIN)/protoc-gen-grpc-gateway
 PROTOC_GEN_OPENAPIV2 := $(TOOLS_BIN)/protoc-gen-openapiv2
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
+SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 
 PROTO_SCHEMA := api/policy/v1/example_service.proto
@@ -56,9 +57,15 @@ GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260819154853-08b0e4226688
 PGX_VERSION := v5.11.0
 GOOSE_VERSION := v3.27.0
 TESTCONTAINERS_VERSION := v0.44.0
+SQLC_VERSION := v1.31.1
+SQL_SCHEMA := internal/postgres/sql/schema.sql
+SQL_QUERIES := internal/postgres/sql/queries.sql
+GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
+	internal/postgres/dbgen/queries.sql.go
 BUILD_EXECUTABLES := server migrate
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
+COVERAGE_EXCLUDE_PATHS := internal/postgres/dbgen internal/testing
 INTEGRATION_COVERAGE_FILE ?=
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
@@ -76,10 +83,12 @@ GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
-	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION)
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION) \
+	github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := \
 	protoc-gen-grpc-gateway|$(PROTOC_GEN_GRPC_GATEWAY)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
-	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version
+	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
+	sqlc|$(SQLC)|$(SQLC_VERSION)|version
 PROTO_GENERATION_TOOLS := \
 	buf protoc-gen-go protoc-gen-go-grpc protoc-gen-grpc-gateway protoc-gen-openapiv2
 GENERATED_PROTO_PATTERN := gen/*
@@ -171,7 +180,7 @@ update-deps:
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto coverage-check test-integration build \
-	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
+	check-deps check-proto-drift check-sql-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
@@ -195,13 +204,13 @@ check: check-go-pr
 # Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration/access smoke tests (Docker required)
+test-integration: ## Run the service composition and disposable PostgreSQL migration, access and storage smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyRuntimeAccess)$$' \
-		./internal/service ./internal/administration \
+		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyRuntimeAccess|PolicyStorageOnAdoptedData)$$' \
+		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:
@@ -285,11 +294,31 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make build            Compile the server and migrator' \
 		'  make test-integration Run service composition and disposable PostgreSQL migration smoke tests' \
 		'  make migration        Run migrate/status with explicit protected inputs' \
+		'  make gen-sql          Regenerate sqlc queries; check-sql-drift verifies them' \
 		'  make resource-inspect Inspect Policy PostgreSQL resources without mutation' \
 		'  make resource-ensure  Confirmed role, grant, enrollment and Secret setup' \
 		'  make resource-verify  Verify effective grants and SQL denials'
 
-.PHONY: migration
+.PHONY: migration gen-sql check-sql-drift
+
+gen-sql: ## Regenerate sqlc Policy queries with the pinned sqlc
+	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
+	rm -f $(GENERATED_SQL_FILES)
+	$(SQLC) generate
+
+check-sql-drift: verify-tools ## Verify sqlc output matches its schema and query inputs
+	@MODULE_ROOT="$(CURDIR)" \
+		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+		MAKE_COMMAND="$(MAKE)" \
+		TOOLS_BIN="$(TOOLS_BIN)" \
+		CHECK_NAME="check-sql-drift" \
+		GENERATION_TARGET="gen-sql" \
+		GENERATION_INPUTS="Makefile sqlc.yaml $(SQL_SCHEMA) $(SQL_QUERIES)" \
+		GENERATION_TOOLS="sqlc" \
+		GENERATED_ROOT="internal/postgres/dbgen" \
+		GENERATED_PATTERN="internal/postgres/dbgen/*.go" \
+		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
+		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
 # The migrator runs outside the serving image and never during server startup. All inputs are
 # explicit; credential and CA paths name private files, never values.
