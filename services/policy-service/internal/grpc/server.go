@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"buf.build/go/protovalidate"
@@ -28,16 +29,38 @@ const (
 	internalMessage    = "internal error"
 	invalidMessage     = "invalid request"
 	notFoundMessage    = "not found"
+	conflictMessage    = "conflict"
 	unavailableMessage = "service unavailable"
 )
 
 // operations names the observed RPCs; other methods are not instrumented.
 var operations = map[string]string{
-	policyv1.PolicyService_CreateOffer_FullMethodName: "create_offer",
+	policyv1.PolicyService_CreateOffer_FullMethodName:     "create_offer",
+	policyv1.PolicyService_IssuePolicy_FullMethodName:     "issue_policy",
+	policyv1.PolicyService_GetPolicy_FullMethodName:       "get_policy",
+	policyv1.PolicyService_TerminatePolicy_FullMethodName: "terminate_policy",
 }
 
 // CreateOffer is the offer use case invoked by the PolicyService transport.
 type CreateOffer func(context.Context, domain.OfferRequest) (domain.Offer, error)
+
+// IssuePolicy is the issuance use case; it returns the new policy number.
+type IssuePolicy func(context.Context, application.IssuePolicyCommand) (string, error)
+
+// GetPolicy is the lookup use case for a policy's latest version.
+type GetPolicy func(context.Context, string) (application.PolicyDetails, error)
+
+// TerminatePolicy is the termination use case; it returns the terminated policy number.
+type TerminatePolicy func(context.Context, string) (string, error)
+
+// Handlers are the use cases served by PolicyService. CreateOffer is required; a missing
+// lifecycle use case reports that policy storage is not configured.
+type Handlers struct {
+	CreateOffer     CreateOffer
+	IssuePolicy     IssuePolicy
+	GetPolicy       GetPolicy
+	TerminatePolicy TerminatePolicy
+}
 
 type Settings struct {
 	RequestTimeout  time.Duration
@@ -53,7 +76,7 @@ func NewServer(
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	createOffer CreateOffer,
+	handlers Handlers,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -64,7 +87,7 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if createOffer == nil {
+	if handlers.CreateOffer == nil {
 		return nil, errors.New("create gRPC server: offer handler is required")
 	}
 
@@ -76,7 +99,12 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&policyv1.CreateOfferRequest{}),
+		protovalidate.WithMessages(
+			&policyv1.CreateOfferRequest{},
+			&policyv1.IssuePolicyRequest{},
+			&policyv1.GetPolicyRequest{},
+			&policyv1.TerminatePolicyRequest{},
+		),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -106,10 +134,19 @@ func NewServer(
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
+	if handlers.IssuePolicy == nil {
+		handlers.IssuePolicy = application.UnavailableIssuance
+	}
+	if handlers.GetPolicy == nil {
+		handlers.GetPolicy = application.UnavailablePolicyDetails
+	}
+	if handlers.TerminatePolicy == nil {
+		handlers.TerminatePolicy = application.UnavailableTermination
+	}
 	policyv1.RegisterPolicyServiceServer(server, &policyServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
-		createOffer:    createOffer,
+		handlers:       handlers,
 	})
 	return server, nil
 }
@@ -118,7 +155,7 @@ type policyServer struct {
 	policyv1.UnimplementedPolicyServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
-	createOffer    CreateOffer
+	handlers       Handlers
 }
 
 func (server *policyServer) CreateOffer(
@@ -131,7 +168,7 @@ func (server *policyServer) CreateOffer(
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, invalidMessage)
 	}
-	offer, err := server.createOffer(requestCtx, mapped)
+	offer, err := server.handlers.CreateOffer(requestCtx, mapped)
 	if err != nil {
 		return nil, server.offerError(ctx, err)
 	}
@@ -140,6 +177,83 @@ func (server *policyServer) CreateOffer(
 		TotalPrice:   offer.TotalPrice,
 		CoversPrices: offer.CoverPrices,
 	}, nil
+}
+
+func (server *policyServer) IssuePolicy(
+	ctx context.Context,
+	request *policyv1.IssuePolicyRequest,
+) (*policyv1.IssuePolicyResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	holder := request.GetPolicyHolder()
+	number, err := server.handlers.IssuePolicy(requestCtx, application.IssuePolicyCommand{
+		OfferNumber: request.GetOfferNumber(),
+		Holder: domain.PolicyHolder{
+			FirstName: holder.GetFirstName(),
+			LastName:  holder.GetLastName(),
+			TaxID:     holder.GetTaxId(),
+		},
+		AgentLogin: request.GetAgentLogin(),
+	})
+	if err != nil {
+		return nil, server.lifecycleError(
+			ctx,
+			policyv1.PolicyService_IssuePolicy_FullMethodName,
+			err,
+		)
+	}
+	return &policyv1.IssuePolicyResponse{PolicyNumber: number}, nil
+}
+
+func (server *policyServer) GetPolicy(
+	ctx context.Context,
+	request *policyv1.GetPolicyRequest,
+) (*policyv1.GetPolicyResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	details, err := server.handlers.GetPolicy(requestCtx, request.GetPolicyNumber())
+	if err != nil {
+		return nil, server.lifecycleError(
+			ctx,
+			policyv1.PolicyService_GetPolicy_FullMethodName,
+			err,
+		)
+	}
+	return &policyv1.GetPolicyResponse{Policy: policyDetails(details)}, nil
+}
+
+func (server *policyServer) TerminatePolicy(
+	ctx context.Context,
+	request *policyv1.TerminatePolicyRequest,
+) (*policyv1.TerminatePolicyResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	number, err := server.handlers.TerminatePolicy(requestCtx, request.GetPolicyNumber())
+	if err != nil {
+		return nil, server.lifecycleError(ctx,
+			policyv1.PolicyService_TerminatePolicy_FullMethodName, err)
+	}
+	return &policyv1.TerminatePolicyResponse{PolicyNumber: number}, nil
+}
+
+// policyDetails maps the latest version; covers are "code - price" texts in sorted order.
+func policyDetails(details application.PolicyDetails) *policyv1.PolicyDetails {
+	version := details.Latest
+	covers := make([]string, 0, len(version.Covers))
+	for _, cover := range version.Covers {
+		covers = append(covers, cover.Code+" - "+cover.Price)
+	}
+	slices.Sort(covers)
+	return &policyv1.PolicyDetails{
+		Number:        details.Number,
+		DateFrom:      version.VersionFrom.Format(time.DateOnly),
+		DateTo:        version.VersionTo.Format(time.DateOnly),
+		PolicyHolder:  version.Holder.FullName(),
+		TotalPremium:  version.TotalPremium,
+		ProductCode:   version.ProductCode,
+		AccountNumber: version.AccountNumber,
+		Covers:        covers,
+	}
 }
 
 // offerRequest maps the validated wire request; dates must be real calendar dates.
@@ -182,6 +296,29 @@ func calendarDate(value string) (time.Time, error) {
 		return time.Time{}, errors.New("invalid calendar date")
 	}
 	return date, nil
+}
+
+// lifecycleError maps policy use-case failures to safe statuses; only unexpected defects are
+// logged.
+func (server *policyServer) lifecycleError(ctx context.Context, rpc string, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+	case errors.Is(err, application.ErrOfferNotFound),
+		errors.Is(err, application.ErrPolicyNotFound):
+		return status.Error(codes.NotFound, notFoundMessage)
+	case errors.Is(err, domain.ErrOfferExpired),
+		errors.Is(err, domain.ErrTerminationOutsideCoverage):
+		return status.Error(codes.FailedPrecondition, conflictMessage)
+	case errors.Is(err, application.ErrStorageUnavailable),
+		errors.Is(err, application.ErrPoliciesUnavailable):
+		return status.Error(codes.Unavailable, unavailableMessage)
+	default:
+		server.logger.ErrorContext(ctx, "policy request failed", slog.String("rpc", rpc))
+		return status.Error(codes.Internal, internalMessage)
+	}
 }
 
 // offerError maps use-case failures to safe statuses; only unexpected defects are logged.

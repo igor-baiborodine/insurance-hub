@@ -30,8 +30,14 @@ import (
 )
 
 const (
-	offersPath = "/offers"
-	offerRoute = "POST " + offersPath
+	offersPath     = "/offers"
+	offerRoute     = "POST " + offersPath
+	policiesPath   = "/policies"
+	issueRoute     = "POST " + policiesPath
+	terminatePath  = policiesPath + "/terminate"
+	terminateRoute = "POST " + terminatePath
+	policyPath     = policiesPath + "/{policyNumber}"
+	policyRoute    = "GET " + policyPath
 	// maxNumericAnswer bounds a numeric answer's plain-decimal text to its stored length.
 	maxNumericAnswer = 255
 )
@@ -69,6 +75,12 @@ func NewHandler(client policyv1.PolicyServiceClient, settings Settings) (http.Ha
 	}
 	handler := &Handler{mux: mux, settings: settings}
 	handler.offers = handler.instrument(offerRoute, http.HandlerFunc(handler.serveCreateOffer))
+	handler.issue = handler.instrument(issueRoute, http.HandlerFunc(handler.serveCommand))
+	handler.terminate = handler.instrument(
+		terminateRoute,
+		http.HandlerFunc(handler.serveCommand),
+	)
+	handler.lookup = handler.instrument(policyRoute, http.HandlerFunc(handler.serveLookup))
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -107,18 +119,26 @@ type Handler struct {
 	mux       http.Handler
 	settings  Settings
 	offers    http.Handler
+	issue     http.Handler
+	terminate http.Handler
+	lookup    http.Handler
 	unmatched http.Handler
 }
 
 type requestFacts struct {
-	originalPath string
-	hadQuery     bool
+	originalPath    string
+	originalRawPath string
+	hadQuery        bool
 }
 
 type factsKey struct{}
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	facts := requestFacts{originalPath: request.URL.Path, hadQuery: request.URL.RawQuery != ""}
+	facts := requestFacts{
+		originalPath:    request.URL.Path,
+		originalRawPath: request.URL.RawPath,
+		hadQuery:        request.URL.RawQuery != "",
+	}
 	request = sanitizeRequest(
 		request.WithContext(context.WithValue(request.Context(), factsKey{}, facts)),
 	)
@@ -128,12 +148,34 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == offersPath && request.Method == http.MethodPost {
+	path, post := facts.originalPath, request.Method == http.MethodPost
+	switch {
+	case path == offersPath && post:
 		handler.offers.ServeHTTP(writer, request)
-		return
+	case path == policiesPath && post:
+		handler.issue.ServeHTTP(writer, request)
+	case path == terminatePath && post:
+		handler.terminate.ServeHTTP(writer, request)
+	case isPolicyPath(path) && request.Method == http.MethodGet:
+		request.URL.Path = policyPath
+		request.URL.RawPath = ""
+		handler.lookup.ServeHTTP(writer, request)
+	default:
+		request.URL.Path = "/unmatched"
+		handler.unmatched.ServeHTTP(writer, request)
 	}
-	request.URL.Path = "/unmatched"
-	handler.unmatched.ServeHTTP(writer, request)
+}
+
+// isPolicyPath matches /policies/{policyNumber} with one non-empty path segment.
+func isPolicyPath(path string) bool {
+	number, found := strings.CutPrefix(path, policiesPath+"/")
+	return found && number != "" && !strings.Contains(number, "/")
+}
+
+// knownPath reports whether some route serves the path, so another method is not allowed.
+func knownPath(path string) bool {
+	return path == offersPath || path == policiesPath || path == terminatePath ||
+		isPolicyPath(path)
 }
 
 func (handler *Handler) instrument(route string, next http.Handler) http.Handler {
@@ -156,40 +198,8 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 // serveCreateOffer applies the media, size and query rules before the generated route decodes
 // the normalized RPC body.
 func (handler *Handler) serveCreateOffer(writer http.ResponseWriter, request *http.Request) {
-	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
-		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
-		return
-	}
-	if !acceptsJSON(request.Header.Get("Accept")) {
-		writeError(
-			writer,
-			http.StatusNotAcceptable,
-			codes.InvalidArgument,
-			"not acceptable",
-		)
-		return
-	}
-	if !isJSON(request.Header.Get("Content-Type")) {
-		writeError(
-			writer,
-			http.StatusUnsupportedMediaType,
-			codes.InvalidArgument,
-			"unsupported media type",
-		)
-		return
-	}
-	body, tooLarge, err := readBounded(request.Body, handler.settings.MaxBodyBytes)
-	if err != nil {
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
-		return
-	}
-	if tooLarge {
-		writeError(
-			writer,
-			http.StatusRequestEntityTooLarge,
-			codes.ResourceExhausted,
-			"request body too large",
-		)
+	body, ok := handler.readJSONBody(writer, request)
+	if !ok {
 		return
 	}
 	normalized, ok := normalizeOfferJSON(body)
@@ -201,9 +211,89 @@ func (handler *Handler) serveCreateOffer(writer http.ResponseWriter, request *ht
 	handler.mux.ServeHTTP(writer, request)
 }
 
+// serveCommand applies the media, size and query rules; the generated route decodes the body as
+// strict protobuf JSON, rejecting unknown and duplicate members.
+func (handler *Handler) serveCommand(writer http.ResponseWriter, request *http.Request) {
+	body, ok := handler.readJSONBody(writer, request)
+	if !ok {
+		return
+	}
+	if !isSingleJSONValue(body) {
+		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
+		return
+	}
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	handler.mux.ServeHTTP(writer, request)
+}
+
+// serveLookup applies the query and response media rules before the generated route reads the
+// policy number from the path.
+func (handler *Handler) serveLookup(writer http.ResponseWriter, request *http.Request) {
+	if !acceptedRequest(writer, request) {
+		return
+	}
+	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
+	request = request.Clone(request.Context())
+	request.URL.Path = facts.originalPath
+	request.URL.RawPath = facts.originalRawPath
+	handler.mux.ServeHTTP(writer, request)
+}
+
+// acceptedRequest rejects a query string or a response media type other than JSON.
+func acceptedRequest(writer http.ResponseWriter, request *http.Request) bool {
+	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
+		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
+		return false
+	}
+	if !acceptsJSON(request.Header.Get("Accept")) {
+		writeError(
+			writer,
+			http.StatusNotAcceptable,
+			codes.InvalidArgument,
+			"not acceptable",
+		)
+		return false
+	}
+	return true
+}
+
+// readJSONBody applies the query, media and size rules and returns the bounded JSON body.
+func (handler *Handler) readJSONBody(
+	writer http.ResponseWriter,
+	request *http.Request,
+) ([]byte, bool) {
+	if !acceptedRequest(writer, request) {
+		return nil, false
+	}
+	if !isJSON(request.Header.Get("Content-Type")) {
+		writeError(
+			writer,
+			http.StatusUnsupportedMediaType,
+			codes.InvalidArgument,
+			"unsupported media type",
+		)
+		return nil, false
+	}
+	body, tooLarge, err := readBounded(request.Body, handler.settings.MaxBodyBytes)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
+		return nil, false
+	}
+	if tooLarge {
+		writeError(
+			writer,
+			http.StatusRequestEntityTooLarge,
+			codes.ResourceExhausted,
+			"request body too large",
+		)
+		return nil, false
+	}
+	return body, true
+}
+
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == offersPath {
+	if knownPath(facts.originalPath) {
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -266,6 +356,8 @@ func safeGatewayError(
 		writeError(writer, http.StatusBadRequest, code, "invalid request")
 	case codes.NotFound:
 		writeError(writer, http.StatusNotFound, code, "not found")
+	case codes.FailedPrecondition:
+		writeError(writer, http.StatusConflict, code, "conflict")
 	case codes.Canceled:
 		writeError(writer, 499, code, "request canceled")
 	case codes.DeadlineExceeded:
@@ -294,6 +386,15 @@ func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
 	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
 	return data, len(data) > maximum, err
+}
+
+func isSingleJSONValue(data []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var value json.RawMessage
+	if err := decoder.Decode(&value); err != nil {
+		return false
+	}
+	return errors.Is(decoder.Decode(&value), io.EOF)
 }
 
 func normalizeOfferJSON(data []byte) ([]byte, bool) {
@@ -491,12 +592,72 @@ func newPolicyMarshaler() *policyMarshaler {
 	}}
 }
 
-// Marshal writes offer amounts as JSON numbers from their exact decimal text.
+// Marshal writes amounts as JSON numbers from their exact decimal text and policy dates as
+// [year, month, day] arrays.
 func (marshaler *policyMarshaler) Marshal(value any) ([]byte, error) {
-	response, ok := value.(*policyv1.CreateOfferResponse)
-	if !ok {
+	switch response := value.(type) {
+	case *policyv1.CreateOfferResponse:
+		return marshalOffer(response)
+	case *policyv1.IssuePolicyResponse:
+		return json.Marshal(policyNumberBody{PolicyNumber: response.GetPolicyNumber()})
+	case *policyv1.TerminatePolicyResponse:
+		return json.Marshal(policyNumberBody{PolicyNumber: response.GetPolicyNumber()})
+	case *policyv1.GetPolicyResponse:
+		return marshalPolicyDetails(response.GetPolicy())
+	default:
 		return marshaler.JSONPb.Marshal(value)
 	}
+}
+
+type policyNumberBody struct {
+	PolicyNumber string `json:"policyNumber"`
+}
+
+// policyDetailsBody is the lookup response; JSON member order follows the published contract.
+type policyDetailsBody struct {
+	Policy struct {
+		Number        string          `json:"number"`
+		DateFrom      [3]int          `json:"dateFrom"`
+		DateTo        [3]int          `json:"dateTo"`
+		PolicyHolder  string          `json:"policyHolder"`
+		TotalPremium  json.RawMessage `json:"totalPremium"`
+		ProductCode   string          `json:"productCode"`
+		AccountNumber string          `json:"accountNumber"`
+		Covers        []string        `json:"covers"`
+	} `json:"policy"`
+}
+
+func marshalPolicyDetails(details *policyv1.PolicyDetails) ([]byte, error) {
+	var body policyDetailsBody
+	var valid bool
+	if body.Policy.TotalPremium, valid = exactJSONNumber(details.GetTotalPremium()); !valid {
+		return nil, errors.New("marshal policy: invalid premium")
+	}
+	var err error
+	if body.Policy.DateFrom, err = dateArray(details.GetDateFrom()); err != nil {
+		return nil, err
+	}
+	if body.Policy.DateTo, err = dateArray(details.GetDateTo()); err != nil {
+		return nil, err
+	}
+	body.Policy.Number = details.GetNumber()
+	body.Policy.PolicyHolder = details.GetPolicyHolder()
+	body.Policy.ProductCode = details.GetProductCode()
+	body.Policy.AccountNumber = details.GetAccountNumber()
+	body.Policy.Covers = append([]string{}, details.GetCovers()...)
+	return json.Marshal(body)
+}
+
+// dateArray converts RPC date text to the [year, month, day] array of the HTTP contract.
+func dateArray(text string) ([3]int, error) {
+	date, err := time.Parse(time.DateOnly, text)
+	if err != nil {
+		return [3]int{}, errors.New("marshal policy: invalid date")
+	}
+	return [3]int{date.Year(), int(date.Month()), date.Day()}, nil
+}
+
+func marshalOffer(response *policyv1.CreateOfferResponse) ([]byte, error) {
 	mapped := struct {
 		OfferNumber  string                     `json:"offerNumber"`
 		TotalPrice   json.RawMessage            `json:"totalPrice"`

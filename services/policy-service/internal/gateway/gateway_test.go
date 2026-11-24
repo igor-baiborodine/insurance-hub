@@ -444,6 +444,53 @@ func TestHandler_CreateOffer_RejectsMalformedLegacyRequests(t *testing.T) {
 	}
 }
 
+func TestHandler_Command_RejectsMultipleJSONValues(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{
+			"issue",
+			"/policies",
+			`{"offerNumber":"offer-1","policyHolder":{}} {}`,
+		},
+		{
+			"terminate",
+			"/policies/terminate",
+			`{"policyNumber":"policy-1"} {}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			client := &fakeClient{}
+			handler := newTestHandler(t, client, 4096)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				test.path,
+				strings.NewReader(test.body),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			// when
+			handler.ServeHTTP(recorder, request)
+
+			// then
+			if recorder.Code != http.StatusBadRequest ||
+				recorder.Body.String() != errorBody(3, "invalid request") ||
+				client.callCount() != 0 {
+				t.Errorf(
+					"response = (%d, %q), calls %d",
+					recorder.Code,
+					recorder.Body.String(),
+					client.callCount(),
+				)
+			}
+		})
+	}
+}
+
 func TestHandler_CreateOffer_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
 	// given
 	privateMarker := "private-upstream-marker"
@@ -686,6 +733,8 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	)
 	malformed.Header.Set("Content-Type", "application/json")
 	handler.ServeHTTP(httptest.NewRecorder(), malformed)
+	lookup := httptest.NewRequest(http.MethodGet, "/policies/"+marker, nil)
+	handler.ServeHTTP(httptest.NewRecorder(), lookup)
 
 	// then
 	var metrics metricdata.ResourceMetrics
@@ -700,6 +749,7 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
 	}
 	if !strings.Contains(combined, "POST /offers") ||
+		!strings.Contains(combined, "GET /policies/{policyNumber}") ||
 		!strings.Contains(combined, "unmatched") ||
 		!strings.Contains(combined, "insurance_hub.service.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
@@ -799,6 +849,8 @@ func newTestHandlerWithSettings(
 }
 
 type fakeClient struct {
+	// PolicyServiceClient leaves the RPCs this gateway does not route unimplemented.
+	policyv1.PolicyServiceClient
 	mu               sync.Mutex
 	calls            int
 	metadata         metadata.MD
@@ -853,6 +905,48 @@ func (client *fakeClient) CreateOffer(
 		}, nil
 	}
 	return client.offer, nil
+}
+
+func (client *fakeClient) IssuePolicy(
+	_ context.Context,
+	_ *policyv1.IssuePolicyRequest,
+	_ ...grpc.CallOption,
+) (*policyv1.IssuePolicyResponse, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.calls++
+	return &policyv1.IssuePolicyResponse{PolicyNumber: "policy-1"}, client.err
+}
+
+func (client *fakeClient) TerminatePolicy(
+	_ context.Context,
+	_ *policyv1.TerminatePolicyRequest,
+	_ ...grpc.CallOption,
+) (*policyv1.TerminatePolicyResponse, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.calls++
+	return &policyv1.TerminatePolicyResponse{PolicyNumber: "policy-1"}, client.err
+}
+
+func (client *fakeClient) GetPolicy(
+	_ context.Context,
+	_ *policyv1.GetPolicyRequest,
+	_ ...grpc.CallOption,
+) (*policyv1.GetPolicyResponse, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	client.calls++
+	return &policyv1.GetPolicyResponse{Policy: &policyv1.PolicyDetails{
+		Number:        "policy-1",
+		DateFrom:      "2026-01-01",
+		DateTo:        "2026-12-31",
+		PolicyHolder:  "Synthetic Holder",
+		TotalPremium:  "1.00",
+		ProductCode:   "TRI",
+		AccountNumber: "account-1",
+		Covers:        []string{"C1 - 1.00"},
+	}}, client.err
 }
 
 func (client *fakeClient) lastOfferRequest() *policyv1.CreateOfferRequest {

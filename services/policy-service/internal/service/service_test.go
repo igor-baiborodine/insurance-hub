@@ -969,6 +969,7 @@ func testConfig(t *testing.T) config.Config {
 		HealthAddress:      parse(kitconfig.EnvHealthAddress),
 		HTTPMaxHeaderBytes: 1024,
 		HTTPMaxBodyBytes:   4096,
+		BusinessTimeZone:   time.UTC,
 	}
 }
 

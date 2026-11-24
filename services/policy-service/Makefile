@@ -220,12 +220,12 @@ check: check-go-pr
 # Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration, access and storage smoke tests (Docker required)
+test-integration: ## Run the service composition and disposable PostgreSQL migration, access, storage and termination smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyWriterReadiness)$$' \
+		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyTerminationAppendsHistory|PolicyWriterReadiness)$$' \
 		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 

@@ -7,7 +7,7 @@
   "tags": [
     {
       "name": "PolicyService",
-      "description": "PolicyService exposes the private offer boundary."
+      "description": "PolicyService exposes the private offer and policy lifecycle boundary."
     }
   ],
   "consumes": [
@@ -176,6 +176,488 @@
           "application/json"
         ]
       }
+    },
+    "/policies": {
+      "post": {
+        "summary": "IssuePolicy issues a policy from a stored, unexpired offer at its saved price.",
+        "operationId": "PolicyService_IssuePolicy",
+        "responses": {
+          "200": {
+            "description": "The issued policy number.",
+            "schema": {
+              "$ref": "#/definitions/v1IssuePolicyResponse"
+            },
+            "examples": {
+              "application/json": {
+                "policyNumber": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66"
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "404": {
+            "description": "The offer does not exist.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 5,
+                "message": "not found",
+                "details": []
+              }
+            }
+          },
+          "406": {
+            "description": "The requested response media type is not available.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "not acceptable",
+                "details": []
+              }
+            }
+          },
+          "409": {
+            "description": "The offer has expired.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 9,
+                "message": "conflict",
+                "details": []
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is too large.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 8,
+                "message": "request body too large",
+                "details": []
+              }
+            }
+          },
+          "415": {
+            "description": "The request media type is not supported.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "unsupported media type",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "Policy storage is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "A deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1IssuePolicyRequest"
+            }
+          }
+        ],
+        "tags": [
+          "PolicyService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    },
+    "/policies/terminate": {
+      "post": {
+        "summary": "TerminatePolicy ends a policy's coverage on the business date with a terminal version.",
+        "operationId": "PolicyService_TerminatePolicy",
+        "responses": {
+          "200": {
+            "description": "The terminated policy number.",
+            "schema": {
+              "$ref": "#/definitions/v1TerminatePolicyResponse"
+            },
+            "examples": {
+              "application/json": {
+                "policyNumber": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66"
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "404": {
+            "description": "The policy does not exist.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 5,
+                "message": "not found",
+                "details": []
+              }
+            }
+          },
+          "406": {
+            "description": "The requested response media type is not available.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "not acceptable",
+                "details": []
+              }
+            }
+          },
+          "409": {
+            "description": "The termination date is outside the policy coverage.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 9,
+                "message": "conflict",
+                "details": []
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is too large.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 8,
+                "message": "request body too large",
+                "details": []
+              }
+            }
+          },
+          "415": {
+            "description": "The request media type is not supported.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "unsupported media type",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "Policy storage is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "A deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1TerminatePolicyRequest"
+            }
+          }
+        ],
+        "tags": [
+          "PolicyService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    },
+    "/policies/{policyNumber}": {
+      "get": {
+        "summary": "GetPolicy returns the details of a policy's latest version.",
+        "operationId": "PolicyService_GetPolicy",
+        "responses": {
+          "200": {
+            "description": "The latest version of the policy, with date arrays and a numeric premium.",
+            "schema": {
+              "$ref": "#/definitions/v1GetPolicyHTTPResponse"
+            },
+            "examples": {
+              "application/json": {
+                "policy": {
+                  "number": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66",
+                  "dateFrom": [
+                    2026,
+                    7,
+                    1
+                  ],
+                  "dateTo": [
+                    2026,
+                    12,
+                    31
+                  ],
+                  "policyHolder": "Synthetic Holder",
+                  "totalPremium": 59.51,
+                  "productCode": "HSI",
+                  "accountNumber": "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c22",
+                  "covers": [
+                    "C1 - 59.51"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The policy number is malformed.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "404": {
+            "description": "The policy does not exist.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 5,
+                "message": "not found",
+                "details": []
+              }
+            }
+          },
+          "406": {
+            "description": "The requested response media type is not available.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "not acceptable",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "Policy storage is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "A deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "policyNumber",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "PolicyService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
     }
   },
   "definitions": {
@@ -275,6 +757,46 @@
         }
       }
     },
+    "v1GetPolicyHTTPResponse": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "$ref": "#/definitions/v1PolicyDetailsHTTP"
+        }
+      },
+      "description": "GetPolicyHTTPResponse is documentation-only: the HTTP lookup response."
+    },
+    "v1GetPolicyResponse": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "$ref": "#/definitions/v1PolicyDetails"
+        }
+      }
+    },
+    "v1IssuePolicyRequest": {
+      "type": "object",
+      "properties": {
+        "offerNumber": {
+          "type": "string"
+        },
+        "policyHolder": {
+          "$ref": "#/definitions/v1PolicyHolder"
+        },
+        "agentLogin": {
+          "type": "string",
+          "description": "The authenticated agent; an empty login issues a policy without an agent."
+        }
+      }
+    },
+    "v1IssuePolicyResponse": {
+      "type": "object",
+      "properties": {
+        "policyNumber": {
+          "type": "string"
+        }
+      }
+    },
     "v1OfferHTTPAnswer": {
       "type": "object",
       "properties": {
@@ -290,6 +812,112 @@
         }
       },
       "description": "OfferHTTPAnswer is documentation-only: one typed questionnaire answer in the HTTP body."
+    },
+    "v1PolicyDetails": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string"
+        },
+        "dateFrom": {
+          "type": "string"
+        },
+        "dateTo": {
+          "type": "string"
+        },
+        "policyHolder": {
+          "type": "string"
+        },
+        "totalPremium": {
+          "type": "string"
+        },
+        "productCode": {
+          "type": "string"
+        },
+        "accountNumber": {
+          "type": "string"
+        },
+        "covers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "PolicyDetails describes a policy's latest version. Dates are \"YYYY-MM-DD\" text and the\npremium is an exact decimal string; each cover is formatted as \"code - price\"."
+    },
+    "v1PolicyDetailsHTTP": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "string"
+        },
+        "dateFrom": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "dateTo": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "policyHolder": {
+          "type": "string"
+        },
+        "totalPremium": {
+          "type": "number",
+          "format": "double"
+        },
+        "productCode": {
+          "type": "string"
+        },
+        "accountNumber": {
+          "type": "string"
+        },
+        "covers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "PolicyDetailsHTTP is documentation-only: dates are [year, month, day] integer arrays and the\npremium is a JSON number with the stored scale."
+    },
+    "v1PolicyHolder": {
+      "type": "object",
+      "properties": {
+        "firstName": {
+          "type": "string"
+        },
+        "lastName": {
+          "type": "string"
+        },
+        "taxId": {
+          "type": "string"
+        }
+      },
+      "description": "PolicyHolder is the insured person named on the policy."
+    },
+    "v1TerminatePolicyRequest": {
+      "type": "object",
+      "properties": {
+        "policyNumber": {
+          "type": "string"
+        }
+      }
+    },
+    "v1TerminatePolicyResponse": {
+      "type": "object",
+      "properties": {
+        "policyNumber": {
+          "type": "string"
+        }
+      }
     }
   }
 }

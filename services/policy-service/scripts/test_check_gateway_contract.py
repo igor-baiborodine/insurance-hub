@@ -68,6 +68,18 @@ def drop_not_found_response(swagger: dict[str, Any]) -> None:
     del swagger["paths"]["/offers"]["post"]["responses"]["404"]
 
 
+def rename_policy_path_parameter(swagger: dict[str, Any]) -> None:
+    swagger["paths"]["/policies/{policyNumber}"]["get"]["parameters"][0]["name"] = "number"
+
+
+def drop_termination_conflict(swagger: dict[str, Any]) -> None:
+    del swagger["paths"]["/policies/terminate"]["post"]["responses"]["409"]
+
+
+def type_premium_as_string(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1PolicyDetailsHTTP"]["properties"]["totalPremium"] = {"type": "string"}
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -80,6 +92,9 @@ def drop_not_found_response(swagger: dict[str, Any]) -> None:
         (drop_answer_type, "v1OfferHTTPAnswer properties differ"),
         (type_date_as_string, "v1CreateOfferHTTPRequest.policyFrom differs"),
         (drop_not_found_response, "/offers response status set differs"),
+        (rename_policy_path_parameter, "/policies/{policyNumber} path parameters differ"),
+        (drop_termination_conflict, "/policies/terminate response status set differs"),
+        (type_premium_as_string, "v1PolicyDetailsHTTP.totalPremium differs"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

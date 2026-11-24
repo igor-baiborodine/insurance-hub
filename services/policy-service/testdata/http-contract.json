@@ -111,6 +111,258 @@
           "details": []
         }
       }
+    },
+    {
+      "path": "/policies",
+      "method": "post",
+      "operation_id": "PolicyService_IssuePolicy",
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "request_schema": "#/definitions/v1IssuePolicyRequest",
+      "success_schema": "#/definitions/v1IssuePolicyResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": [
+          "offerNumber",
+          "policyHolder",
+          "agentLogin"
+        ],
+        "unknown_fields": "reject",
+        "duplicate_fields": "reject",
+        "non_empty_query": "reject",
+        "accepted_content_types": [
+          "application/json",
+          "application/json; charset=utf-8"
+        ],
+        "accepted_response_types": [
+          "application/json",
+          "*/*"
+        ]
+      },
+      "responses": {
+        "200": {
+          "policyNumber": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66"
+        },
+        "400": {
+          "code": 3,
+          "message": "invalid request",
+          "details": []
+        },
+        "404": {
+          "code": 5,
+          "message": "not found",
+          "details": []
+        },
+        "406": {
+          "code": 3,
+          "message": "not acceptable",
+          "details": []
+        },
+        "409": {
+          "code": 9,
+          "message": "conflict",
+          "details": []
+        },
+        "413": {
+          "code": 8,
+          "message": "request body too large",
+          "details": []
+        },
+        "415": {
+          "code": 3,
+          "message": "unsupported media type",
+          "details": []
+        },
+        "499": {
+          "code": 1,
+          "message": "request canceled",
+          "details": []
+        },
+        "500": {
+          "code": 13,
+          "message": "internal error",
+          "details": []
+        },
+        "503": {
+          "code": 14,
+          "message": "service unavailable",
+          "details": []
+        },
+        "504": {
+          "code": 4,
+          "message": "deadline exceeded",
+          "details": []
+        }
+      }
+    },
+    {
+      "path": "/policies/{policyNumber}",
+      "method": "get",
+      "operation_id": "PolicyService_GetPolicy",
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "path_parameters": [
+        "policyNumber"
+      ],
+      "success_schema": "#/definitions/v1GetPolicyHTTPResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "response_contract": {
+        "date_representation": "[year, month, day] integer array",
+        "premium_representation": "number with the stored scale",
+        "covers": "\"code - price\" strings"
+      },
+      "responses": {
+        "200": {
+          "policy": {
+            "number": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66",
+            "dateFrom": [
+              2026,
+              7,
+              1
+            ],
+            "dateTo": [
+              2026,
+              12,
+              31
+            ],
+            "policyHolder": "Synthetic Holder",
+            "totalPremium": 59.51,
+            "productCode": "HSI",
+            "accountNumber": "8a7b6c5d-4e3f-4a1b-9c8d-7e6f5a4b3c22",
+            "covers": [
+              "C1 - 59.51"
+            ]
+          }
+        },
+        "400": {
+          "code": 3,
+          "message": "invalid request",
+          "details": []
+        },
+        "404": {
+          "code": 5,
+          "message": "not found",
+          "details": []
+        },
+        "406": {
+          "code": 3,
+          "message": "not acceptable",
+          "details": []
+        },
+        "499": {
+          "code": 1,
+          "message": "request canceled",
+          "details": []
+        },
+        "500": {
+          "code": 13,
+          "message": "internal error",
+          "details": []
+        },
+        "503": {
+          "code": 14,
+          "message": "service unavailable",
+          "details": []
+        },
+        "504": {
+          "code": 4,
+          "message": "deadline exceeded",
+          "details": []
+        }
+      }
+    },
+    {
+      "path": "/policies/terminate",
+      "method": "post",
+      "operation_id": "PolicyService_TerminatePolicy",
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "request_schema": "#/definitions/v1TerminatePolicyRequest",
+      "success_schema": "#/definitions/v1TerminatePolicyResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": [
+          "policyNumber"
+        ],
+        "unknown_fields": "reject",
+        "duplicate_fields": "reject",
+        "non_empty_query": "reject",
+        "accepted_content_types": [
+          "application/json",
+          "application/json; charset=utf-8"
+        ],
+        "accepted_response_types": [
+          "application/json",
+          "*/*"
+        ]
+      },
+      "responses": {
+        "200": {
+          "policyNumber": "5f3d2a1b-7c6e-4d8f-9a0b-1c2d3e4f5a66"
+        },
+        "400": {
+          "code": 3,
+          "message": "invalid request",
+          "details": []
+        },
+        "404": {
+          "code": 5,
+          "message": "not found",
+          "details": []
+        },
+        "406": {
+          "code": 3,
+          "message": "not acceptable",
+          "details": []
+        },
+        "409": {
+          "code": 9,
+          "message": "conflict",
+          "details": []
+        },
+        "413": {
+          "code": 8,
+          "message": "request body too large",
+          "details": []
+        },
+        "415": {
+          "code": 3,
+          "message": "unsupported media type",
+          "details": []
+        },
+        "499": {
+          "code": 1,
+          "message": "request canceled",
+          "details": []
+        },
+        "500": {
+          "code": 13,
+          "message": "internal error",
+          "details": []
+        },
+        "503": {
+          "code": 14,
+          "message": "service unavailable",
+          "details": []
+        },
+        "504": {
+          "code": 4,
+          "message": "deadline exceeded",
+          "details": []
+        }
+      }
     }
   ],
   "routing_responses": {
@@ -191,6 +443,87 @@
         "items": {
           "type": "object",
           "$ref": "#/definitions/protobufAny"
+        }
+      }
+    },
+    "v1IssuePolicyRequest": {
+      "offerNumber": {
+        "type": "string"
+      },
+      "policyHolder": {
+        "$ref": "#/definitions/v1PolicyHolder"
+      },
+      "agentLogin": {
+        "type": "string",
+        "description": "The authenticated agent; an empty login issues a policy without an agent."
+      }
+    },
+    "v1PolicyHolder": {
+      "firstName": {
+        "type": "string"
+      },
+      "lastName": {
+        "type": "string"
+      },
+      "taxId": {
+        "type": "string"
+      }
+    },
+    "v1IssuePolicyResponse": {
+      "policyNumber": {
+        "type": "string"
+      }
+    },
+    "v1TerminatePolicyRequest": {
+      "policyNumber": {
+        "type": "string"
+      }
+    },
+    "v1TerminatePolicyResponse": {
+      "policyNumber": {
+        "type": "string"
+      }
+    },
+    "v1GetPolicyHTTPResponse": {
+      "policy": {
+        "$ref": "#/definitions/v1PolicyDetailsHTTP"
+      }
+    },
+    "v1PolicyDetailsHTTP": {
+      "number": {
+        "type": "string"
+      },
+      "dateFrom": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "dateTo": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "policyHolder": {
+        "type": "string"
+      },
+      "totalPremium": {
+        "type": "number",
+        "format": "double"
+      },
+      "productCode": {
+        "type": "string"
+      },
+      "accountNumber": {
+        "type": "string"
+      },
+      "covers": {
+        "type": "array",
+        "items": {
+          "type": "string"
         }
       }
     }
