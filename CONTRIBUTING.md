@@ -91,10 +91,10 @@ missing table of contents, format the affected working-tree files and stage the 
 git add path/to/file.md
 ```
 
-The hook uses the repository's managed CPython 3.14.8 runtime and requires `npx` only when staged
-Markdown needs validation. Complete [Python Toolchain Setup](#python-toolchain-setup) before using
-the hook. Run `make markdown-toc-test` to exercise partial staging, cleanup, and controlled failure
-cases in a disposable Git repository.
+The hook uses the repository's managed CPython 3.14.8 runtime and the pinned doctoc package
+provisioned under `ai/framework`. Complete [Python Toolchain Setup](#python-toolchain-setup) and run
+`make -C ai/framework markdown-setup` before using the hook. Run `make markdown-toc-test` to
+exercise partial staging, cleanup, and controlled failure cases in a disposable Git repository.
 
 ### Install Dependencies
 
@@ -520,14 +520,15 @@ Do not reset/stash unrelated work or touch local artifacts. An older pin remains
 fails current freshness if upstream differs; record that limitation rather than auto-upgrading.
 See the [shared lifecycle](ai/framework/docs/upgrades.md) for the operation contract.
 
-For a client sandbox without access to the host npm cache, provision the pinned formatter explicitly
-with `make -C ai/framework markdown-setup` (Node/npm, package-lock verification, ignored
-`node_modules` writes). Then use the existing consumer owner without npx or downloads:
+Provision the pinned formatter explicitly with `make -C ai/framework markdown-setup` (Node/npm,
+package-lock verification, ignored `node_modules` writes). The consumer owner defaults to that
+verified framework package and never invokes npx or downloads during format/check:
 
 ```bash
-AI_DOCTOC_DIR="$PWD/ai/framework" ./scripts/markdown-toc.sh format <task-owned-files>
-AI_DOCTOC_DIR="$PWD/ai/framework" ./scripts/markdown-toc.sh check <task-owned-files>
+./scripts/markdown-toc.sh format <task-owned-files>
+./scripts/markdown-toc.sh check <task-owned-files>
 ```
 
-This override verifies doctoc 2.5.0 before execution and never provisions on a check. The existing
-npx route remains supported; an explicit `npm_config_offline=true` is passed through unchanged.
+`AI_DOCTOC_DIR` may point to another explicitly provisioned package prefix when needed. The wrapper
+verifies doctoc 2.5.0 before execution and fails with setup guidance when the package is absent; a
+normal check never provisions dependencies.
