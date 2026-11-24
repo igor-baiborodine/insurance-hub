@@ -25,6 +25,7 @@ TOOL_NAMES = (
     "protoc-gen-openapiv2",
     "golangci-lint",
     "govulncheck",
+    "sqlc",
 )
 IGNORED_DIRECTORIES = {".git", ".tools", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 COVERAGE_OUTPUTS = {"coverage.txt", "integration-coverage.txt"}
