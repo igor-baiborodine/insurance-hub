@@ -100,7 +100,7 @@ func (x *CreateOfferRequest) GetAnswers() []*OfferAnswer {
 	return nil
 }
 
-// OfferAnswer keeps the legacy answer variant; the stored answer is limited to 255 characters.
+// OfferAnswer is one typed questionnaire answer; the stored answer is limited to 255 characters.
 type OfferAnswer struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	QuestionCode string                 `protobuf:"bytes,1,opt,name=question_code,json=questionCode,proto3" json:"question_code,omitempty"`

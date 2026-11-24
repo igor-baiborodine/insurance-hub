@@ -100,7 +100,7 @@ func (useCase *CreateOffer) Execute(
 	return offer, nil
 }
 
-// newOfferNumber returns a random (version 4) UUID, as the Java service generated.
+// newOfferNumber returns a random (version 4) UUID.
 func newOfferNumber() (string, error) {
 	var value [16]byte
 	if _, err := rand.Read(value[:]); err != nil {

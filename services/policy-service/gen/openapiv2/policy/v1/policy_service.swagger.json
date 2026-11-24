@@ -287,7 +287,7 @@
           "type": "string"
         }
       },
-      "description": "OfferAnswer keeps the legacy answer variant; the stored answer is limited to 255 characters."
+      "description": "OfferAnswer is one typed questionnaire answer; the stored answer is limited to 255 characters."
     }
   }
 }

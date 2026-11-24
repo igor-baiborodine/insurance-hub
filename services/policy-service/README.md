@@ -18,9 +18,9 @@
 
 # Policy service
 
-The Go Policy service exposes private offer creation over direct gRPC and an HTTP gateway. Its
-separate management listener serves liveness and readiness. Java Policy continues to serve
-agents' offer, policy and termination requests.
+The Policy service creates priced offers for agents. It exposes this operation privately over
+direct gRPC and an HTTP gateway, and its separate management listener serves liveness and
+readiness.
 
 ## Prerequisites
 
@@ -294,8 +294,8 @@ reserved interval within the one overall deadline.
 
 ## Offer creation
 
-`policy.v1.PolicyService/CreateOffer` is exposed privately as `POST /offers`. It accepts the legacy
-offer command sent by the Agent Portal Gateway: `productCode`, `policyFrom` and `policyTo` as
+`policy.v1.PolicyService/CreateOffer` is exposed privately as `POST /offers`. It accepts an offer
+command with `productCode`, `policyFrom` and `policyTo` as
 `YYYY-MM-DD` strings or `[year, month, day]` arrays, `selectedCovers`, and `answers` with `type`
 (`choice`, `text` or `numeric`), `questionCode` and `answer`. Choice and text answers are JSON strings;
 numeric answers are JSON numbers whose exact text is kept. Unknown or duplicate members are rejected.

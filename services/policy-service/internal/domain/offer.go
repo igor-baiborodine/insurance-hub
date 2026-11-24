@@ -25,7 +25,7 @@ var (
 // amountPattern accepts exact decimals that fit numeric(19, 2) without rounding.
 var amountPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,16})(\.[0-9]{1,2})?$`)
 
-// AnswerKind identifies the legacy questionnaire answer variant.
+// AnswerKind identifies the questionnaire answer variant.
 type AnswerKind int
 
 const (

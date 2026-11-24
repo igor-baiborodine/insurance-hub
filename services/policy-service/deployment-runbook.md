@@ -49,8 +49,7 @@ below, then run
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
 It runs only the private workload checks (offer rejection, probes, identity, Pod denial and
 scale-to-zero).
-Shared routing and coexistence checks run only through `go-svc-deploy-verify` against local-dev and
-QA.
+Shared routing checks run only through `go-svc-deploy-verify` against local-dev and QA.
 
 ## Direct local-dev
 
@@ -123,8 +122,8 @@ to match the ready Pod image ID.
 three listeners. It checks that HTTP and generated-client gRPC reject an empty offer with
 `InvalidArgument` (HTTP 400) before any provider call or write, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. It also reads the configured gateway and external Policy endpoint contract without mutation
-to ensure this private workload does not change shared routing. For manual troubleshooting, forward
+UID. It also reads the configured gateway routing without mutation to ensure this private workload
+does not change shared routing. For manual troubleshooting, forward
 the exact Pod selected by status.
 
 ```bash

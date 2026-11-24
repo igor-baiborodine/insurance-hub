@@ -29,7 +29,7 @@ message CreateOfferRequest {
   repeated OfferAnswer answers = 5;
 }
 
-// OfferAnswer keeps the legacy answer variant; the stored answer is limited to 255 characters.
+// OfferAnswer is one typed questionnaire answer; the stored answer is limited to 255 characters.
 message OfferAnswer {
   string question_code = 1 [(buf.validate.field).string = {
     min_bytes: 1

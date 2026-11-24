@@ -382,7 +382,7 @@ func decodeHTTPDate(decoder *json.Decoder) (string, error) {
 	return fmt.Sprintf("%04d-%02d-%02d", values[0], values[1], values[2]), nil
 }
 
-// decodeHTTPAnswer maps the legacy typed answer to its RPC variant. Choice and text answers are
+// decodeHTTPAnswer maps the typed HTTP answer to its RPC variant. Choice and text answers are
 // JSON strings; numeric answers are JSON numbers whose exact text is preserved.
 func decodeHTTPAnswer(data []byte) (*policyv1.OfferAnswer, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
