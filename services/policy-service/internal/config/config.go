@@ -26,6 +26,7 @@ const (
 	productTargetSetting    = "PRODUCT_GRPC_TARGET"
 	pricingTargetSetting    = "PRICING_GRPC_TARGET"
 	providerTimeoutSetting  = "PROVIDER_CALL_TIMEOUT"
+	businessZoneSetting     = "BUSINESS_TIME_ZONE"
 )
 
 // Database holds the optional Policy writer connection and pool limits. An absent URL leaves the
@@ -64,6 +65,8 @@ func (providers Providers) Configured() bool { return providers.ProductTarget !=
 type Config struct {
 	Database  Database
 	Providers Providers
+	// BusinessTimeZone defines the calendar date of a new offer.
+	BusinessTimeZone *time.Location
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -302,10 +305,15 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	businessZone, err := loadBusinessZone(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Database:           database,
 		Providers:          providers,
+		BusinessTimeZone:   businessZone,
 		Runtime:            runtime,
 		GRPC:               grpc,
 		HTTPServer:         httpServer,
@@ -522,6 +530,20 @@ func loadProviders(lookup lookupEnv, requestTimeout time.Duration) (Providers, e
 		PricingTarget: pricingTarget,
 		CallTimeout:   callTimeout,
 	}, nil
+}
+
+// loadBusinessZone accepts an IANA time zone name. The process-local zone is rejected so the
+// business date cannot depend on the host.
+func loadBusinessZone(lookup lookupEnv) (*time.Location, error) {
+	name, err := kitconfig.ValueOrDefault(lookup, businessZoneSetting, "UTC")
+	if err != nil {
+		return nil, err
+	}
+	zone, err := time.LoadLocation(name)
+	if err != nil || name == "Local" {
+		return nil, kitconfig.Invalid(businessZoneSetting, "must be an IANA time zone name")
+	}
+	return zone, nil
 }
 
 // loadTarget accepts an optional host:port gRPC target with an explicit nonzero port.

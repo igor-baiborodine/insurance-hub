@@ -688,6 +688,29 @@ func TestLoad_ProvidersAreOptionalAsAPair(t *testing.T) {
 	}
 }
 
+func TestLoad_BusinessTimeZone(t *testing.T) {
+	// when
+	defaulted, defaultErr := load(mapLookup(nil))
+	warsaw, warsawErr := load(
+		mapLookup(map[string]string{businessZoneSetting: "Europe/Warsaw"}),
+	)
+	_, localErr := load(mapLookup(map[string]string{businessZoneSetting: "Local"}))
+	_, unknownErr := load(mapLookup(map[string]string{businessZoneSetting: "Mars/Olympus"}))
+
+	// then
+	if defaultErr != nil || defaulted.BusinessTimeZone.String() != "UTC" {
+		t.Errorf("default zone = %v (%v)", defaulted.BusinessTimeZone, defaultErr)
+	}
+	if warsawErr != nil || warsaw.BusinessTimeZone.String() != "Europe/Warsaw" {
+		t.Errorf("configured zone = %v (%v)", warsaw.BusinessTimeZone, warsawErr)
+	}
+	for _, err := range []error{localErr, unknownErr} {
+		if err == nil || !strings.Contains(err.Error(), "must be an IANA time zone name") {
+			t.Errorf("expected zone refusal, got %v", err)
+		}
+	}
+}
+
 func TestLoad_RejectsInvalidProviderSettings(t *testing.T) {
 	for _, test := range []struct {
 		name   string

@@ -23,6 +23,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
@@ -239,6 +240,7 @@ func runtimeClient(
 		propagation.TraceContext{},
 		settings,
 		echo,
+		application.UnavailableOffers,
 	)
 	if err != nil {
 		_ = listener.Close()

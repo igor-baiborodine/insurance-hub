@@ -11,6 +11,7 @@
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
+  - [Offer creation](#offer-creation)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
@@ -204,6 +205,7 @@ do not repeat its supplied value.
 | `DB_QUERY_TIMEOUT` | `1s` | Positive duration bounding the readiness query; with a database URL it must not exceed `PROBE_TIMEOUT`. |
 | `PRODUCT_GRPC_TARGET` | unset | Optional `host:port` of the private Product gRPC service. Must be supplied together with `PRICING_GRPC_TARGET`. |
 | `PRICING_GRPC_TARGET` | unset | Optional `host:port` of the private Pricing gRPC service. Must be supplied together with `PRODUCT_GRPC_TARGET`. |
+| `BUSINESS_TIME_ZONE` | `UTC` | IANA time zone name defining the creation date of a new offer; `Local` is rejected. |
 | `PROVIDER_CALL_TIMEOUT` | `3s` | Positive duration bounding each Product and Pricing call; with provider targets, twice this value must be less than `REQUEST_TIMEOUT`. A shorter caller deadline still applies. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
@@ -318,6 +320,43 @@ upstream response metadata have empty allowlists. `REQUEST_TIMEOUT` begins at HT
 the configured HTTP/gRPC limits remain independent. Reflection, CORS, profiling, authentication,
 debug endpoints and production exposure are not enabled by this foundation.
 
+## Offer creation
+
+`policy.v1.PolicyService/CreateOffer` is exposed privately as `POST /offers`. It accepts the legacy
+offer command sent by the Agent Portal Gateway: `productCode`, `policyFrom` and `policyTo` as
+`YYYY-MM-DD` strings or `[year, month, day]` arrays, `selectedCovers`, and `answers` with `type`
+(`choice`, `text` or `numeric`), `questionCode` and `answer`. Choice and text answers are JSON strings;
+numeric answers are JSON numbers whose exact text is kept. Unknown or duplicate members are rejected.
+
+```sh
+curl --fail-with-body -H 'Content-Type: application/json' -d '{"productCode":"TRI",
+  "policyFrom":"2017-04-16","policyTo":"2018-04-15","selectedCovers":["C1","C2"],
+  "answers":[{"type":"choice","questionCode":"DESTINATION","answer":"EUR"},
+  {"type":"numeric","questionCode":"NUM_OF_ADULTS","answer":1}]}' \
+  http://127.0.0.1:8080/offers
+```
+
+The use case checks the product with `product.v1.ProductService/GetProduct`, then obtains the quote
+from `pricing.v1.PricingService/CalculatePrice`. Both calls finish before the SQL transaction opens.
+It then commits the offer, its answers and cover prices in one transaction through the restricted
+writer. Success is HTTP 200 with exactly `offerNumber` (a random UUID), `totalPrice` and
+`coversPrices`; amounts are JSON numbers written from Pricing's exact decimal text. The offer has
+status NEW and a creation date taken once from the clock in `BUSINESS_TIME_ZONE`. Offer creation
+publishes no event.
+
+| Outcome | HTTP / gRPC code | Writes |
+| --- | --- | --- |
+| Malformed command or repeated question code | 400 / 3 | none; no provider call |
+| Unknown product | 404 / 5 | none; Pricing is not called |
+| Pricing rejects the input | 400 / 3 | none |
+| Product or Pricing unavailable, or offers not configured | 503 / 14 | none |
+| Provider or request deadline exceeded | 504 / 4 | none |
+| Caller canceled | 499 / 1 (when a response can still be written) | none |
+| Unexpected defect, including an amount that cannot be stored exactly | 500 / 13 | none |
+
+Offers require `POLICY_DATABASE_URL` and both provider targets. Without them, the operation
+returns 503 and readiness is unaffected. Provider availability is not part of readiness.
+
 ## Reusable baseline and ownership
 
 Product is the reference for operational foundations, not a runtime dependency. Both modules own
@@ -346,11 +385,16 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/grpc` | Generated Echo and PolicyService registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/application` | `CreateOffer` use case, its `ProductCatalog`, `QuoteCalculator` and `OfferStore` ports, and its failures. |
+| `internal/domain` | Offer request, answer, quote and offer values; NEW status, keyed answers and exact-amount invariants. |
+| `internal/providers` | Product and Pricing gRPC adapters with bounded calls and status translation. |
+| `internal/postgres` | Writer pool, readiness, aggregate reads and the transactional offer and issuance writes. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policy/v1`, `gen/policy/v1`, `gen/openapiv2/policy/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
+| `api/product/v1`, `api/pricing/v1`, `gen/product/v1`, `gen/pricing/v1` | Exact provider contract copies and the generated Policy-local clients. |
 
 This component diagram shows source dependencies; construction and runtime dispatch are described
 below it.
@@ -366,6 +410,16 @@ flowchart TD
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
     composition --> config
+    composition --> application["internal/application"]
+    composition --> providers["internal/providers"]
+    composition --> postgres["internal/postgres"]
+    application --> domain["internal/domain"]
+    grpc --> application
+    grpc --> domain
+    providers --> application
+    providers --> domain
+    providers --> clients["gen/product/v1, gen/pricing/v1"]
+    postgres --> domain
     grpc --> telemetry
     grpc --> generated["gen/policy/v1"]
     gateway --> generated
@@ -381,6 +435,14 @@ At startup, composition binds all listeners, starts gRPC, derives the same-proce
 from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
 HTTP server span, uses the generated client across the instrumented connection, obtains client and
 server spans, passes protobuf validation and calls the injected function with the shorter deadline.
-HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
-accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
+HTTP and gRPC record separate bounded completion signals.
+
+An HTTP offer follows the same path to `PolicyService/CreateOffer`, which maps the validated request
+to a domain `OfferRequest` and calls `CreateOffer.Execute`. The use case calls the Product and
+Pricing adapters in turn over their process-owned connections. Each call is bounded by
+`PROVIDER_CALL_TIMEOUT` and the request deadline and carries the trace context. The use case then
+commits the offer through the store. The providers and the store satisfy the application ports
+implicitly; the application imports neither. Shutdown withdraws readiness and drains
+accepted HTTP work before connection and gRPC teardown, closes provider connections and the
+database pool, then closes management and telemetry within
 the shared deadline.

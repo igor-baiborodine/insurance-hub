@@ -27,6 +27,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
 )
 
@@ -426,11 +427,13 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 		tracerMissing     bool
 		propagatorMissing bool
 		echoMissing       bool
+		offerMissing      bool
 	}{
 		{name: "logger", loggerMissing: true},
 		{name: "tracer provider", tracerMissing: true},
 		{name: "propagator", propagatorMissing: true},
 		{name: "echo handler", echoMissing: true},
+		{name: "offer handler", offerMissing: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -439,6 +442,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			selectedTracer := trace.TracerProvider(tracerProvider)
 			selectedPropagator := propagation.TextMapPropagator(propagator)
 			selectedEcho := transport.Echo(transport.IdentityEcho)
+			selectedOffer := transport.CreateOffer(application.UnavailableOffers)
 			if test.loggerMissing {
 				selectedLogger = nil
 			}
@@ -451,6 +455,9 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			if test.echoMissing {
 				selectedEcho = nil
 			}
+			if test.offerMissing {
+				selectedOffer = nil
+			}
 
 			// when
 			server, err := transport.NewServer(
@@ -459,6 +466,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 				selectedPropagator,
 				defaultSettings(),
 				selectedEcho,
+				selectedOffer,
 			)
 
 			// then
@@ -487,6 +495,7 @@ func newExampleClient(
 		propagator,
 		defaultSettings(),
 		echo,
+		application.UnavailableOffers,
 	)
 	if err != nil {
 		_ = listener.Close()

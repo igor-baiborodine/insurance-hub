@@ -22,10 +22,12 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/providers"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
 
@@ -67,7 +69,14 @@ type gatewayConnection interface {
 // databasePool is the process-owned Policy writer pool.
 type databasePool interface {
 	postgres.QueryRower
+	postgres.TxBeginner
 	Close()
+}
+
+// providerConnection is a process-owned client connection to Product or Pricing.
+type providerConnection interface {
+	grpcgo.ClientConnInterface
+	Close() error
 }
 
 type dependencies struct {
@@ -75,8 +84,10 @@ type dependencies struct {
 	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
+	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo, transport.CreateOffer) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
+	newProvider    func(string, telemetryProvider) (providerConnection, error)
+	now            func() time.Time
 	newGateway     func(policyv1.ExampleServiceClient, policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
@@ -94,10 +105,19 @@ func productionDependencies() dependencies {
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo, createOffer transport.CreateOffer) (grpcServer, error) {
+			return transport.NewServer(
+				logger,
+				tracer,
+				propagator,
+				settings,
+				echo,
+				createOffer,
+			)
 		},
 		newConnection:  newGatewayConnection,
+		newProvider:    newProviderConnection,
+		now:            time.Now,
 		newGateway:     gateway.NewHandler,
 		newUnavailable: gateway.NewUnavailableHandler,
 		newBusiness: func(handler http.Handler, settings config.Config) httpServer {
@@ -141,8 +161,26 @@ func newGatewayConnection(
 	return connection, nil
 }
 
+// newProviderConnection creates a lazily connecting client that propagates trace context.
+func newProviderConnection(target string, provider telemetryProvider) (providerConnection, error) {
+	connection, err := grpcgo.NewClient(
+		target,
+		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
+		grpcgo.WithStatsHandler(otelgrpc.NewClientHandler(
+			otelgrpc.WithTracerProvider(provider.TracerProvider()),
+			otelgrpc.WithMeterProvider(provider.MeterProvider()),
+			otelgrpc.WithPropagators(provider.GRPCPropagator()),
+		)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create provider connection: %w", err)
+	}
+	return connection, nil
+}
+
 type runningService struct {
 	pool               databasePool
+	providers          []providerConnection
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -207,6 +245,12 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	createOffer, err := runtime.composeOffers(settings, provider, deps)
+	if err != nil {
+		return fail(fmt.Errorf("run service: %w", err))
+	}
+	logger.InfoContext(ctx, "offer creation configured",
+		slog.Bool("enabled", runtime.pool != nil && settings.Providers.Configured()))
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -215,7 +259,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+		}, deps.echo, createOffer,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -323,6 +367,52 @@ func run(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+// composeOffers wires offer creation when both storage and providers are configured; otherwise
+// the operation reports that offers are unavailable.
+func (runtime *runningService) composeOffers(
+	settings config.Config,
+	provider telemetryProvider,
+	deps dependencies,
+) (transport.CreateOffer, error) {
+	if runtime.pool == nil || !settings.Providers.Configured() {
+		return application.UnavailableOffers, nil
+	}
+	connections := make([]grpcgo.ClientConnInterface, 0, 2)
+	for _, target := range []string{
+		settings.Providers.ProductTarget,
+		settings.Providers.PricingTarget,
+	} {
+		connection, err := deps.newProvider(target, provider)
+		if err != nil {
+			return nil, err
+		}
+		runtime.providers = append(runtime.providers, connection)
+		connections = append(connections, connection)
+	}
+	catalog, err := providers.NewProductCatalog(connections[0], settings.Providers.CallTimeout)
+	if err != nil {
+		return nil, err
+	}
+	calculator, err := providers.NewPricingCalculator(
+		connections[1],
+		settings.Providers.CallTimeout,
+	)
+	if err != nil {
+		return nil, err
+	}
+	store, err := postgres.NewStore(runtime.pool)
+	if err != nil {
+		return nil, err
+	}
+	useCase, err := application.NewCreateOffer(
+		catalog, calculator, store, deps.now, settings.BusinessTimeZone,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return useCase.Execute, nil
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -463,7 +553,15 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 			shutdownErrors = append(shutdownErrors, err)
 		}
 	}
-	// Handlers have drained, so no request still holds a database connection.
+	// Handlers have drained, so no request still uses a provider or database connection.
+	for _, connection := range runtime.providers {
+		if err := connection.Close(); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("close provider connection: %w", err),
+			)
+		}
+	}
 	if runtime.pool != nil {
 		runtime.pool.Close()
 	}

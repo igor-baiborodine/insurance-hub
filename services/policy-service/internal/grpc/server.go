@@ -19,10 +19,26 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
 
-const internalMessage = "internal error"
+const (
+	internalMessage    = "internal error"
+	invalidMessage     = "invalid request"
+	notFoundMessage    = "not found"
+	unavailableMessage = "service unavailable"
+)
+
+// operations names the observed RPCs; other methods are not instrumented.
+var operations = map[string]string{
+	policyv1.ExampleService_Echo_FullMethodName:       "echo",
+	policyv1.PolicyService_CreateOffer_FullMethodName: "create_offer",
+}
+
+// CreateOffer is the offer use case invoked by the PolicyService transport.
+type CreateOffer func(context.Context, domain.OfferRequest) (domain.Offer, error)
 
 // Echo handles the example's single responsibility independently of transport details.
 type Echo func(context.Context, string) (string, error)
@@ -43,13 +59,14 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated ExampleService.
+// NewServer constructs the instrumented server and registers the generated services.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
 	echo Echo,
+	createOffer CreateOffer,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -60,8 +77,8 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil {
-		return nil, errors.New("create gRPC server: echo handler is required")
+	if echo == nil || createOffer == nil {
+		return nil, errors.New("create gRPC server: echo and offer handlers are required")
 	}
 
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
@@ -72,7 +89,7 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&policyv1.EchoRequest{}),
+		protovalidate.WithMessages(&policyv1.EchoRequest{}, &policyv1.CreateOfferRequest{}),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -94,7 +111,8 @@ func NewServer(
 					otelgrpc.WithPropagators(propagator),
 					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == policyv1.ExampleService_Echo_FullMethodName
+						_, observed := operations[info.FullMethodName]
+						return observed
 					}),
 				),
 			},
@@ -106,7 +124,104 @@ func NewServer(
 		requestTimeout: settings.RequestTimeout,
 		echo:           echo,
 	})
+	policyv1.RegisterPolicyServiceServer(server, &policyServer{
+		logger:         logger,
+		requestTimeout: settings.RequestTimeout,
+		createOffer:    createOffer,
+	})
 	return server, nil
+}
+
+type policyServer struct {
+	policyv1.UnimplementedPolicyServiceServer
+	logger         *slog.Logger
+	requestTimeout time.Duration
+	createOffer    CreateOffer
+}
+
+func (server *policyServer) CreateOffer(
+	ctx context.Context,
+	request *policyv1.CreateOfferRequest,
+) (*policyv1.CreateOfferResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	mapped, err := offerRequest(request)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, invalidMessage)
+	}
+	offer, err := server.createOffer(requestCtx, mapped)
+	if err != nil {
+		return nil, server.offerError(ctx, err)
+	}
+	return &policyv1.CreateOfferResponse{
+		OfferNumber:  offer.Number,
+		TotalPrice:   offer.TotalPrice,
+		CoversPrices: offer.CoverPrices,
+	}, nil
+}
+
+// offerRequest maps the validated wire request; dates must be real calendar dates.
+func offerRequest(request *policyv1.CreateOfferRequest) (domain.OfferRequest, error) {
+	policyFrom, err := calendarDate(request.GetPolicyFrom())
+	if err != nil {
+		return domain.OfferRequest{}, err
+	}
+	policyTo, err := calendarDate(request.GetPolicyTo())
+	if err != nil {
+		return domain.OfferRequest{}, err
+	}
+	answers := make([]domain.Answer, 0, len(request.GetAnswers()))
+	for _, answer := range request.GetAnswers() {
+		mapped := domain.Answer{QuestionCode: answer.GetQuestionCode()}
+		switch value := answer.GetValue().(type) {
+		case *policyv1.OfferAnswer_Choice:
+			mapped.Kind, mapped.Value = domain.ChoiceAnswer, value.Choice
+		case *policyv1.OfferAnswer_Text:
+			mapped.Kind, mapped.Value = domain.TextAnswer, value.Text
+		case *policyv1.OfferAnswer_Number:
+			mapped.Kind, mapped.Value = domain.NumericAnswer, value.Number
+		default:
+			return domain.OfferRequest{}, errors.New("answer has no value")
+		}
+		answers = append(answers, mapped)
+	}
+	return domain.OfferRequest{
+		ProductCode:    request.GetProductCode(),
+		PolicyFrom:     policyFrom,
+		PolicyTo:       policyTo,
+		SelectedCovers: append([]string(nil), request.GetSelectedCovers()...),
+		Answers:        answers,
+	}, nil
+}
+
+func calendarDate(value string) (time.Time, error) {
+	date, err := time.Parse(time.DateOnly, value)
+	if err != nil || date.Format(time.DateOnly) != value {
+		return time.Time{}, errors.New("invalid calendar date")
+	}
+	return date, nil
+}
+
+// offerError maps use-case failures to safe statuses; only unexpected defects are logged.
+func (server *policyServer) offerError(ctx context.Context, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+	case errors.Is(err, domain.ErrInvalidOffer), errors.Is(err, application.ErrQuoteRejected):
+		return status.Error(codes.InvalidArgument, invalidMessage)
+	case errors.Is(err, application.ErrProductNotFound):
+		return status.Error(codes.NotFound, notFoundMessage)
+	case errors.Is(err, application.ErrProviderUnavailable),
+		errors.Is(err, application.ErrOffersUnavailable):
+		return status.Error(codes.Unavailable, unavailableMessage)
+	default:
+		server.logger.ErrorContext(ctx, "create-offer request failed",
+			slog.String("rpc", policyv1.PolicyService_CreateOffer_FullMethodName),
+		)
+		return status.Error(codes.Internal, internalMessage)
+	}
 }
 
 type exampleServer struct {
@@ -163,7 +278,7 @@ func validationInterceptor(
 		}
 		if err := validator.Validate(message); err != nil {
 			if _, ok := errors.AsType[*protovalidate.ValidationError](err); ok {
-				return nil, status.Error(codes.InvalidArgument, "invalid request")
+				return nil, status.Error(codes.InvalidArgument, invalidMessage)
 			}
 			logger.ErrorContext(ctx, "request validation failed",
 				slog.String("rpc", info.FullMethod),
@@ -186,9 +301,13 @@ func (handler *requestStatsHandler) TagRPC(
 	info *stats.RPCTagInfo,
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
-	if handler.observer != nil &&
-		info.FullMethodName == policyv1.ExampleService_Echo_FullMethodName {
-		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
+	if operation, observed := operations[info.FullMethodName]; handler.observer != nil &&
+		observed {
+		return context.WithValue(
+			ctx,
+			requestStateKey{},
+			handler.observer.StartGRPC(ctx, operation),
+		)
 	}
 	return ctx
 }

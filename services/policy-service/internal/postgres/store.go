@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres/dbgen"
@@ -83,13 +82,18 @@ type Issuance struct {
 	Intent     Intent
 }
 
-// Store reads and writes Policy aggregates through the writer pool.
-type Store struct {
-	pool *pgxpool.Pool
+// TxBeginner starts transactions on the process-owned writer pool.
+type TxBeginner interface {
+	BeginTx(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error)
 }
 
-// NewStore wraps the process-owned writer pool.
-func NewStore(pool *pgxpool.Pool) (*Store, error) {
+// Store reads and writes Policy aggregates through the writer pool.
+type Store struct {
+	pool TxBeginner
+}
+
+// NewStore wraps the process-owned writer pool; the caller owns closing it.
+func NewStore(pool TxBeginner) (*Store, error) {
 	if pool == nil {
 		return nil, errors.New("create Policy store: pool is required")
 	}

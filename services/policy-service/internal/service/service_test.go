@@ -1192,7 +1192,10 @@ func (provider *recordingProvider) Shutdown(ctx context.Context) error {
 type fakePool struct{ closed atomic.Bool }
 
 func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
-func (pool *fakePool) Close()                                      { pool.closed.Store(true) }
+func (*fakePool) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	return nil, errors.New("fake pool has no transactions")
+}
+func (pool *fakePool) Close() { pool.closed.Store(true) }
 
 func databaseConfig(t *testing.T) config.Config {
 	t.Helper()
