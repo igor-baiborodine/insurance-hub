@@ -162,6 +162,8 @@ func (server *productServer) ListProducts(
 	return response, nil
 }
 
+// GetProduct returns one product by code. The Policy service calls it to confirm that a product
+// exists before pricing an offer, so NotFound is part of that caller's contract.
 func (server *productServer) GetProduct(
 	ctx context.Context,
 	request *productv1.GetProductRequest,
