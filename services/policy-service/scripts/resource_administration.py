@@ -271,7 +271,9 @@ class Kubernetes:
             record["metadata"]["name"] == name and record["metadata"]["namespace"] == namespace,
             "Secret identity mismatch",
         )
-        if namespace == self.svc_ns:
+        if name == self.ca_name:
+            require(namespace == self.data_ns, "database CA Secret namespace differs")
+        elif namespace == self.svc_ns:
             labels = record["metadata"].get("labels", {})
             require(
                 labels.get("insurance-hub.io/owner") == "policy"
@@ -328,18 +330,7 @@ class Kubernetes:
     ) -> Iterator[Callable[[str], tuple[str, str]]]:
         """Log in as one Policy role over verified TLS through an owned loopback forward."""
         require(role in ROLES, "unsupported Policy database role")
-        port = loopback_port()
-        spec = PortForwardSpec(self.context, self.data_ns, f"pod/{self.primary}", port, 5432)
-        with (
-            tempfile.TemporaryDirectory(prefix="policy-resources-") as directory,
-            OwnedPortForward(
-                spec,
-                cwd=Path.cwd(),
-                env=kubernetes_environment(),
-                startup_seconds=10,
-                kubectl=self.kubectl_path,
-            ),
-        ):
+        with tempfile.TemporaryDirectory(prefix="policy-resources-") as directory:
             root = Path(directory)
             cert, passfile = root / "ca.crt", root / "pgpass"
             for path, content in (
@@ -349,19 +340,37 @@ class Kubernetes:
                 descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(content)
-            options = (
-                f"host={self.hostname} hostaddr=127.0.0.1 port={port} dbname=policy "
-                f"user={role} sslmode=verify-full sslrootcert={cert}"
-            )
             environment = {"PGPASSFILE": str(passfile), "PGCONNECT_TIMEOUT": "5"}
 
             def execute(sql: str) -> tuple[str, str]:
-                return command(
-                    ["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-d", options],
-                    input_text=sql,
-                    sensitive=(password,),
-                    environment=environment,
+                port = loopback_port()
+                spec = PortForwardSpec(
+                    self.context, self.data_ns, f"pod/{self.primary}", port, 5432
                 )
+                with OwnedPortForward(
+                    spec,
+                    cwd=Path.cwd(),
+                    env=kubernetes_environment(),
+                    startup_seconds=10,
+                    kubectl=self.kubectl_path,
+                ):
+                    return command(
+                        [
+                            "psql",
+                            "-X",
+                            "-q",
+                            "-A",
+                            "-t",
+                            "-v",
+                            "ON_ERROR_STOP=1",
+                            "-d",
+                            f"host={self.hostname} hostaddr=127.0.0.1 port={port} "
+                            f"dbname=policy user={role} sslmode=verify-full sslrootcert={cert}",
+                        ],
+                        input_text=sql,
+                        sensitive=(password,),
+                        environment=environment,
+                    )
 
             yield execute
 

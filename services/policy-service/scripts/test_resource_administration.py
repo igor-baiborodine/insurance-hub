@@ -156,6 +156,8 @@ def test_existing_roles_keep_their_passwords():
 def test_secret_owned_by_another_service_is_refused(monkeypatch):
     # given
     manager = object.__new__(resources.Kubernetes)
+    manager.ca_name = "local-dev-postgres-policy-ca"
+    manager.data_ns = "local-dev-all"
     manager.svc_ns = "local-dev-all"
     record = {
         "metadata": {
@@ -173,6 +175,73 @@ def test_secret_owned_by_another_service_is_refused(monkeypatch):
     # when / then
     with pytest.raises(resources.ResourceError, match="not owned by Policy"):
         manager.get_secret("local-dev-postgres-policy-writer-creds", "local-dev-all")
+
+
+def test_cnpg_ca_secret_does_not_require_application_labels(monkeypatch):
+    # given
+    manager = object.__new__(resources.Kubernetes)
+    manager.ca_name = "local-dev-postgres-policy-ca"
+    manager.data_ns = manager.svc_ns = "local-dev-all"
+    record = {
+        "metadata": {
+            "name": manager.ca_name,
+            "namespace": manager.data_ns,
+        },
+        "data": {"ca.crt": base64.b64encode(CA).decode()},
+    }
+    monkeypatch.setattr(manager, "kubectl", lambda *_, **__: json.dumps(record), raising=False)
+
+    # when
+    secret = manager.get_secret(manager.ca_name, manager.data_ns)
+
+    # then
+    assert secret == {"ca.crt": CA}
+
+
+def test_each_role_query_uses_a_fresh_owned_port_forward(monkeypatch):
+    # given
+    manager = object.__new__(resources.Kubernetes)
+    manager.context = "kind-local-dev-insurance-hub"
+    manager.data_ns = "local-dev-all"
+    manager.primary = "local-dev-postgres-policy-1"
+    manager.hostname = "local-dev-postgres-policy-rw.local-dev-all.svc.cluster.local"
+    manager.kubectl_path = "kubectl"
+    ports = iter((21001, 21002))
+    forwards = []
+    commands = []
+
+    class Forward:
+        def __init__(self, spec, **_):
+            forwards.append(spec)
+
+        def __enter__(self):
+            return forwards[-1].local_port
+
+        def __exit__(self, *_):
+            return None
+
+    def command(argv, **options):
+        commands.append((argv, options))
+        return "go_policy_migrator", ""
+
+    monkeypatch.setattr(resources, "loopback_port", lambda: next(ports))
+    monkeypatch.setattr(resources, "OwnedPortForward", Forward)
+    monkeypatch.setattr(resources, "command", command)
+
+    # when
+    with manager.role_connection("go_policy_migrator", "synthetic-password", CA) as execute:
+        execute("SELECT current_user;")
+        execute("SET ROLE policy; SELECT current_user;")
+
+    # then
+    assert [item.local_port for item in forwards] == [21001, 21002]
+    assert all(item.resource == "pod/local-dev-postgres-policy-1" for item in forwards)
+    assert "port=21001" in commands[0][0][-1]
+    assert "port=21002" in commands[1][0][-1]
+    assert [item[1]["input_text"] for item in commands] == [
+        "SELECT current_user;",
+        "SET ROLE policy; SELECT current_user;",
+    ]
 
 
 def test_command_failure_redacts_subprocess_output(monkeypatch, capsys):
