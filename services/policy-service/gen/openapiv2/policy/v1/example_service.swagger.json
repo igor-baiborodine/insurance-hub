@@ -7,6 +7,10 @@
   "tags": [
     {
       "name": "ExampleService"
+    },
+    {
+      "name": "PolicyService",
+      "description": "PolicyService exposes the private offer boundary."
     }
   ],
   "consumes": [
@@ -16,6 +20,166 @@
     "application/json"
   ],
   "paths": {
+    "/offers": {
+      "post": {
+        "summary": "CreateOffer checks the product, prices the selected covers and stores a new offer.",
+        "operationId": "PolicyService_CreateOffer",
+        "responses": {
+          "200": {
+            "description": "The stored offer with numeric total and cover prices.",
+            "schema": {
+              "$ref": "#/definitions/v1CreateOfferHTTPResponse"
+            },
+            "examples": {
+              "application/json": {
+                "offerNumber": "8f0e2c1a-5b7d-4e3f-9a6c-2d1b0e9f8a7c",
+                "totalPrice": 78,
+                "coversPrices": {
+                  "C1": 26,
+                  "C2": 52
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or the quote input is invalid.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "invalid request",
+                "details": []
+              }
+            }
+          },
+          "404": {
+            "description": "The product does not exist.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 5,
+                "message": "not found",
+                "details": []
+              }
+            }
+          },
+          "406": {
+            "description": "The requested response media type is not available.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "not acceptable",
+                "details": []
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is too large.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 8,
+                "message": "request body too large",
+                "details": []
+              }
+            }
+          },
+          "415": {
+            "description": "The request media type is not supported.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 3,
+                "message": "unsupported media type",
+                "details": []
+              }
+            }
+          },
+          "499": {
+            "description": "The request was canceled.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 1,
+                "message": "request canceled",
+                "details": []
+              }
+            }
+          },
+          "500": {
+            "description": "The request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 13,
+                "message": "internal error",
+                "details": []
+              }
+            }
+          },
+          "503": {
+            "description": "Product, Pricing or offer storage is unavailable.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 14,
+                "message": "service unavailable",
+                "details": []
+              }
+            }
+          },
+          "504": {
+            "description": "A deadline was exceeded.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            },
+            "examples": {
+              "application/json": {
+                "code": 4,
+                "message": "deadline exceeded",
+                "details": []
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateOfferRequest"
+            }
+          }
+        ],
+        "tags": [
+          "PolicyService"
+        ],
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    },
     "/v1/example/echo": {
       "post": {
         "operationId": "ExampleService_Echo",
@@ -187,6 +351,70 @@
         }
       }
     },
+    "v1CreateOfferHTTPResponse": {
+      "type": "object",
+      "properties": {
+        "offerNumber": {
+          "type": "string"
+        },
+        "totalPrice": {
+          "type": "number",
+          "format": "double"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "description": "CreateOfferHTTPResponse is documentation-only; RPC amounts remain exact decimal strings."
+    },
+    "v1CreateOfferRequest": {
+      "type": "object",
+      "properties": {
+        "productCode": {
+          "type": "string"
+        },
+        "policyFrom": {
+          "type": "string"
+        },
+        "policyTo": {
+          "type": "string"
+        },
+        "selectedCovers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1OfferAnswer"
+          }
+        }
+      }
+    },
+    "v1CreateOfferResponse": {
+      "type": "object",
+      "properties": {
+        "offerNumber": {
+          "type": "string"
+        },
+        "totalPrice": {
+          "type": "string"
+        },
+        "coversPrices": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "v1EchoRequest": {
       "type": "object",
       "properties": {
@@ -202,6 +430,24 @@
           "type": "string"
         }
       }
+    },
+    "v1OfferAnswer": {
+      "type": "object",
+      "properties": {
+        "questionCode": {
+          "type": "string"
+        },
+        "choice": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "number": {
+          "type": "string"
+        }
+      },
+      "description": "OfferAnswer keeps the legacy answer variant; the stored answer is limited to 255 characters."
     }
   }
 }

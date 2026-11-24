@@ -1,86 +1,204 @@
 {
   "swagger": "2.0",
-  "operation": {
-    "path": "/v1/example/echo",
-    "method": "post",
-    "operation_id": "ExampleService_Echo",
-    "consumes": [
-      "application/json"
-    ],
-    "produces": [
-      "application/json"
-    ],
-    "request_schema": "#/definitions/v1EchoRequest",
-    "success_schema": "#/definitions/v1EchoResponse",
-    "error_schema": "#/definitions/rpcStatus"
-  },
-  "request_contract": {
-    "json_members": [
-      "message"
-    ],
-    "unknown_fields": "reject",
-    "duplicate_fields": "reject",
-    "non_empty_query": "reject",
-    "accepted_content_types": [
-      "application/json",
-      "application/json; charset=utf-8"
-    ],
-    "accepted_response_types": [
-      "application/json",
-      "*/*"
-    ],
-    "minimum_utf8_bytes": 1,
-    "maximum_utf8_bytes": 128,
-    "multibyte_boundary": {
-      "valid": "64 repetitions of é",
-      "invalid": "64 repetitions of é followed by a"
+  "operations": [
+    {
+      "path": "/v1/example/echo",
+      "method": "post",
+      "operation_id": "ExampleService_Echo",
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "request_schema": "#/definitions/v1EchoRequest",
+      "success_schema": "#/definitions/v1EchoResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": [
+          "message"
+        ],
+        "unknown_fields": "reject",
+        "duplicate_fields": "reject",
+        "non_empty_query": "reject",
+        "accepted_content_types": [
+          "application/json",
+          "application/json; charset=utf-8"
+        ],
+        "accepted_response_types": [
+          "application/json",
+          "*/*"
+        ],
+        "minimum_utf8_bytes": 1,
+        "maximum_utf8_bytes": 128,
+        "multibyte_boundary": {
+          "valid": "64 repetitions of \u00e9",
+          "invalid": "64 repetitions of \u00e9 followed by a"
+        }
+      },
+      "responses": {
+        "200": {
+          "message": "hello"
+        },
+        "400": {
+          "code": 3,
+          "message": "invalid request",
+          "details": []
+        },
+        "406": {
+          "code": 3,
+          "message": "not acceptable",
+          "details": []
+        },
+        "413": {
+          "code": 8,
+          "message": "request body too large",
+          "details": []
+        },
+        "415": {
+          "code": 3,
+          "message": "unsupported media type",
+          "details": []
+        },
+        "499": {
+          "code": 1,
+          "message": "request canceled",
+          "details": []
+        },
+        "500": {
+          "code": 13,
+          "message": "internal error",
+          "details": []
+        },
+        "503": {
+          "code": 14,
+          "message": "service unavailable",
+          "details": []
+        },
+        "504": {
+          "code": 4,
+          "message": "deadline exceeded",
+          "details": []
+        }
+      }
+    },
+    {
+      "path": "/offers",
+      "method": "post",
+      "operation_id": "PolicyService_CreateOffer",
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "request_schema": "#/definitions/v1CreateOfferRequest",
+      "success_schema": "#/definitions/v1CreateOfferHTTPResponse",
+      "error_schema": "#/definitions/rpcStatus",
+      "request_contract": {
+        "json_members": [
+          "productCode",
+          "policyFrom",
+          "policyTo",
+          "selectedCovers",
+          "answers"
+        ],
+        "answer_members": [
+          "type",
+          "questionCode",
+          "answer"
+        ],
+        "answer_variants": {
+          "choice": "string",
+          "text": "string",
+          "numeric": "number"
+        },
+        "rpc_answer_members": [
+          "questionCode",
+          "choice",
+          "text",
+          "number"
+        ],
+        "unknown_fields": "reject",
+        "duplicate_fields": "reject",
+        "non_empty_query": "reject",
+        "accepted_content_types": [
+          "application/json",
+          "application/json; charset=utf-8"
+        ],
+        "accepted_response_types": [
+          "application/json",
+          "*/*"
+        ],
+        "date_representation": {
+          "http": [
+            "YYYY-MM-DD string",
+            "[year, month, day] integer array"
+          ],
+          "rpc": "YYYY-MM-DD string"
+        },
+        "price_representation": {
+          "http": "number",
+          "rpc": "exact decimal string"
+        }
+      },
+      "responses": {
+        "200": {
+          "offerNumber": "8f0e2c1a-5b7d-4e3f-9a6c-2d1b0e9f8a7c",
+          "totalPrice": 78,
+          "coversPrices": {
+            "C1": 26,
+            "C2": 52
+          }
+        },
+        "400": {
+          "code": 3,
+          "message": "invalid request",
+          "details": []
+        },
+        "404": {
+          "code": 5,
+          "message": "not found",
+          "details": []
+        },
+        "406": {
+          "code": 3,
+          "message": "not acceptable",
+          "details": []
+        },
+        "413": {
+          "code": 8,
+          "message": "request body too large",
+          "details": []
+        },
+        "415": {
+          "code": 3,
+          "message": "unsupported media type",
+          "details": []
+        },
+        "499": {
+          "code": 1,
+          "message": "request canceled",
+          "details": []
+        },
+        "500": {
+          "code": 13,
+          "message": "internal error",
+          "details": []
+        },
+        "503": {
+          "code": 14,
+          "message": "service unavailable",
+          "details": []
+        },
+        "504": {
+          "code": 4,
+          "message": "deadline exceeded",
+          "details": []
+        }
+      }
     }
-  },
-  "responses": {
-    "200": {
-      "message": "hello"
-    },
-    "400": {
-      "code": 3,
-      "message": "invalid request",
-      "details": []
-    },
-    "406": {
-      "code": 3,
-      "message": "not acceptable",
-      "details": []
-    },
-    "413": {
-      "code": 8,
-      "message": "request body too large",
-      "details": []
-    },
-    "415": {
-      "code": 3,
-      "message": "unsupported media type",
-      "details": []
-    },
-    "499": {
-      "code": 1,
-      "message": "request canceled",
-      "details": []
-    },
-    "500": {
-      "code": 13,
-      "message": "internal error",
-      "details": []
-    },
-    "503": {
-      "code": 14,
-      "message": "service unavailable",
-      "details": []
-    },
-    "504": {
-      "code": 4,
-      "message": "deadline exceeded",
-      "details": []
-    }
-  },
+  ],
   "routing_responses": {
     "404": {
       "code": 5,
@@ -95,15 +213,84 @@
   },
   "schemas": {
     "v1EchoRequest": {
-      "message": "string"
+      "message": {
+        "type": "string"
+      }
     },
     "v1EchoResponse": {
-      "message": "string"
+      "message": {
+        "type": "string"
+      }
+    },
+    "v1CreateOfferRequest": {
+      "productCode": {
+        "type": "string"
+      },
+      "policyFrom": {
+        "type": "string"
+      },
+      "policyTo": {
+        "type": "string"
+      },
+      "selectedCovers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "answers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "$ref": "#/definitions/v1OfferAnswer"
+        }
+      }
+    },
+    "v1OfferAnswer": {
+      "questionCode": {
+        "type": "string"
+      },
+      "choice": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string"
+      },
+      "number": {
+        "type": "string"
+      }
+    },
+    "v1CreateOfferHTTPResponse": {
+      "offerNumber": {
+        "type": "string"
+      },
+      "totalPrice": {
+        "type": "number",
+        "format": "double"
+      },
+      "coversPrices": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "number",
+          "format": "double"
+        }
+      }
     },
     "rpcStatus": {
-      "code": "integer",
-      "message": "string",
-      "details": "array"
+      "code": {
+        "type": "integer",
+        "format": "int32"
+      },
+      "message": {
+        "type": "string"
+      },
+      "details": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "$ref": "#/definitions/protobufAny"
+        }
+      }
     }
   }
 }

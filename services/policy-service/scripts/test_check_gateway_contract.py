@@ -1,4 +1,4 @@
-"""Independent fixtures for the generated Echo Swagger contract check."""
+"""Independent fixtures for the generated Policy Swagger contract check."""
 
 from __future__ import annotations
 
@@ -34,12 +34,34 @@ def add_response(swagger: dict[str, Any]) -> None:
     swagger["paths"]["/v1/example/echo"]["post"]["responses"]["418"] = {"description": "unexpected"}
 
 
+def remove_offer_path(swagger: dict[str, Any]) -> None:
+    del swagger["paths"]["/offers"]
+
+
+def type_price_as_string(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1CreateOfferHTTPResponse"]["properties"]["totalPrice"] = {
+        "type": "string"
+    }
+
+
+def drop_numeric_answer(swagger: dict[str, Any]) -> None:
+    del swagger["definitions"]["v1OfferAnswer"]["properties"]["number"]
+
+
+def drop_not_found_response(swagger: dict[str, Any]) -> None:
+    del swagger["paths"]["/offers"]["post"]["responses"]["404"]
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (change_path, "paths must contain only"),
         (change_status_example, "response 503 example differs"),
         (add_response, "response status set differs"),
+        (remove_offer_path, "paths must contain only /offers, /v1/example/echo"),
+        (type_price_as_string, "v1CreateOfferHTTPResponse.totalPrice differs"),
+        (drop_numeric_answer, "v1OfferAnswer properties differ"),
+        (drop_not_found_response, "/offers response status set differs"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(
@@ -71,3 +93,16 @@ def test_main_reports_malformed_contract_without_traceback(
     # then
     assert status == 1
     assert "HTTP contract must be a JSON object" in capsys.readouterr().err
+
+
+def test_contract_check_rejects_inconsistent_offer_answer_members(tmp_path: Path) -> None:
+    # given
+    contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    offer = next(item for item in contract["operations"] if item["path"] == "/offers")
+    offer["request_contract"]["rpc_answer_members"] = ["questionCode", "text", "number"]
+    changed = tmp_path / "contract.json"
+    changed.write_text(json.dumps(contract), encoding="utf-8")
+
+    # when / then
+    with pytest.raises(check_gateway_contract.ContractError, match="RPC answer members differ"):
+        check_gateway_contract.check_contract(changed, SWAGGER)

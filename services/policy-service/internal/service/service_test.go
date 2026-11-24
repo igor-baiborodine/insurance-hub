@@ -343,7 +343,7 @@ func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return connection, nil
 	}
-	deps.newGateway = func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(policyv1.ExampleServiceClient, policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusNoContent)
 		}), nil
@@ -1234,7 +1234,7 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return newStatefulGatewayConnection(connectivity.Ready), nil
 	}
-	deps.newGateway = func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(policyv1.ExampleServiceClient, policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.NotFoundHandler(), nil
 	}
 	addresses := make(chan string, 3)

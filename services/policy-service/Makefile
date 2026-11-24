@@ -29,12 +29,19 @@ SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 
 PROTO_SCHEMA := api/policy/v1/example_service.proto
+# Policy-local client bindings are generated from exact copies of the provider-owned contracts.
+PROVIDER_PROTOS := api/product/v1/product_service.proto api/pricing/v1/pricing_service.proto
+PROTO_GENERATION_INPUTS := $(PROTO_SCHEMA) $(PROVIDER_PROTOS)
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
 	gen/policy/v1/example_service.pb.go \
 	gen/policy/v1/example_service.pb.gw.go \
 	gen/policy/v1/example_service_grpc.pb.go \
-	gen/openapiv2/policy/v1/example_service.swagger.json
+	gen/openapiv2/policy/v1/example_service.swagger.json \
+	gen/product/v1/product_service.pb.go \
+	gen/product/v1/product_service_grpc.pb.go \
+	gen/pricing/v1/pricing_service.pb.go \
+	gen/pricing/v1/pricing_service_grpc.pb.go
 
 GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
@@ -100,7 +107,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: python-tooling-format-check python-tooling-lint-fix python-tooling-lint python-tooling-test-fast python-check \
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
+	gen-proto check-proto-drift check-provider-protos check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -180,7 +187,16 @@ update-deps:
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto coverage-check test-integration build \
-	check-deps check-proto-drift check-sql-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
+	check-deps check-proto-drift check-provider-protos check-sql-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
+
+check-provider-protos: ## Verify the provider client contracts match their owning services
+	@for proto in $(PROVIDER_PROTOS); do \
+		owner="$${proto#api/}"; owner="$${owner%%/*}-service"; \
+		source="$(INSURANCE_HUB_ROOT)/services/$$owner/$$proto"; \
+		cmp -s "$$proto" "$$source" || { \
+			echo "check-provider-protos: $$proto differs from services/$$owner/$$proto" >&2; exit 1; }; \
+	done
+	@echo "check-provider-protos: provider client contracts match their owning services"
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \

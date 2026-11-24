@@ -77,7 +77,7 @@ type dependencies struct {
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(policyv1.ExampleServiceClient, policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
@@ -276,6 +276,7 @@ func run(
 	}
 	handler, err := deps.newGateway(
 		policyv1.NewExampleServiceClient(runtime.connection),
+		policyv1.NewPolicyServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {

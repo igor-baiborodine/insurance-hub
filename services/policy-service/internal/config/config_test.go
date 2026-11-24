@@ -665,3 +665,82 @@ func TestLoad_RejectsUnsafeDatabaseSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_ProvidersAreOptionalAsAPair(t *testing.T) {
+	// when
+	absent, absentErr := load(mapLookup(map[string]string{}))
+	present, presentErr := load(mapLookup(map[string]string{
+		productTargetSetting:   "product-service.local-dev-all.svc.cluster.local:9090",
+		pricingTargetSetting:   "pricing-service:9090",
+		providerTimeoutSetting: "1500ms",
+	}))
+
+	// then
+	if absentErr != nil || absent.Providers.Configured() ||
+		absent.Providers.CallTimeout != 3*time.Second {
+		t.Fatalf("absent providers: %+v (%v)", absent.Providers, absentErr)
+	}
+	if presentErr != nil || !present.Providers.Configured() ||
+		present.Providers.ProductTarget != "product-service.local-dev-all.svc.cluster.local:9090" ||
+		present.Providers.PricingTarget != "pricing-service:9090" ||
+		present.Providers.CallTimeout != 1500*time.Millisecond {
+		t.Fatalf("configured providers: %+v (%v)", present.Providers, presentErr)
+	}
+}
+
+func TestLoad_RejectsInvalidProviderSettings(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		values map[string]string
+		reason string
+	}{
+		{
+			"product without pricing",
+			map[string]string{productTargetSetting: "product-service:9090"},
+			"must be supplied together with " + pricingTargetSetting,
+		},
+		{
+			"pricing without product",
+			map[string]string{pricingTargetSetting: "pricing-service:9090"},
+			"must be supplied together with " + pricingTargetSetting,
+		},
+		{
+			"missing port",
+			map[string]string{productTargetSetting: "product-service", pricingTargetSetting: "p:1"},
+			"must be a host:port gRPC target",
+		},
+		{
+			"scheme target",
+			map[string]string{
+				productTargetSetting: "dns:///product-service:9090",
+				pricingTargetSetting: "pricing-service:9090",
+			},
+			"must be a host:port gRPC target",
+		},
+		{
+			"zero port",
+			map[string]string{productTargetSetting: "product:0", pricingTargetSetting: "p:1"},
+			"must use a valid port",
+		},
+		{
+			"calls exceed request budget",
+			map[string]string{
+				productTargetSetting:   "product-service:9090",
+				pricingTargetSetting:   "pricing-service:9090",
+				providerTimeoutSetting: "4s",
+			},
+			"must leave both provider calls within REQUEST_TIMEOUT",
+		},
+		{"invalid timeout", map[string]string{providerTimeoutSetting: "0s"}, providerTimeoutSetting},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := load(mapLookup(test.values))
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.reason) {
+				t.Fatalf("expected refusal %q, got %v", test.reason, err)
+			}
+		})
+	}
+}

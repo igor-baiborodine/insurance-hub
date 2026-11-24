@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -28,7 +29,12 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const (
+	echoPath   = "/v1/example/echo"
+	offersPath = "/offers"
+	echoRoute  = "POST " + echoPath
+	offerRoute = "POST " + offersPath
+)
 
 type Settings struct {
 	RequestTimeout time.Duration
@@ -39,15 +45,16 @@ type Settings struct {
 	Observer       *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client policyv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
-	if client == nil || !validSettings(settings) {
+// NewHandler registers the generated clients while retaining a strict HTTP contract.
+func NewHandler(
+	echoClient policyv1.ExampleServiceClient,
+	policyClient policyv1.PolicyServiceClient,
+	settings Settings,
+) (http.Handler, error) {
+	if echoClient == nil || policyClient == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
-	}
+	marshaler := newPolicyMarshaler()
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
@@ -60,12 +67,20 @@ func NewHandler(client policyv1.ExampleServiceClient, settings Settings) (http.H
 	if err := policyv1.RegisterExampleServiceHandlerClient(
 		context.Background(),
 		mux,
-		client,
+		echoClient,
+	); err != nil {
+		return nil, errors.New("create gateway: register generated handler")
+	}
+	if err := policyv1.RegisterPolicyServiceHandlerClient(
+		context.Background(),
+		mux,
+		policyClient,
 	); err != nil {
 		return nil, errors.New("create gateway: register generated handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
 	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.offers = handler.instrument(offerRoute, http.HandlerFunc(handler.serveCreateOffer))
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -104,6 +119,7 @@ type Handler struct {
 	mux       http.Handler
 	settings  Settings
 	echo      http.Handler
+	offers    http.Handler
 	unmatched http.Handler
 }
 
@@ -125,9 +141,15 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
-		return
+	if request.Method == http.MethodPost {
+		switch facts.originalPath {
+		case echoPath:
+			handler.echo.ServeHTTP(writer, request)
+			return
+		case offersPath:
+			handler.offers.ServeHTTP(writer, request)
+			return
+		}
 	}
 	request.URL.Path = "/unmatched"
 	handler.unmatched.ServeHTTP(writer, request)
@@ -151,6 +173,22 @@ func (handler *Handler) instrument(route string, next http.Handler) http.Handler
 }
 
 func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
+	handler.serveJSON(writer, request, func(body []byte) ([]byte, bool) {
+		return body, validRequestJSON(body)
+	})
+}
+
+func (handler *Handler) serveCreateOffer(writer http.ResponseWriter, request *http.Request) {
+	handler.serveJSON(writer, request, normalizeOfferJSON)
+}
+
+// serveJSON applies the shared media, size and query rules before the generated route decodes
+// the normalized RPC body.
+func (handler *Handler) serveJSON(
+	writer http.ResponseWriter,
+	request *http.Request,
+	normalize func([]byte) ([]byte, bool),
+) {
 	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
@@ -187,17 +225,18 @@ func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Requ
 		)
 		return
 	}
-	if !validRequestJSON(body) {
+	normalized, ok := normalize(body)
+	if !ok {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.Body = io.NopCloser(bytes.NewReader(normalized))
 	handler.mux.ServeHTTP(writer, request)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
+	if facts.originalPath == echoPath || facts.originalPath == offersPath {
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -258,6 +297,8 @@ func safeGatewayError(
 	switch code {
 	case codes.InvalidArgument:
 		writeError(writer, http.StatusBadRequest, code, "invalid request")
+	case codes.NotFound:
+		writeError(writer, http.StatusNotFound, code, "not found")
 	case codes.Canceled:
 		writeError(writer, 499, code, "request canceled")
 	case codes.DeadlineExceeded:
@@ -317,6 +358,219 @@ func validRequestJSON(data []byte) bool {
 	_, err = decoder.Token()
 	return errors.Is(err, io.EOF)
 }
+
+func normalizeOfferJSON(data []byte) ([]byte, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	seen := make(map[string]struct{}, 5)
+	request := &policyv1.CreateOfferRequest{}
+	for decoder.More() {
+		value, tokenErr := decoder.Token()
+		name, nameOK := value.(string)
+		if tokenErr != nil || !nameOK {
+			return nil, false
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, false
+		}
+		seen[name] = struct{}{}
+		switch name {
+		case "productCode":
+			err = decoder.Decode(&request.ProductCode)
+		case "policyFrom":
+			request.PolicyFrom, err = decodeHTTPDate(decoder)
+		case "policyTo":
+			request.PolicyTo, err = decodeHTTPDate(decoder)
+		case "selectedCovers":
+			err = decoder.Decode(&request.SelectedCovers)
+		case "answers":
+			var answers []json.RawMessage
+			if err = decoder.Decode(&answers); err == nil {
+				request.Answers = make([]*policyv1.OfferAnswer, 0, len(answers))
+				for _, raw := range answers {
+					answer, valid := decodeHTTPAnswer(raw)
+					if !valid {
+						return nil, false
+					}
+					request.Answers = append(request.Answers, answer)
+				}
+			}
+		default:
+			return nil, false
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	_, err = decoder.Token()
+	if !errors.Is(err, io.EOF) {
+		return nil, false
+	}
+	normalized, err := protojson.Marshal(request)
+	return normalized, err == nil
+}
+
+// decodeHTTPDate converts an ISO date or [year, month, day] array to RPC date text.
+func decodeHTTPDate(decoder *json.Decoder) (string, error) {
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		return "", err
+	}
+	if !bytes.HasPrefix(raw, []byte("[")) {
+		var text string
+		err := json.Unmarshal(raw, &text)
+		return text, err
+	}
+	var parts []any
+	arrayDecoder := json.NewDecoder(bytes.NewReader(raw))
+	arrayDecoder.UseNumber()
+	if err := arrayDecoder.Decode(&parts); err != nil || len(parts) != 3 {
+		return "", errors.New("invalid date array")
+	}
+	var values [3]int
+	limits := [3][2]int{{0, 9999}, {1, 12}, {1, 31}}
+	for index, part := range parts {
+		number, isNumber := part.(json.Number)
+		value, err := strconv.Atoi(number.String())
+		if !isNumber || err != nil || value < limits[index][0] || value > limits[index][1] {
+			return "", errors.New("invalid date array")
+		}
+		values[index] = value
+	}
+	return fmt.Sprintf("%04d-%02d-%02d", values[0], values[1], values[2]), nil
+}
+
+// decodeHTTPAnswer maps the legacy typed answer to its RPC variant. Choice and text answers are
+// JSON strings; numeric answers are JSON numbers whose exact text is preserved.
+func decodeHTTPAnswer(data []byte) (*policyv1.OfferAnswer, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	var kind string
+	var answerValue any
+	answer := &policyv1.OfferAnswer{}
+	seen := make(map[string]struct{}, 3)
+	for decoder.More() {
+		value, tokenErr := decoder.Token()
+		name, nameOK := value.(string)
+		if tokenErr != nil || !nameOK {
+			return nil, false
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return nil, false
+		}
+		seen[name] = struct{}{}
+		switch name {
+		case "type":
+			err = decoder.Decode(&kind)
+		case "questionCode":
+			err = decoder.Decode(&answer.QuestionCode)
+		case "answer":
+			err = decoder.Decode(&answerValue)
+		default:
+			return nil, false
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err = decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, false
+	}
+	text, isText := answerValue.(string)
+	number, isNumber := answerValue.(json.Number)
+	switch {
+	case kind == "choice" && isText:
+		answer.Value = &policyv1.OfferAnswer_Choice{Choice: text}
+	case kind == "text" && isText:
+		answer.Value = &policyv1.OfferAnswer_Text{Text: text}
+	case kind == "numeric" && isNumber:
+		answer.Value = &policyv1.OfferAnswer_Number{Number: number.String()}
+	default:
+		return nil, false
+	}
+	return answer, true
+}
+
+type policyMarshaler struct{ *runtime.JSONPb }
+
+func newPolicyMarshaler() *policyMarshaler {
+	return &policyMarshaler{JSONPb: &runtime.JSONPb{
+		MarshalOptions:   protojson.MarshalOptions{},
+		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+	}}
+}
+
+// Marshal writes offer amounts as JSON numbers from their exact decimal text.
+func (marshaler *policyMarshaler) Marshal(value any) ([]byte, error) {
+	response, ok := value.(*policyv1.CreateOfferResponse)
+	if !ok {
+		return marshaler.JSONPb.Marshal(value)
+	}
+	mapped := struct {
+		OfferNumber  string                     `json:"offerNumber"`
+		TotalPrice   json.RawMessage            `json:"totalPrice"`
+		CoversPrices map[string]json.RawMessage `json:"coversPrices"`
+	}{
+		OfferNumber:  response.GetOfferNumber(),
+		CoversPrices: make(map[string]json.RawMessage, len(response.GetCoversPrices())),
+	}
+	var valid bool
+	mapped.TotalPrice, valid = exactJSONNumber(response.GetTotalPrice())
+	if !valid {
+		return nil, errors.New("marshal offer: invalid total")
+	}
+	for code, price := range response.GetCoversPrices() {
+		number, valid := exactJSONNumber(price)
+		if !valid {
+			return nil, errors.New("marshal offer: invalid cover price")
+		}
+		mapped.CoversPrices[code] = number
+	}
+	return json.Marshal(mapped)
+}
+
+func exactJSONNumber(text string) (json.RawMessage, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	if _, ok := value.(json.Number); !ok {
+		return nil, false
+	}
+	_, err := decoder.Token()
+	return json.RawMessage(text), errors.Is(err, io.EOF)
+}
+
+func (marshaler *policyMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
+	return encoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(data)
+		return err
+	})
+}
+
+type encoderFunc func(any) error
+
+func (encoder encoderFunc) Encode(value any) error { return encoder(value) }
 
 func isJSON(value string) bool {
 	mediaType, parameters, err := mime.ParseMediaType(value)

@@ -231,7 +231,7 @@ def mutate_fixture(fixture: Path, case: str) -> tuple[str, str, tuple[str, ...]]
             ),
             encoding="utf-8",
         )
-        return "check-gateway-contract", "paths must contain only /v1/example/changed", ()
+        return "check-gateway-contract", "paths must contain only /offers, /v1/example/changed", ()
     if case == "gateway-startup":
         path = fixture / "internal" / "service" / "service.go"
         path.write_text(

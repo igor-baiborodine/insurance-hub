@@ -5,6 +5,7 @@ EXTRA_TOOL_PACKAGES ?=
 VERIFY_EXTRA_TOOL_SPECS ?=
 PROTO_GENERATION_TOOLS ?= buf protoc-gen-go protoc-gen-go-grpc
 GENERATED_PROTO_PATTERN ?= gen/*.go
+PROTO_GENERATION_INPUTS ?= $(PROTO_SCHEMA)
 COVERAGE_FILE ?= coverage.txt
 COVERAGE_MINIMUM ?= 75
 COVERAGE_PACKAGES ?= ./...
@@ -129,7 +130,7 @@ check-proto-drift: verify-tools
 		TOOLS_BIN="$(TOOLS_BIN)" \
 		CHECK_NAME="check-proto-drift" \
 		GENERATION_TARGET="gen-proto" \
-		GENERATION_INPUTS="Makefile buf.gen.yaml buf.yaml buf.lock $(PROTO_SCHEMA)" \
+		GENERATION_INPUTS="Makefile buf.gen.yaml buf.yaml buf.lock $(PROTO_GENERATION_INPUTS)" \
 		GENERATION_TOOLS="$(PROTO_GENERATION_TOOLS)" \
 		GENERATED_ROOT="gen" \
 		GENERATED_PATTERN="$(GENERATED_PROTO_PATTERN)" \

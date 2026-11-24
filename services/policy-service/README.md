@@ -79,7 +79,16 @@ gen/policy/v1/example_service.pb.go
 gen/policy/v1/example_service.pb.gw.go
 gen/policy/v1/example_service_grpc.pb.go
 gen/openapiv2/policy/v1/example_service.swagger.json
+gen/product/v1/product_service.pb.go
+gen/product/v1/product_service_grpc.pb.go
+gen/pricing/v1/pricing_service.pb.go
+gen/pricing/v1/pricing_service_grpc.pb.go
 ```
+
+The Product and Pricing client bindings come from exact copies of the provider-owned contracts in
+`api/product/v1/` and `api/pricing/v1/`; the gateway and Swagger generators are limited to the
+`policy.v1` package. Policy imports no provider module. After a provider contract changes, copy its
+`.proto` file unchanged and run `make gen-proto`.
 
 ### Non-mutating validation targets
 
@@ -99,7 +108,8 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint-proto`           | Buf lint for the one owned schema.                                                                                                                                                                                                                                         | Verified tools and locked BSR dependencies.                                                                                                                                        |
 | `make check-proto-breaking` | Current schema against `testdata/contract-baseline/` with Buf `FILE` rules. The baseline is fixed and never promoted automatically.                                                                                                                                        | Verified tools and readable checked-in baseline/lock data.                                                                                                                         |
 | `make check-proto-drift`    | Exact generated path set and bytes against two isolated regenerations, detecting added, modified, missing, deleted, and non-reproducible output.                                                                                                                           | Verified tools and BSR access unless cached.                                                                                                                                       |
-| `make check-gateway-contract` | Generated Swagger route, schemas, media types, responses and safe examples against `testdata/http-contract.json`. | Managed Python and readable generated Swagger; no service process or network. |
+| `make check-provider-protos` | The Product and Pricing contract copies under `api/` are byte-identical to `services/product-service` and `services/pricing-service`. | Repository checkout containing both provider services. |
+| `make check-gateway-contract` | Generated Swagger routes, schemas, media types, responses and safe examples for Echo and `POST /offers` against `testdata/http-contract.json`. | Managed Python and readable generated Swagger; no service process or network. |
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
@@ -192,6 +202,9 @@ do not repeat its supplied value.
 | `DB_MAX_CONNS` | `4` | Integer from 1 through 16; writer pool size. |
 | `DB_CONNECT_TIMEOUT` | `3s` | Positive duration bounding each connection attempt. |
 | `DB_QUERY_TIMEOUT` | `1s` | Positive duration bounding the readiness query; with a database URL it must not exceed `PROBE_TIMEOUT`. |
+| `PRODUCT_GRPC_TARGET` | unset | Optional `host:port` of the private Product gRPC service. Must be supplied together with `PRICING_GRPC_TARGET`. |
+| `PRICING_GRPC_TARGET` | unset | Optional `host:port` of the private Pricing gRPC service. Must be supplied together with `PRODUCT_GRPC_TARGET`. |
+| `PROVIDER_CALL_TIMEOUT` | `3s` | Positive duration bounding each Product and Pricing call; with provider targets, twice this value must be less than `REQUEST_TIMEOUT`. A shorter caller deadline still applies. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
 `insurance-hub`, implementation `go` and generated logical service name are fixed. `development` is
