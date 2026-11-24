@@ -108,6 +108,14 @@ func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
+	t.Run("foreign key action drift", func(t *testing.T) {
+		fixture := postgresfixture.New(t, ctx)
+		fixture.LoadJavaData(t, ctx)
+		fixture.Exec(t, ctx, changeCoverForeignKeyActionQuery)
+
+		refuse(t, ctx, fixture, "status", "incompatible Policy schema or owner")
+		refuse(t, ctx, fixture, "migrate", "incompatible Policy schema or owner")
+	})
 	fixture := postgresfixture.New(t, ctx)
 	fixture.LoadJavaData(t, ctx)
 	baseline := fixture.Query(t, ctx, postgresfixture.ReadRowFingerprints)

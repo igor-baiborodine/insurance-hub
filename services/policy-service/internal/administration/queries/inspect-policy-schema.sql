@@ -44,22 +44,32 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default, managed
         ('policy_outbox', 'payload', 'jsonb', true, false, false, true),
         ('policy_outbox', 'created_at', 'timestamp with time zone', true, false, true, true),
         ('policy_outbox', 'published_at', 'timestamp with time zone', false, false, false, true)
-), expected_constraint (tbl, kind, cols, ref, managed_only) AS (
+), expected_constraint (
+    tbl, kind, cols, ref_schema, ref_table, ref_cols,
+    update_action, delete_action, validated, managed_only
+) AS (
     VALUES
-        ('offer', 'p', '{id}', NULL, false),
-        ('offer_answers', 'p', '{offer_id,question_code}', NULL, false),
-        ('offer_answers', 'f', '{offer_id}', 'offer', false),
-        ('offer_cover', 'p', '{offer_id,cover_code}', NULL, false),
-        ('offer_cover', 'f', '{offer_id}', 'offer', false),
-        ('policy', 'p', '{id}', NULL, false),
-        ('policy_version', 'p', '{id}', NULL, false),
-        ('policy_version', 'f', '{policy_id}', 'policy', false),
-        ('cover', 'p', '{id}', NULL, false),
-        ('cover', 'f', '{policy_version_id}', 'policy_version', false),
-        ('policy_outbox', 'p', '{id}', NULL, true),
-        ('policy_outbox', 'u', '{intent_id}', NULL, true),
-        ('policy_outbox', 'f', '{policy_id}', 'policy', true),
-        ('policy_outbox', 'c', '{topic}', NULL, true)
+        ('offer', 'p', '{id}', NULL, NULL, NULL, NULL, NULL, true, false),
+        ('offer_answers', 'p', '{offer_id,question_code}',
+            NULL, NULL, NULL, NULL, NULL, true, false),
+        ('offer_answers', 'f', '{offer_id}',
+            'public', 'offer', '{id}', 'a', 'a', true, false),
+        ('offer_cover', 'p', '{offer_id,cover_code}',
+            NULL, NULL, NULL, NULL, NULL, true, false),
+        ('offer_cover', 'f', '{offer_id}',
+            'public', 'offer', '{id}', 'a', 'a', true, false),
+        ('policy', 'p', '{id}', NULL, NULL, NULL, NULL, NULL, true, false),
+        ('policy_version', 'p', '{id}', NULL, NULL, NULL, NULL, NULL, true, false),
+        ('policy_version', 'f', '{policy_id}',
+            'public', 'policy', '{id}', 'a', 'a', true, false),
+        ('cover', 'p', '{id}', NULL, NULL, NULL, NULL, NULL, true, false),
+        ('cover', 'f', '{policy_version_id}',
+            'public', 'policy_version', '{id}', 'a', 'a', true, false),
+        ('policy_outbox', 'p', '{id}', NULL, NULL, NULL, NULL, NULL, true, true),
+        ('policy_outbox', 'u', '{intent_id}', NULL, NULL, NULL, NULL, NULL, true, true),
+        ('policy_outbox', 'f', '{policy_id}',
+            'public', 'policy', '{id}', 'a', 'a', true, true),
+        ('policy_outbox', 'c', '{topic}', NULL, NULL, NULL, NULL, NULL, true, true)
 ), managed_table AS (
     SELECT DISTINCT tbl FROM expected_column WHERE NOT managed_only OR $1
 ), relation AS (
@@ -79,12 +89,22 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default, managed
         (SELECT array_agg(a.attname::text ORDER BY k.ord)
          FROM unnest(con.conkey) WITH ORDINALITY AS k (attnum, ord)
          JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum)::text,
-        referenced.relname::text
+        referenced_namespace.nspname::text,
+        referenced.relname::text,
+        (SELECT array_agg(a.attname::text ORDER BY k.ord)
+         FROM unnest(con.confkey) WITH ORDINALITY AS k (attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum)::text,
+        CASE WHEN con.contype = 'f' THEN con.confupdtype::text END,
+        CASE WHEN con.contype = 'f' THEN con.confdeltype::text END,
+        con.convalidated
     FROM relation r JOIN pg_constraint con ON con.conrelid = r.oid
     LEFT JOIN pg_class referenced ON referenced.oid = con.confrelid
+    LEFT JOIN pg_namespace referenced_namespace ON referenced_namespace.oid = referenced.relnamespace
     WHERE con.contype <> 'n'
 ), wanted_constraint AS (
-    SELECT tbl, kind, cols, ref FROM expected_constraint WHERE NOT managed_only OR $1
+    SELECT tbl, kind, cols, ref_schema, ref_table, ref_cols,
+        update_action, delete_action, validated
+    FROM expected_constraint WHERE NOT managed_only OR $1
 )
 SELECT (SELECT count(*) FROM relation) = (SELECT count(*) FROM managed_table)
     AND NOT EXISTS (

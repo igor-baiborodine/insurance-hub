@@ -54,3 +54,6 @@ var rewindOfferAllocatorQuery string
 
 //go:embed testdata/sql/restore-offer-allocator.sql
 var restoreOfferAllocatorQuery string
+
+//go:embed testdata/sql/change-cover-foreign-key-action.sql
+var changeCoverForeignKeyActionQuery string
