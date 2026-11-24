@@ -12,7 +12,7 @@ resources:
 images:
   - name: insurance-hub-document-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/document-api
-    newTag: 1.4.1
+    newTag: 1.5.0
 configMapGenerator:
   - name: document-config
     behavior: merge
@@ -20,7 +20,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-31dd2ccdbbb0
+      - SERVICE_VERSION=git-67605913fec9
       - MINIO_CA_FILE=/etc/document-service/minio/ca.crt
       - EVENT_WORKERS_ENABLED=true
       - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc:9093
