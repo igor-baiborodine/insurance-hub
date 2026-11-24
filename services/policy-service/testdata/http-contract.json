@@ -15,6 +15,7 @@
       "success_schema": "#/definitions/v1CreateOfferHTTPResponse",
       "error_schema": "#/definitions/rpcStatus",
       "request_contract": {
+        "http_request_schema": "#/definitions/v1CreateOfferHTTPRequest",
         "json_members": [
           "productCode",
           "policyFrom",
@@ -32,12 +33,6 @@
           "text": "string",
           "numeric": "number"
         },
-        "rpc_answer_members": [
-          "questionCode",
-          "choice",
-          "text",
-          "number"
-        ],
         "unknown_fields": "reject",
         "duplicate_fields": "reject",
         "non_empty_query": "reject",
@@ -131,15 +126,15 @@
     }
   },
   "schemas": {
-    "v1CreateOfferRequest": {
+    "v1CreateOfferHTTPRequest": {
       "productCode": {
         "type": "string"
       },
       "policyFrom": {
-        "type": "string"
+        "description": "Coverage start as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
       },
       "policyTo": {
-        "type": "string"
+        "description": "Coverage end as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
       },
       "selectedCovers": {
         "type": "array",
@@ -151,22 +146,20 @@
         "type": "array",
         "items": {
           "type": "object",
-          "$ref": "#/definitions/v1OfferAnswer"
+          "$ref": "#/definitions/v1OfferHTTPAnswer"
         }
       }
     },
-    "v1OfferAnswer": {
+    "v1OfferHTTPAnswer": {
+      "type": {
+        "type": "string",
+        "description": "Answer variant: \"choice\", \"text\" or \"numeric\"."
+      },
       "questionCode": {
         "type": "string"
       },
-      "choice": {
-        "type": "string"
-      },
-      "text": {
-        "type": "string"
-      },
-      "number": {
-        "type": "string"
+      "answer": {
+        "description": "A JSON string for \"choice\" and \"text\" answers; a JSON number for \"numeric\" answers."
       }
     },
     "v1CreateOfferHTTPResponse": {

@@ -67,20 +67,30 @@ def check_request_contract(
     request_contract: dict[str, Any],
     request_schema: str,
     schemas: dict[str, Any],
+    definitions: dict[str, Any],
 ) -> None:
+    body_schema = request_schema
+    http_reference = request_contract.get("http_request_schema")
+    if http_reference is not None:
+        # The published body must be the documented HTTP shape, never the RPC message.
+        require(
+            definitions.get(request_schema) == {"$ref": http_reference},
+            f"{operation_id} request body does not reference the HTTP request schema",
+        )
+        body_schema = definition_name(http_reference)
     require(
-        request_contract.get("json_members") == list(schemas.get(request_schema, {})),
-        f"{operation_id} HTTP request members differ from the RPC request schema",
+        request_contract.get("json_members") == list(schemas.get(body_schema, {})),
+        f"{operation_id} HTTP request members differ from the published request schema",
     )
-    if "rpc_answer_members" in request_contract:
+    if "answer_members" in request_contract:
         answers = require_object(
-            schemas.get(request_schema, {}).get("answers"),
-            f"{operation_id} RPC request schema lacks answers",
+            schemas.get(body_schema, {}).get("answers"),
+            f"{operation_id} published request schema lacks answers",
         )
         answer_schema = definition_name(answers.get("items", {}).get("$ref"))
         require(
-            request_contract["rpc_answer_members"] == list(schemas.get(answer_schema, {})),
-            f"{operation_id} RPC answer members differ",
+            request_contract["answer_members"] == list(schemas.get(answer_schema, {})),
+            f"{operation_id} HTTP answer members differ",
         )
 
 
@@ -88,6 +98,7 @@ def check_operation(
     operation_contract: dict[str, Any],
     paths: dict[str, Any],
     schemas: dict[str, Any],
+    definitions: dict[str, Any],
 ) -> None:
     path = operation_contract.get("path")
     method = operation_contract.get("method")
@@ -124,6 +135,7 @@ def check_operation(
         request_contract,
         definition_name(operation_contract.get("request_schema")),
         schemas,
+        definitions,
     )
 
     responses_contract = require_object(
@@ -171,16 +183,16 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
         sorted(paths) == expected_paths,
         f"Swagger paths must contain only {', '.join(map(str, expected_paths))}",
     )
+    definitions = require_object(
+        swagger.get("definitions"), "generated Swagger definitions must be an object"
+    )
     for operation in operations:
         check_operation(
             require_object(operation, "HTTP contract operation must be an object"),
             paths,
             schemas,
+            definitions,
         )
-
-    definitions = require_object(
-        swagger.get("definitions"), "generated Swagger definitions must be an object"
-    )
     for name, expected_properties in schemas.items():
         require_schema(
             definitions,

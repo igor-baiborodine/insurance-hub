@@ -318,7 +318,9 @@ publishes no event.
 
 Malformed, duplicate or unknown JSON members, a nonempty query, unsupported media, an unknown route
 and a wrong method receive fixed JSON error envelopes. The generated Swagger 2.0 document is
-`gen/openapiv2/policy/v1/policy_service.swagger.json`; `testdata/http-contract.json` is the
+`gen/openapiv2/policy/v1/policy_service.swagger.json`. Its `POST /offers` body is the
+documentation-only `CreateOfferHTTPRequest` shape described above, not the RPC message.
+`testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`. The compatibility baseline
 in `testdata/contract-baseline/` records the accepted PolicyService wire contract.
 

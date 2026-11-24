@@ -207,6 +207,34 @@
         }
       }
     },
+    "v1CreateOfferHTTPRequest": {
+      "type": "object",
+      "properties": {
+        "productCode": {
+          "type": "string"
+        },
+        "policyFrom": {
+          "description": "Coverage start as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
+        },
+        "policyTo": {
+          "description": "Coverage end as a \"YYYY-MM-DD\" string or a [year, month, day] integer array."
+        },
+        "selectedCovers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1OfferHTTPAnswer"
+          }
+        }
+      },
+      "description": "CreateOfferHTTPRequest is documentation-only: the HTTP body that the gateway maps to CreateOfferRequest."
+    },
     "v1CreateOfferHTTPResponse": {
       "type": "object",
       "properties": {
@@ -228,31 +256,7 @@
       "description": "CreateOfferHTTPResponse is documentation-only; RPC amounts remain exact decimal strings."
     },
     "v1CreateOfferRequest": {
-      "type": "object",
-      "properties": {
-        "productCode": {
-          "type": "string"
-        },
-        "policyFrom": {
-          "type": "string"
-        },
-        "policyTo": {
-          "type": "string"
-        },
-        "selectedCovers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "answers": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1OfferAnswer"
-          }
-        }
-      }
+      "$ref": "#/definitions/v1CreateOfferHTTPRequest"
     },
     "v1CreateOfferResponse": {
       "type": "object",
@@ -271,23 +275,21 @@
         }
       }
     },
-    "v1OfferAnswer": {
+    "v1OfferHTTPAnswer": {
       "type": "object",
       "properties": {
+        "type": {
+          "type": "string",
+          "description": "Answer variant: \"choice\", \"text\" or \"numeric\"."
+        },
         "questionCode": {
           "type": "string"
         },
-        "choice": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "number": {
-          "type": "string"
+        "answer": {
+          "description": "A JSON string for \"choice\" and \"text\" answers; a JSON number for \"numeric\" answers."
         }
       },
-      "description": "OfferAnswer is one typed questionnaire answer; the stored answer is limited to 255 characters."
+      "description": "OfferHTTPAnswer is documentation-only: one typed questionnaire answer in the HTTP body."
     }
   }
 }

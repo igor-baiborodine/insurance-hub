@@ -44,8 +44,24 @@ def type_price_as_string(swagger: dict[str, Any]) -> None:
     }
 
 
-def drop_numeric_answer(swagger: dict[str, Any]) -> None:
-    del swagger["definitions"]["v1OfferAnswer"]["properties"]["number"]
+def publish_rpc_request(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1CreateOfferRequest"] = {
+        "type": "object",
+        "properties": {
+            "productCode": {"type": "string"},
+            "answers": {"type": "array", "items": {"$ref": "#/definitions/v1OfferAnswer"}},
+        },
+    }
+
+
+def drop_answer_type(swagger: dict[str, Any]) -> None:
+    del swagger["definitions"]["v1OfferHTTPAnswer"]["properties"]["type"]
+
+
+def type_date_as_string(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1CreateOfferHTTPRequest"]["properties"]["policyFrom"] = {
+        "type": "string"
+    }
 
 
 def drop_not_found_response(swagger: dict[str, Any]) -> None:
@@ -60,7 +76,9 @@ def drop_not_found_response(swagger: dict[str, Any]) -> None:
         (add_response, "response status set differs"),
         (add_path, "paths must contain only /offers"),
         (type_price_as_string, "v1CreateOfferHTTPResponse.totalPrice differs"),
-        (drop_numeric_answer, "v1OfferAnswer properties differ"),
+        (publish_rpc_request, "request body does not reference the HTTP request schema"),
+        (drop_answer_type, "v1OfferHTTPAnswer properties differ"),
+        (type_date_as_string, "v1CreateOfferHTTPRequest.policyFrom differs"),
         (drop_not_found_response, "/offers response status set differs"),
     ],
 )
@@ -99,10 +117,10 @@ def test_contract_check_rejects_inconsistent_offer_answer_members(tmp_path: Path
     # given
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     offer = next(item for item in contract["operations"] if item["path"] == "/offers")
-    offer["request_contract"]["rpc_answer_members"] = ["questionCode", "text", "number"]
+    offer["request_contract"]["answer_members"] = ["questionCode", "answer"]
     changed = tmp_path / "contract.json"
     changed.write_text(json.dumps(contract), encoding="utf-8")
 
     # when / then
-    with pytest.raises(check_gateway_contract.ContractError, match="RPC answer members differ"):
+    with pytest.raises(check_gateway_contract.ContractError, match="HTTP answer members differ"):
         check_gateway_contract.check_contract(changed, SWAGGER)
