@@ -217,15 +217,19 @@ def test_strimzi_public_ca_secret_does_not_require_application_labels(monkeypatc
             "name": manager.kafka_public_ca_secret,
             "namespace": manager.data_ns,
         },
-        "data": {"ca.crt": base64.b64encode(KAFKA_CA).decode()},
+        "data": {
+            "ca.crt": base64.b64encode(KAFKA_CA).decode(),
+            "ca.p12": base64.b64encode(b"synthetic-pkcs12").decode(),
+            "ca.password": base64.b64encode(b"synthetic-password").decode(),
+        },
     }
     monkeypatch.setattr(manager, "kubectl", lambda *_, **__: json.dumps(record), raising=False)
 
     # when
-    secret = manager.get_secret(manager.kafka_public_ca_secret, manager.data_ns)
+    secret = manager.kafka_ca()
 
     # then
-    assert secret == {"ca.crt": KAFKA_CA}
+    assert secret == KAFKA_CA
 
 
 def test_each_role_query_uses_a_fresh_owned_port_forward(monkeypatch):

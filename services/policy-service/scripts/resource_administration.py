@@ -332,8 +332,7 @@ class Kubernetes:
         source = self.get_secret(self.kafka_public_ca_secret, self.data_ns)
         require(
             source is not None
-            and set(source) == {"ca.crt"}
-            and source["ca.crt"].startswith(b"-----BEGIN CERTIFICATE-----"),
+            and source.get("ca.crt", b"").startswith(b"-----BEGIN CERTIFICATE-----"),
             "Kafka public CA Secret has no usable ca.crt",
         )
         return source["ca.crt"]

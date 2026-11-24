@@ -770,6 +770,15 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         and set(secret_data) == {"database-url", "ca.crt"},
         "disposable smoke requires the exact Policy writer Secret",
     )
+    kafka_secret_name = f"{target.environment}-policy-kafka-ca"
+    source_kafka_secret = target.json("get", "secret", kafka_secret_name)
+    kafka_secret_data = source_kafka_secret.get("data")
+    require(
+        source_kafka_secret.get("type") == "Opaque"
+        and isinstance(kafka_secret_data, dict)
+        and set(kafka_secret_data) == {"ca.crt"},
+        "disposable smoke requires the exact Policy Kafka CA Secret",
+    )
     token = uuid.uuid4().hex[:12]
     target.namespace = f"policy-smoke-{token}"
     namespace = {
@@ -777,8 +786,10 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
-    # The writer Secret is copied into the owned namespace and removed with it. The workload
-    # only runs its read-only readiness query; the invalid-offer probes write nothing.
+    # The writer and public Kafka CA Secrets are copied into the owned namespace and removed with
+    # it. The workload only runs its read-only readiness query; the invalid-offer probes write
+    # nothing. The fully qualified broker name preserves the ordinary cluster while DNS originates
+    # in the disposable namespace.
     writer_secret = {
         "apiVersion": "v1",
         "kind": "Secret",
@@ -786,13 +797,24 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "type": "Opaque",
         "data": secret_data,
     }
+    kafka_secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": kafka_secret_name, "namespace": target.namespace},
+        "type": "Opaque",
+        "data": kafka_secret_data,
+    }
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
+    items["ConfigMap"]["data"]["KAFKA_BROKERS"] = (
+        "local-dev-kafka-kafka-bootstrap.local-dev-all.svc:9093"
+    )
 
     try:
         # when
         target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
         target.kubectl("create", "-f", "-", input_text=json.dumps(writer_secret))
+        target.kubectl("create", "-f", "-", input_text=json.dumps(kafka_secret))
         policy.run(
             ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
             timeout=120,
