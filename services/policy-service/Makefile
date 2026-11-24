@@ -209,7 +209,7 @@ test-integration: ## Run the service composition and disposable PostgreSQL migra
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData)$$' \
+		-run '^TestRun_(ProductionComposition.*|PolicyMigrationFreshTarget|PolicyMigrationAdoptsJavaData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyWriterReadiness)$$' \
 		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
@@ -293,7 +293,7 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make run              Start the service with environment configuration' \
 		'  make build            Compile the server and migrator' \
 		'  make test-integration Run service composition and disposable PostgreSQL migration smoke tests' \
-		'  make migration        Run migrate/status with explicit protected inputs' \
+		'  make migration        Run migrate/status through a tunnel to the enrolled target' \
 		'  make gen-sql          Regenerate sqlc queries; check-sql-drift verifies them' \
 		'  make resource-inspect Inspect Policy PostgreSQL resources without mutation' \
 		'  make resource-ensure  Confirmed role, grant, enrollment and Secret setup' \
@@ -320,19 +320,11 @@ check-sql-drift: verify-tools ## Verify sqlc output matches its schema and query
 		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
 		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
 
-# The migrator runs outside the serving image and never during server startup. All inputs are
-# explicit; credential and CA paths name private files, never values.
-migration: ## Run migrate/status against the explicitly enrolled Policy database
-	@test -n "$(POLICY_MIGRATION_OPERATION)" -a -n "$(POLICY_MIGRATION_ENV)" \
-		-a -n "$(POLICY_MIGRATION_CONTEXT)" -a -n "$(POLICY_MIGRATION_TARGET_FILE)" \
-		-a -n "$(POLICY_MIGRATION_DATABASE_URL_FILE)" -a -n "$(POLICY_MIGRATION_CA_FILE)" || { \
-		echo 'POLICY_MIGRATION_{OPERATION,ENV,CONTEXT,TARGET_FILE,DATABASE_URL_FILE,CA_FILE} are required' >&2; \
-		exit 1; }
-	@GOWORK=off $(GO) run -mod=readonly ./cmd/migrate \
-		-operation "$(POLICY_MIGRATION_OPERATION)" -environment "$(POLICY_MIGRATION_ENV)" \
-		-context "$(POLICY_MIGRATION_CONTEXT)" -target-file "$(POLICY_MIGRATION_TARGET_FILE)" \
-		-database-url-file "$(POLICY_MIGRATION_DATABASE_URL_FILE)" \
-		-ca-file "$(POLICY_MIGRATION_CA_FILE)"
+# The migrator runs from this checkout, never from the serving image or during startup. It reaches
+# the enrolled CNPG primary through an owned loopback port-forward with TLS name verification.
+migration: python-runtime-check ## Run POLICY_MIGRATION_OPERATION=migrate|status against the enrolled Policy target
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" GO="$(GO)" \
+		"$(PYTHON)" scripts/resource_administration.py migration
 
 .PHONY: resource-inspect resource-ensure resource-verify resource-test-fast
 

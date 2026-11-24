@@ -7,13 +7,16 @@ import (
 	_ "embed"
 	"errors"
 	"maps"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
@@ -117,6 +120,54 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	t.Run("sqlc schema equals the migrated shape", func(t *testing.T) {
 		requireSQLCSchemaMatchesMigration(t, ctx, fixture)
 	})
+}
+
+func TestRun_PolicyWriterReadiness(t *testing.T) {
+	// given
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	fixture := postgresfixture.New(t, ctx)
+	open := func(databaseURL string) (*pgxpool.Pool, error) {
+		return postgres.OpenPool(ctx, postgres.PoolSettings{
+			URL: databaseURL, MaxConnections: 2, ConnectTimeout: 5 * time.Second,
+		})
+	}
+	pool, err := open(fixture.WriterURL("policy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	// when
+	unmigrated := postgres.CheckReadiness(ctx, pool, time.Second)
+	fixture.Call(t, ctx, "migrate", "version=1")
+	migrated := postgres.CheckReadiness(ctx, pool, time.Second)
+
+	// then
+	if unmigrated == nil {
+		t.Fatal("readiness passed without the required Policy tables")
+	}
+	if migrated != nil {
+		t.Fatalf("readiness after migration: %v", migrated)
+	}
+	for _, test := range []struct{ name, url string }{
+		{"missing CA", strings.Replace(fixture.WriterURL("policy"),
+			url.QueryEscape(fixture.CA), url.QueryEscape(fixture.CA+".missing"), 1)},
+		{"other database", fixture.WriterURL("pricing")},
+		{"wrong endpoint", strings.Replace(fixture.WriterURL("policy"),
+			fixture.Address.Port(), "1", 1)},
+	} {
+		t.Run("refuses "+test.name, func(t *testing.T) {
+			// when
+			refused, err := open(test.url)
+
+			// then
+			if err == nil {
+				refused.Close()
+				t.Fatal("writer pool opened against an unverified target")
+			}
+		})
+	}
 }
 
 func requireJavaPolicy(t *testing.T, policy postgres.Policy, err error) {

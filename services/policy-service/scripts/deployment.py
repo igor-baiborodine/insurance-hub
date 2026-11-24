@@ -37,6 +37,13 @@ ALLOY_EGRESS = (
     {"app.kubernetes.io/name": "alloy", "app.kubernetes.io/instance": "qa-alloy"},
     [(4317, "TCP")],
 )
+# Local-dev reaches its own Policy CNPG cluster as the writer; QA has no Go Policy database yet.
+DATABASE_PORT = 5432
+DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
+WRITER_CA_DIRECTORY = "/etc/policy-service/postgres"
+# The only alternative binding: a disposable namespace holding a fresh Policy CNPG cluster and the
+# Go workload together, used when local-dev-all is occupied by the serving Java database.
+ISOLATED_NAMESPACE = "local-dev-policy-isolated"
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -89,8 +96,20 @@ def source_version(revision: str) -> str:
     return version
 
 
-def expected_policy(environment: str) -> dict:
-    destinations = (DNS_EGRESS, ALLOY_EGRESS) if environment == "qa" else (DNS_EGRESS,)
+def database_egress(environment: str, namespace: str) -> tuple:
+    return (
+        namespace,
+        {"cnpg.io/cluster": f"{environment}-postgres-policy"},
+        [(DATABASE_PORT, "TCP")],
+    )
+
+
+def expected_policy(environment: str, data_namespace: str) -> dict:
+    destinations = (
+        (DNS_EGRESS, ALLOY_EGRESS)
+        if environment == "qa"
+        else (DNS_EGRESS, database_egress(environment, data_namespace))
+    )
     egress = [
         {
             "to": [
@@ -146,6 +165,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "Policy resource name or namespace differs",
         )
 
+    database = environment == "local-dev"
+    writer_secret = f"{environment}-postgres-policy-writer-creds"
     deployment = items["Deployment"]
     spec = deployment["spec"]
     template = spec["template"]
@@ -165,6 +186,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "terminationGracePeriodSeconds",
             "securityContext",
             "containers",
+            *(("volumes",) if database else ()),
         }
         and pod["automountServiceAccountToken"] is False
         and pod["enableServiceLinks"] is False
@@ -195,6 +217,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "startupProbe",
             "livenessProbe",
             "readinessProbe",
+            *(("volumeMounts",) if database else ()),
         }
         and container["name"] == "policy-api"
         and container["imagePullPolicy"] == "IfNotPresent"
@@ -210,10 +233,22 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         ]
         and container["env"]
         == [
+            *(
+                [
+                    {
+                        "name": "POLICY_DATABASE_URL",
+                        "valueFrom": {
+                            "secretKeyRef": {"name": writer_secret, "key": "database-url"}
+                        },
+                    }
+                ]
+                if database
+                else []
+            ),
             {
                 "name": "SERVICE_INSTANCE_ID",
                 "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.uid"}},
-            }
+            },
         ]
         and container["envFrom"] == [{"configMapRef": {"name": f"{environment}-policy-config"}}]
         and container["resources"]
@@ -223,6 +258,23 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         },
         "Policy container security, ports, resources or identity binding differs",
     )
+    if database:
+        # Only the writer credential and its CA reach the serving Pod.
+        require(
+            container["volumeMounts"]
+            == [{"name": "postgres-ca", "mountPath": WRITER_CA_DIRECTORY, "readOnly": True}]
+            and pod["volumes"]
+            == [
+                {
+                    "name": "postgres-ca",
+                    "secret": {
+                        "secretName": writer_secret,
+                        "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    },
+                }
+            ],
+            "Policy database credential or CA mount differs",
+        )
     for name, path, period, failures in (
         ("startupProbe", "/livez", 2, 30),
         ("livenessProbe", "/livez", 10, 3),
@@ -249,6 +301,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         "SERVICE_VERSION": version,
         "OTEL_ENABLED": "true" if environment == "qa" else "false",
     }
+    if database:
+        expected_data.update(DATABASE_CONFIG)
     if environment == "qa":
         expected_data["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"
@@ -281,7 +335,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             "local image and release version differ",
         )
     require(
-        policy_spec(items["NetworkPolicy"]["spec"]) == expected_policy(environment),
+        policy_spec(items["NetworkPolicy"]["spec"])
+        == expected_policy(environment, target["dataNamespace"]),
         "Policy NetworkPolicy must deny Pod ingress and allow only the accepted egress",
     )
     return items
@@ -336,9 +391,11 @@ class Target:
         self.configuration = target_record(ROOT, self.record, self.environment)
         self.context = self.configuration["context"]
         self.namespace = self.configuration["namespace"]
+        requested = os.environ.get("DEPLOY_SVC_NS")
+        if self.environment == "local-dev" and requested == ISOLATED_NAMESPACE:
+            self.namespace = ISOLATED_NAMESPACE
         require(
-            os.environ.get("DEPLOY_CONTEXT") == self.context
-            and os.environ.get("DEPLOY_SVC_NS") == self.namespace,
+            os.environ.get("DEPLOY_CONTEXT") == self.context and requested == self.namespace,
             "deployment coordinates differ from the catalog",
         )
         self.deployment = f"{self.environment}-policy-api"
@@ -388,6 +445,8 @@ class Target:
             require(
                 config["SERVICE_VERSION"] == version, "QA Policy release is inactive or differs"
             )
+        if self.namespace != self.configuration["namespace"]:
+            bind_namespace(items, self.environment, self.namespace)
         self.template_labels = template["metadata"]["labels"]
         return yaml.safe_dump_all(items.values(), explicit_start=True), items, container["image"]
 
@@ -497,6 +556,14 @@ class Target:
             identity = f"{metadata['namespace']}_{metadata['name']}_{group}_{kind}"
             expected.add((identity, version))
         require(expected <= observed, "shared Flux inventory does not own all Policy resources")
+
+
+def bind_namespace(items: dict[str, dict], environment: str, namespace: str) -> None:
+    """Move a validated local-dev render, and its database egress, to the isolated namespace."""
+    for item in items.values():
+        item["metadata"]["namespace"] = namespace
+    spec = items["NetworkPolicy"]["spec"]
+    spec["egress"] = expected_policy(environment, namespace)["egress"]
 
 
 def running_image_matches(mode: str, image: str, digest: str, running: str) -> bool:
@@ -687,6 +754,18 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
         ),
         "Policy runtime identity differs",
     )
+    container = items["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    if any(item["name"] == "POLICY_DATABASE_URL" for item in container["env"]):
+        # Readiness above ran the writer's bounded table reads from inside this Pod.
+        require(
+            any(
+                record.get("msg") == "policy database ready"
+                and record.get("database_role") == "go_policy_writer"
+                for record in records
+            ),
+            "Policy Pod did not verify its writer database connection",
+        )
+        print("Policy database readiness passed through the writer role and verified TLS")
     print(
         f"Policy HTTP Echo, direct gRPC Echo, liveness, readiness and identity passed: {expected}"
     )

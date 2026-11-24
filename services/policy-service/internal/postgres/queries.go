@@ -8,3 +8,6 @@ var assumeOwnerQuery string
 
 //go:embed queries/administration-settings.sql
 var administrationSettingsQuery string
+
+//go:embed queries/inspect-writer-readiness.sql
+var inspectWriterReadinessQuery string

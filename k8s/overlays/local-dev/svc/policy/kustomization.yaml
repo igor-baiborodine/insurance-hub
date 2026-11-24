@@ -19,7 +19,14 @@ configMapGenerator:
     literals:
       - DEPLOYMENT_ENVIRONMENT=local-dev
       - SERVICE_VERSION=git-000000000000
+      - DB_MAX_CONNS=4
+      - DB_CONNECT_TIMEOUT=3s
+      - DB_QUERY_TIMEOUT=1s
 patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-api
   - path: network-policy-patch.yaml
     target:
       kind: NetworkPolicy

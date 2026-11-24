@@ -228,3 +228,86 @@ def test_verify_requires_permission_denied_sqlstate(monkeypatch):
     # when / then
     with pytest.raises(resources.ResourceError, match="SQLSTATE 42501"):
         resources.verify(target)
+
+
+@pytest.mark.parametrize(
+    ("environment", "namespace", "accepted"),
+    [
+        ("local-dev", resources.ISOLATED_NAMESPACE, True),
+        ("local-dev", "local-dev-policy-other", False),
+        ("qa", resources.ISOLATED_NAMESPACE, False),
+    ],
+)
+def test_isolated_binding_selects_only_its_own_coordinates(
+    monkeypatch, environment, namespace, accepted
+):
+    # given
+    context = resources.ENVIRONMENTS[environment][0]
+    cluster = f"{environment}-postgres-policy"
+    for key, value in {
+        "POLICY_RESOURCE_CONTEXT": context,
+        "POLICY_RESOURCE_DATA_NS": namespace,
+        "POLICY_RESOURCE_SVC_NS": namespace,
+        "POLICY_RESOURCE_CLUSTER": cluster,
+        "POLICY_RESOURCE_DB_HOST": f"{cluster}-rw.{namespace}.svc.cluster.local",
+    }.items():
+        monkeypatch.setenv(key, value)
+    contacted = []
+
+    def stop_at_cluster(argv, **_options):
+        contacted.append(argv)
+        raise resources.ResourceError("stop before cluster contact")
+
+    monkeypatch.setattr(resources, "command", stop_at_cluster)
+
+    # when / then
+    with pytest.raises(resources.ResourceError) as raised:
+        resources.Kubernetes(environment)
+    if accepted:
+        assert "stop before cluster contact" in str(raised.value)
+        assert f"get namespace {namespace}" in " ".join(contacted[0])
+    else:
+        assert "must explicitly equal" in str(raised.value) and not contacted
+
+
+@pytest.mark.parametrize(
+    ("operation", "confirmation", "message"),
+    [
+        ("drop", "", "must be migrate or status"),
+        ("migrate", "", "POLICY_MIGRATION_CONFIRM must equal migrate-local-dev-policy-schema"),
+        ("migrate", "migrate-qa-policy-schema", "POLICY_MIGRATION_CONFIRM"),
+    ],
+)
+def test_migration_requires_operation_and_confirmation_before_access(
+    monkeypatch, operation, confirmation, message
+):
+    # given
+    monkeypatch.setenv("POLICY_RESOURCE_ENV", "local-dev")
+    monkeypatch.setenv("POLICY_MIGRATION_OPERATION", operation)
+    monkeypatch.setenv("POLICY_MIGRATION_CONFIRM", confirmation)
+    monkeypatch.setattr(resources, "Kubernetes", lambda *_: pytest.fail("target accessed"))
+
+    # when / then
+    with pytest.raises(resources.ResourceError, match=message):
+        resources.main(["migration"])
+
+
+def test_tunnel_url_keeps_enrolled_host_and_only_adds_loopback(tmp_path):
+    # given
+    password = "A" * 64
+    canonical = resources.database_url(resources.MIGRATOR, password, FakeTarget.hostname)
+
+    # when
+    url = resources.tunnel_url(canonical, FakeTarget.hostname, 15432, tmp_path / "ca.crt")
+
+    # then
+    parsed = resources.urlsplit(url)
+    query = dict(item.split("=", 1) for item in parsed.query.split("&"))
+    assert parsed.hostname == FakeTarget.hostname and parsed.port == 5432
+    assert parsed.username == resources.MIGRATOR and parsed.password == password
+    assert query == {
+        "sslmode": "verify-full",
+        "sslrootcert": resources.quote(str(tmp_path / "ca.crt"), safe=""),
+        "hostaddr": "127.0.0.1",
+        "port": "15432",
+    }

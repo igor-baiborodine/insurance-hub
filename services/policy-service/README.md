@@ -188,6 +188,10 @@ do not repeat its supplied value.
 | `OTEL_ENABLED` | `false` | Boolean. Disabled mode creates no exporter and needs no collector. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
+| `POLICY_DATABASE_URL` | unset | Optional. When set, a `postgres`/`postgresql` URL for database `policy` with a password and exactly `sslmode=verify-full` and `sslrootcert`; the pool accepts only login `go_policy_writer`. Unset leaves the service without storage. |
+| `DB_MAX_CONNS` | `4` | Integer from 1 through 16; writer pool size. |
+| `DB_CONNECT_TIMEOUT` | `3s` | Positive duration bounding each connection attempt. |
+| `DB_QUERY_TIMEOUT` | `1s` | Positive duration bounding the readiness query; with a database URL it must not exceed `PROBE_TIMEOUT`. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
 `insurance-hub`, implementation `go` and generated logical service name are fixed. `development` is
@@ -262,6 +266,10 @@ only after the actual gRPC server is accepting the owned gateway connection and 
 serving. The owned same-process connection disables grpc-go channel idleness so an inactive but
 healthy gateway cannot become permanently unready. Each readiness request rechecks that the
 connection remains `READY` within `PROBE_TIMEOUT`; liveness stays independent of that dependency.
+With `POLICY_DATABASE_URL`, startup opens the writer pool and refuses to listen until a bounded
+query proves the `go_policy_writer` identity and access to every Policy table. Each readiness
+request repeats that query within `DB_QUERY_TIMEOUT`; liveness does not touch the database. The
+pool closes after HTTP handlers drain.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
 HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops

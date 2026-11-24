@@ -33,7 +33,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from scripts.go.service.tooling_contracts import (
     AdministrationError,
@@ -57,12 +57,18 @@ ENVIRONMENTS = {
     "local-dev": ("kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"),
     "qa": ("qa-insurance-hub", "qa-data", "qa-svc"),
 }
+# The only alternative binding: a disposable local-dev namespace holding a fresh Policy CNPG
+# cluster and the Go workload together while local-dev-all serves the Java database.
+ISOLATED_NAMESPACE = "local-dev-policy-isolated"
 COMMAND_SECONDS = 30
 PROBE_STATE = re.compile(r"policy-probe-state:([0-9A-Z]{5})")
 ADMINISTRATION = Path(__file__).resolve().parents[1] / "internal/administration"
 PROVISION_SQL = ADMINISTRATION / "provisioning/provision-access.sql"
 INSPECT_ACCESS_SQL = ADMINISTRATION / "provisioning/inspect-access.sql"
 WRITER_GRANTS_SQL = ADMINISTRATION / "queries/apply-writer-grants.sql"
+MODULE_ROOT = Path(__file__).resolve().parents[1]
+MIGRATION_SECONDS = 180
+MIGRATION_OPERATIONS = {"migrate", "status"}
 MANAGED_TABLES = (
     "offer",
     "offer_answers",
@@ -139,14 +145,16 @@ def command(
     input_text: str | None = None,
     sensitive: Sequence[str] = (),
     environment: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: float = COMMAND_SECONDS,
 ) -> tuple[str, str]:
     """Run one bounded child. Diagnostics name the tool only, never its output or input."""
     try:
         result = run_command(
             argv,
-            cwd=Path.cwd(),
+            cwd=cwd or Path.cwd(),
             env=kubernetes_environment(environment),
-            timeout_seconds=COMMAND_SECONDS,
+            timeout_seconds=timeout,
             activity=f"policy-resources {Path(argv[0]).name}",
             input_text=input_text,
             sensitive_values=tuple(value for value in sensitive if value),
@@ -185,6 +193,13 @@ class Kubernetes:
         require(environment in ENVIRONMENTS, "POLICY_RESOURCE_ENV must be local-dev or qa")
         self.environment = environment
         self.context, self.data_ns, self.svc_ns = ENVIRONMENTS[environment]
+        if (
+            environment == "local-dev"
+            and os.environ.get("POLICY_RESOURCE_DATA_NS")
+            == os.environ.get("POLICY_RESOURCE_SVC_NS")
+            == ISOLATED_NAMESPACE
+        ):
+            self.data_ns = self.svc_ns = ISOLATED_NAMESPACE
         self.kubectl_path = os.environ.get("KUBECTL", "kubectl")
         self.cluster = f"{environment}-postgres-policy"
         self.ca_name = f"{environment}-postgres-policy-ca"
@@ -580,10 +595,95 @@ def inspect(manager: Kubernetes) -> dict[str, object]:
     }
 
 
+def tunnel_url(value: str, hostname: str, port: int, ca_path: Path) -> str:
+    """Point the canonical migrator URL at a loopback tunnel; TLS still verifies the host name."""
+    password = password_from_url(MIGRATOR, value, hostname)
+    return (
+        f"postgresql://{MIGRATOR}:{quote(password, safe='')}@{hostname}:5432/policy?"
+        + urlencode(
+            {
+                "sslmode": "verify-full",
+                "sslrootcert": str(ca_path),
+                "hostaddr": "127.0.0.1",
+                "port": str(port),
+            }
+        )
+    )
+
+
+def migration(manager: Kubernetes, operation: str) -> str:
+    """Run the Policy migrator from this checkout against the enrolled target's primary."""
+    _, stored, target, target_stored = read_inputs(manager)
+    credentials = stored[MIGRATOR]
+    require(
+        target_stored and credentials is not None,
+        "Policy enrollment or migrator Secret is missing; run resource-ensure first",
+    )
+    require(credentials["ca.crt"] == manager.ca(), "migrator Secret CA differs from CNPG CA")
+    port = loopback_port()
+    spec = PortForwardSpec(manager.context, manager.data_ns, f"pod/{manager.primary}", port, 5432)
+    with (
+        tempfile.TemporaryDirectory(prefix="policy-migration-") as directory,
+        OwnedPortForward(
+            spec,
+            cwd=MODULE_ROOT,
+            env=kubernetes_environment(),
+            startup_seconds=10,
+            kubectl=manager.kubectl_path,
+        ),
+    ):
+        root = Path(directory)
+        paths = {name: root / name for name in ("target.json", "ca.crt", "database-url")}
+        url = tunnel_url(
+            credentials["database-url"].decode(), manager.hostname, port, paths["ca.crt"]
+        )
+        for name, content in (
+            ("target.json", json.dumps(target).encode()),
+            ("ca.crt", credentials["ca.crt"]),
+            ("database-url", url.encode()),
+        ):
+            descriptor = os.open(paths[name], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+        argv = [
+            os.environ.get("GO", "go"),
+            "run",
+            "-mod=readonly",
+            "./cmd/migrate",
+            "-operation",
+            operation,
+            "-environment",
+            manager.environment,
+            "-context",
+            manager.context,
+            "-target-file",
+            str(paths["target.json"]),
+            "-database-url-file",
+            str(paths["database-url"]),
+            "-ca-file",
+            str(paths["ca.crt"]),
+        ]
+        try:
+            result = run_command(
+                argv,
+                cwd=MODULE_ROOT,
+                env=child_environment({"GOWORK": "off"}, preferred_executables=argv[:1]),
+                timeout_seconds=MIGRATION_SECONDS,
+                activity=f"policy-migrate {operation}",
+                sensitive_values=(urlsplit(url).password or "",),
+            )
+        except CommandError as error:
+            # The migrator reports only redacted, operator-safe diagnostics.
+            raise ResourceError(
+                f"policy-migrate {operation} refused: {error.stderr.strip()[-600:]}"
+            ) from error
+    return result.stdout.strip()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) != 1 or arguments[0] not in {"inspect", "ensure", "verify"}:
-        print("policy-resources: expected inspect, ensure or verify", file=sys.stderr)
+    if len(arguments) != 1 or arguments[0] not in {"inspect", "ensure", "verify", "migration"}:
+        print("policy-resources: expected inspect, ensure, verify or migration", file=sys.stderr)
         return 2
     action = arguments[0]
     environment = os.environ.get("POLICY_RESOURCE_ENV", "")
@@ -594,8 +694,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             os.environ.get("POLICY_RESOURCE_CONFIRM") == expected,
             f"POLICY_RESOURCE_CONFIRM must equal {expected}",
         )
+    operation = os.environ.get("POLICY_MIGRATION_OPERATION", "")
+    if action == "migration":
+        require(
+            operation in MIGRATION_OPERATIONS,
+            "POLICY_MIGRATION_OPERATION must be migrate or status",
+        )
+        expected = f"migrate-{environment}-policy-schema"
+        require(
+            operation == "status" or os.environ.get("POLICY_MIGRATION_CONFIRM") == expected,
+            f"POLICY_MIGRATION_CONFIRM must equal {expected}",
+        )
     manager = Kubernetes(environment)
-    if action == "inspect":
+    if action == "migration":
+        print(migration(manager, operation))
+    elif action == "inspect":
         print(json.dumps(inspect(manager), sort_keys=True))
     elif action == "ensure":
         ensure(manager)

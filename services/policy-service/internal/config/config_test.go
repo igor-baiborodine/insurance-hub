@@ -600,3 +600,68 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 		})
 	}
 }
+
+const validDatabaseURL = "postgresql://go_policy_writer:secret@local-dev-postgres-policy-rw." +
+	"local-dev-all.svc.cluster.local:5432/policy" +
+	"?sslmode=verify-full&sslrootcert=/etc/policy-service/postgres/ca.crt"
+
+func TestLoad_DatabaseIsOptionalAndRedacted(t *testing.T) {
+	// when
+	absent, absentErr := load(mapLookup(map[string]string{}))
+	present, presentErr := load(mapLookup(map[string]string{
+		databaseURLSetting: validDatabaseURL, databaseMaxConnsSetting: "2",
+		databaseQuerySetting: "500ms",
+	}))
+
+	// then
+	if absentErr != nil || absent.Database.Configured() {
+		t.Fatalf("absent database: %+v (%v)", absent.Database, absentErr)
+	}
+	if presentErr != nil || !present.Database.Configured() ||
+		present.Database.URL.Value() != validDatabaseURL ||
+		present.Database.MaxConnections != 2 ||
+		present.Database.ConnectTimeout != 3*time.Second ||
+		present.Database.QueryTimeout != 500*time.Millisecond {
+		t.Fatalf("configured database: %+v (%v)", present.Database, presentErr)
+	}
+	if formatted := fmt.Sprintf("%v %+v %#v", present.Database.URL, present.Database,
+		present.Database.URL); strings.Contains(formatted, "secret") {
+		t.Fatalf("database credential leaked: %s", formatted)
+	}
+}
+
+func TestLoad_RejectsUnsafeDatabaseSettings(t *testing.T) {
+	for _, test := range []struct{ name, setting, value, reason string }{
+		{"empty URL", databaseURLSetting, " ", "must not be empty"},
+		{
+			"other database", databaseURLSetting,
+			strings.Replace(validDatabaseURL, "/policy?", "/pricing?", 1), "Policy database",
+		},
+		{
+			"relaxed TLS", databaseURLSetting,
+			strings.Replace(validDatabaseURL, "verify-full", "require", 1), "TLS hostname",
+		},
+		{
+			"missing CA", databaseURLSetting,
+			strings.Replace(validDatabaseURL, "&sslrootcert=/etc/policy-service/postgres/ca.crt",
+				"", 1), "TLS hostname",
+		},
+		{"query beyond probe", databaseQuerySetting, "3s", "must not exceed PROBE_TIMEOUT"},
+		{"oversized pool", databaseMaxConnsSetting, "17", databaseMaxConnsSetting},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			values := map[string]string{databaseURLSetting: validDatabaseURL}
+			values[test.setting] = test.value
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.reason) ||
+				strings.Contains(err.Error(), "secret") {
+				t.Fatalf("expected redacted refusal %q, got %v", test.reason, err)
+			}
+		})
+	}
+}

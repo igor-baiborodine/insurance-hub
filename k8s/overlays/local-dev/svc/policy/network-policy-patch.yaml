@@ -17,3 +17,13 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: local-dev-postgres-policy
+      ports:
+        - port: 5432
+          protocol: TCP

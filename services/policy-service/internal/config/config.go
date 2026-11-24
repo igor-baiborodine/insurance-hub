@@ -1,9 +1,11 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -15,8 +17,37 @@ const DefaultServiceName = "policy-service"
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"
 
+const (
+	databaseURLSetting      = "POLICY_DATABASE_URL"
+	databaseMaxConnsSetting = "DB_MAX_CONNS"
+	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
+	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
+)
+
+// Database holds the optional Policy writer connection and pool limits. An absent URL leaves the
+// service without storage; environments that have provisioned Policy PostgreSQL supply it.
+type Database struct {
+	URL            DatabaseURL
+	MaxConnections int32
+	ConnectTimeout time.Duration
+	QueryTimeout   time.Duration
+}
+
+// DatabaseURL redacts the writer credential from ordinary formatting.
+type DatabaseURL struct{ value string }
+
+// Value returns the writer connection URL to the PostgreSQL adapter.
+func (databaseURL DatabaseURL) Value() string { return databaseURL.value }
+
+func (DatabaseURL) String() string   { return "[REDACTED]" }
+func (DatabaseURL) GoString() string { return "[REDACTED]" }
+
+// Configured reports whether a database connection was supplied.
+func (database Database) Configured() bool { return database.URL.value != "" }
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
+	Database Database
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -247,7 +278,13 @@ func load(lookup lookupEnv) (Config, error) {
 		}
 	}
 
+	database, err := loadDatabase(lookup, runtime.ProbeTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
+		Database:           database,
 		Runtime:            runtime,
 		GRPC:               grpc,
 		HTTPServer:         httpServer,
@@ -361,4 +398,74 @@ func validCanonicalVersion(value string) bool {
 		}
 	}
 	return nonzero
+}
+
+func loadDatabase(lookup lookupEnv, probeTimeout time.Duration) (Database, error) {
+	databaseURL, err := loadDatabaseURL(lookup)
+	if err != nil {
+		return Database{}, err
+	}
+	maxConnections, err := kitconfig.LoadBoundedInt(lookup, databaseMaxConnsSetting, "4", 1, 16)
+	if err != nil {
+		return Database{}, err
+	}
+	connectTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseConnectSetting, "3s")
+	if err != nil {
+		return Database{}, err
+	}
+	queryTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseQuerySetting, "1s")
+	if err != nil {
+		return Database{}, err
+	}
+	// Readiness runs the database check inside the probe budget.
+	if databaseURL.value != "" && queryTimeout > probeTimeout {
+		return Database{}, kitconfig.Invalid(
+			databaseQuerySetting,
+			"must not exceed PROBE_TIMEOUT",
+		)
+	}
+	return Database{
+		URL:            databaseURL,
+		MaxConnections: int32(maxConnections),
+		ConnectTimeout: connectTimeout,
+		QueryTimeout:   queryTimeout,
+	}, nil
+}
+
+func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
+	value, ok := lookup(databaseURLSetting)
+	if !ok {
+		return DatabaseURL{}, nil
+	}
+	if strings.TrimSpace(value) == "" {
+		return DatabaseURL{}, kitconfig.Invalid(databaseURLSetting, "must not be empty")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
+		parsed.User == nil || parsed.Path != "/policy" ||
+		!kitconfig.ValidHost(parsed.Hostname()) || parsed.Fragment != "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must identify the Policy database",
+		)
+	}
+	if port := parsed.Port(); port != "" {
+		if number, err := strconv.ParseUint(port, 10, 16); err != nil || number == 0 {
+			return DatabaseURL{}, kitconfig.Invalid(
+				databaseURLSetting,
+				"must use a valid port",
+			)
+		}
+	}
+	password, ok := parsed.User.Password()
+	params, err := url.ParseQuery(parsed.RawQuery)
+	if !ok || password == "" || err != nil || len(params) != 2 ||
+		len(params["sslmode"]) != 1 || params.Get("sslmode") != "verify-full" ||
+		len(params["sslrootcert"]) != 1 || params.Get("sslrootcert") == "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must require TLS hostname and CA verification",
+		)
+	}
+	return DatabaseURL{value: value}, nil
 }

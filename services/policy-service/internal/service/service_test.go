@@ -13,11 +13,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/metric"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
@@ -36,6 +38,7 @@ import (
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 )
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
@@ -1184,4 +1187,130 @@ func (*recordingProvider) GRPCPropagator() propagation.TextMapPropagator {
 
 func (provider *recordingProvider) Shutdown(ctx context.Context) error {
 	return provider.tracerProvider.Shutdown(ctx)
+}
+
+type fakePool struct{ closed atomic.Bool }
+
+func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
+func (pool *fakePool) Close()                                      { pool.closed.Store(true) }
+
+func databaseConfig(t *testing.T) config.Config {
+	t.Helper()
+	settings := testConfig(t)
+	settings.Database = loadTestDatabase(t)
+	return settings
+}
+
+func loadTestDatabase(t *testing.T) config.Database {
+	t.Helper()
+	t.Setenv("POLICY_DATABASE_URL", "postgresql://go_policy_writer:synthetic@db.example:5432/"+
+		"policy?sslmode=verify-full&sslrootcert=%2Fca.crt")
+	t.Setenv("DB_QUERY_TIMEOUT", "100ms")
+	settings, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return settings.Database
+}
+
+func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
+	// given
+	settings := databaseConfig(t)
+	pool := &fakePool{}
+	var available atomic.Bool
+	available.Store(true)
+	deps := productionDependencies()
+	var opened postgres.PoolSettings
+	deps.openPool = func(_ context.Context, settings postgres.PoolSettings) (databasePool, error) {
+		opened = settings
+		return pool, nil
+	}
+	deps.checkDatabase = func(_ context.Context, database postgres.QueryRower, timeout time.Duration) error {
+		if database != pool || timeout != 100*time.Millisecond || !available.Load() {
+			return errors.New("database unavailable")
+		}
+		return nil
+	}
+	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
+		return newStatefulGatewayConnection(connectivity.Ready), nil
+	}
+	deps.newGateway = func(policyv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+		return http.NotFoundHandler(), nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_, _ = receiveString(t, addresses), receiveString(t, addresses)
+	health := "http://" + receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+
+	// when
+	available.Store(false)
+
+	// then
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusServiceUnavailable)
+	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+	if opened.MaxConnections != settings.Database.MaxConnections ||
+		opened.URL != settings.Database.URL.Value() {
+		t.Fatalf("pool opened with unexpected settings")
+	}
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+	if !pool.closed.Load() {
+		t.Fatal("database pool was not closed during shutdown")
+	}
+}
+
+func TestRun_RefusesToStartWithoutAVerifiedDatabase(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		openErr  error
+		checkErr error
+		want     string
+	}{
+		{"pool unavailable", errors.New("refused"), nil, "open Policy database"},
+		{"tables unavailable", nil, errors.New("missing"), "verify Policy database"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			pool := &fakePool{}
+			deps := productionDependencies()
+			deps.openPool = func(context.Context, postgres.PoolSettings) (databasePool, error) {
+				if test.openErr != nil {
+					return nil, test.openErr
+				}
+				return pool, nil
+			}
+			deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
+				return test.checkErr
+			}
+			listened := false
+			deps.listen = func(string, string) (net.Listener, error) {
+				listened = true
+				return nil, errors.New("unexpected listener")
+			}
+
+			// when
+			err := run(context.Background(), databaseConfig(t), discardLogger(), deps)
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.want) || listened {
+				t.Fatalf("expected %q before listening, got %v", test.want, err)
+			}
+			if test.openErr == nil && !pool.closed.Load() {
+				t.Fatal("rejected database pool was not closed")
+			}
+		})
+	}
 }

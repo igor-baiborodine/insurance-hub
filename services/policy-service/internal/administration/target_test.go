@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 )
 
 func TestReadTarget_ValidatesProtectedEnrollment(t *testing.T) {
@@ -27,6 +29,16 @@ func TestReadTarget_ValidatesProtectedEnrollment(t *testing.T) {
 			strings.Replace(content, "{", `{"seedAllowed":true,`, 1),
 			"invalid target enrollment", 0o600,
 		},
+		{
+			"isolated namespace", "kind-local-dev-insurance-hub",
+			strings.ReplaceAll(content, "local-dev-all", isolatedNamespace), "", 0o600,
+		},
+		{
+			"split isolated namespace", "kind-local-dev-insurance-hub",
+			strings.Replace(content, `"dataNamespace":"local-dev-all"`,
+				`"dataNamespace":"`+isolatedNamespace+`"`, 1),
+			"coordinates differ from environment policy", 0o600,
+		},
 		{"readable enrollment", "kind-local-dev-insurance-hub", content, "private regular file", 0o644},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -39,7 +51,8 @@ func TestReadTarget_ValidatesProtectedEnrollment(t *testing.T) {
 			// then
 			if test.diagnostic == "" {
 				if err != nil ||
-					got.Host != "local-dev-postgres-policy-rw.local-dev-all.svc.cluster.local" {
+					got.Host != "local-dev-postgres-policy-rw."+got.DataNamespace+
+						".svc.cluster.local" {
 					t.Fatalf(
 						"expected approved enrollment, got %+v (%v)",
 						got,
@@ -68,7 +81,7 @@ func TestMigrationConnection_RequiresVerifiedMigratorURL(t *testing.T) {
 	for _, test := range []struct{ name, url, diagnostic string }{
 		{"direct connection", base, ""},
 		{"loopback tunnel", base + "&hostaddr=127.0.0.1&port=15432", ""},
-		{"writer credential", strings.Replace(base, "go_policy_migrator", writerRole, 1), "does not match"},
+		{"writer credential", strings.Replace(base, "go_policy_migrator", postgres.WriterRole, 1), "does not match"},
 		{"relaxed TLS", strings.Replace(base, "verify-full", "require", 1), "TLS verify-full"},
 		{"remote tunnel", base + "&hostaddr=10.0.0.1&port=15432", "loopback"},
 		{"privileged tunnel port", base + "&hostaddr=127.0.0.1&port=80", "loopback"},

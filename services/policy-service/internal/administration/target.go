@@ -17,9 +17,9 @@ const (
 	databaseName = "policy"
 	ownerRole    = "policy"
 	migratorRole = "go_policy_migrator"
-	// writerRole is the only database identity the serving workload may use.
-	writerRole = "go_policy_writer"
-	fileLimit  = 16 * 1024
+	fileLimit    = 16 * 1024
+	// isolatedNamespace is the only alternative local-dev binding.
+	isolatedNamespace = "local-dev-policy-isolated"
 )
 
 var uuidPattern = regexp.MustCompile(
@@ -89,6 +89,10 @@ func (t Target) validate(environment, contextName string) error {
 	switch environment {
 	case "local-dev":
 		context, serviceNS, dataNS = "kind-local-dev-insurance-hub", "local-dev-all", "local-dev-all"
+		// The isolated binding holds a fresh Policy cluster and workload in one namespace.
+		if t.DataNamespace == isolatedNamespace && t.ServiceNamespace == isolatedNamespace {
+			serviceNS, dataNS = isolatedNamespace, isolatedNamespace
+		}
 		cluster = "local-dev-postgres-policy"
 	case "qa":
 		context, serviceNS, dataNS = "qa-insurance-hub", "qa-svc", "qa-data"

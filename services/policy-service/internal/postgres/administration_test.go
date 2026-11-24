@@ -24,7 +24,7 @@ func TestOpenMigrationDatabase_RejectsUntrustedInputs(t *testing.T) {
 	}{
 		{"missing CA", databaseURL, "127.0.0.1", nil, errInvalidCA},
 		{"different host", databaseURL, "different-host", ca, errInvalidConnection},
-		{"writer login", replaceUser(t, databaseURL, "go_policy_writer"), "127.0.0.1", ca, errInvalidConnection},
+		{"writer login", replaceUser(t, databaseURL, WriterRole), "127.0.0.1", ca, errInvalidConnection},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// when

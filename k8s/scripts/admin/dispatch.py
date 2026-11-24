@@ -169,6 +169,7 @@ def _target(commands: Commands) -> Kubernetes:
         service_namespace=os.environ.get("SVC_NS", expected.service_namespace),
         monitoring_namespace=os.environ.get("MONITORING_NS", expected.monitoring_namespace),
         flux_namespace=os.environ.get("FLUX_SYSTEM_NS", expected.flux_namespace),
+        service_name=os.environ.get("SVC_NAME", ""),
     )
     return Kubernetes(commands, target)
 
