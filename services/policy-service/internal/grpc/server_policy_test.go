@@ -97,6 +97,26 @@ func TestPolicyService_GetPolicy_ReturnsLatestDetailsWithExactCovers(t *testing.
 	}
 }
 
+func TestPolicyService_TerminatePolicy_ReturnsTheTerminatedNumber(t *testing.T) {
+	// given
+	var got string
+	client := newLifecycleClient(t, transport.Handlers{
+		TerminatePolicy: func(_ context.Context, number string) (string, error) {
+			got = number
+			return number, nil
+		},
+	}, new(bytes.Buffer))
+
+	// when
+	response, err := client.TerminatePolicy(t.Context(),
+		&policyv1.TerminatePolicyRequest{PolicyNumber: "policy-1"})
+
+	// then
+	if err != nil || response.GetPolicyNumber() != "policy-1" || got != "policy-1" {
+		t.Errorf("response = %v (%v), use case received %q", response, err, got)
+	}
+}
+
 func TestPolicyService_Lifecycle_MapsFailuresToSafeStatuses(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -108,6 +128,10 @@ func TestPolicyService_Lifecycle_MapsFailuresToSafeStatuses(t *testing.T) {
 		{"absent offer", application.ErrOfferNotFound, codes.NotFound, "not found", false},
 		{"absent policy", application.ErrPolicyNotFound, codes.NotFound, "not found", false},
 		{"expired offer", domain.ErrOfferExpired, codes.FailedPrecondition, "conflict", false},
+		{
+			"termination outside coverage", domain.ErrTerminationOutsideCoverage,
+			codes.FailedPrecondition, "conflict", false,
+		},
 		{
 			"storage unavailable", application.ErrStorageUnavailable, codes.Unavailable,
 			"service unavailable", false,
@@ -133,6 +157,9 @@ func TestPolicyService_Lifecycle_MapsFailuresToSafeStatuses(t *testing.T) {
 				GetPolicy: func(context.Context, string) (application.PolicyDetails, error) {
 					return application.PolicyDetails{}, failure
 				},
+				TerminatePolicy: func(context.Context, string) (string, error) {
+					return "", failure
+				},
 			}, logs)
 
 			// when
@@ -141,9 +168,11 @@ func TestPolicyService_Lifecycle_MapsFailuresToSafeStatuses(t *testing.T) {
 			})
 			_, getErr := client.GetPolicy(t.Context(),
 				&policyv1.GetPolicyRequest{PolicyNumber: "policy-1"})
+			_, terminateErr := client.TerminatePolicy(t.Context(),
+				&policyv1.TerminatePolicyRequest{PolicyNumber: "policy-1"})
 
 			// then
-			for _, err := range []error{issueErr, getErr} {
+			for _, err := range []error{issueErr, getErr, terminateErr} {
 				if got := status.Convert(err); got.Code() != test.wantCode ||
 					got.Message() != test.wantText {
 					t.Errorf(
@@ -177,6 +206,10 @@ func TestPolicyService_Lifecycle_RejectsInvalidInputBeforeUseCase(t *testing.T) 
 			called = true
 			return application.PolicyDetails{}, nil
 		},
+		TerminatePolicy: func(context.Context, string) (string, error) {
+			called = true
+			return "", nil
+		},
 	}, new(bytes.Buffer))
 
 	for _, test := range []struct {
@@ -199,6 +232,10 @@ func TestPolicyService_Lifecycle_RejectsInvalidInputBeforeUseCase(t *testing.T) 
 				OfferNumber:  "offer-1",
 				PolicyHolder: &policyv1.PolicyHolder{LastName: strings.Repeat("x", 256)},
 			})
+			return err
+		}},
+		{"termination without number", func() error {
+			_, err := client.TerminatePolicy(t.Context(), &policyv1.TerminatePolicyRequest{})
 			return err
 		}},
 		{"lookup without number", func() error {

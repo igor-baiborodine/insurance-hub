@@ -346,7 +346,17 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 	if err != nil {
 		return 0, fmt.Errorf("insert policy: %w", err)
 	}
-	version := issuance.Version
+	if err := t.insertVersion(ctx, policyID, issuance.Version); err != nil {
+		return 0, err
+	}
+	if err := t.insertIntent(ctx, policyID, issuance.Intent); err != nil {
+		return 0, err
+	}
+	return policyID, nil
+}
+
+// insertVersion writes one policy version and its covers.
+func (t Transaction) insertVersion(ctx context.Context, policyID int64, version Version) error {
 	versionID, err := t.queries.InsertPolicyVersion(ctx, dbgen.InsertPolicyVersionParams{
 		PolicyID:      pgtype.Int8{Int64: policyID, Valid: true},
 		VersionNumber: nullableInt64(version.Number),
@@ -364,24 +374,28 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 		),
 	})
 	if err != nil {
-		return 0, fmt.Errorf("insert policy version: %w", err)
+		return fmt.Errorf("insert policy version: %w", err)
 	}
 	for _, cover := range version.Covers {
 		if err := t.queries.InsertCover(ctx, dbgen.InsertCoverParams{
 			PolicyVersionID: pgtype.Int8{Int64: versionID, Valid: true},
 			Code:            nullableText(cover.Code), Price: nullableText(cover.Price),
 		}); err != nil {
-			return 0, fmt.Errorf("insert cover: %w", err)
+			return fmt.Errorf("insert cover: %w", err)
 		}
 	}
+	return nil
+}
+
+// insertIntent writes the event intent caused by a change to the policy.
+func (t Transaction) insertIntent(ctx context.Context, policyID int64, intent Intent) error {
 	if _, err := t.queries.InsertOutboxIntent(ctx, dbgen.InsertOutboxIntentParams{
-		IntentID: pgtype.UUID{Bytes: issuance.Intent.ID, Valid: true}, PolicyID: policyID,
-		Topic: issuance.Intent.Topic, MessageKey: issuance.Intent.Key,
-		Payload: issuance.Intent.Payload,
+		IntentID: pgtype.UUID{Bytes: intent.ID, Valid: true}, PolicyID: policyID,
+		Topic: intent.Topic, MessageKey: intent.Key, Payload: intent.Payload,
 	}); err != nil {
-		return 0, fmt.Errorf("insert outbox intent: %w", err)
+		return fmt.Errorf("insert outbox intent: %w", err)
 	}
-	return policyID, nil
+	return nil
 }
 
 // beginError keeps cancellation and deadlines distinct and reports a failed connection attempt,

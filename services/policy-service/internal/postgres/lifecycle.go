@@ -74,6 +74,39 @@ func (t Transaction) AddPolicy(
 	return err
 }
 
+// LoadPolicy reads the complete policy inside the command's transaction.
+func (t Transaction) LoadPolicy(ctx context.Context, number string) (domain.Policy, error) {
+	stored, err := readPolicy(ctx, t.queries, number)
+	if errors.Is(err, ErrNotFound) {
+		return domain.Policy{}, application.ErrPolicyNotFound
+	}
+	if err != nil {
+		return domain.Policy{}, err
+	}
+	return domainPolicy(stored)
+}
+
+// AppendVersion writes a further version with its covers and the event intent it causes.
+func (t Transaction) AppendVersion(
+	ctx context.Context,
+	number string,
+	version domain.PolicyVersion,
+	event domain.PolicyEvent,
+) error {
+	intent, err := outboxIntent(event)
+	if err != nil {
+		return err
+	}
+	row, err := t.queries.GetPolicy(ctx, text(number))
+	if err != nil {
+		return readError("policy", err)
+	}
+	if err := t.insertVersion(ctx, row.ID, storedVersion(version)); err != nil {
+		return err
+	}
+	return t.insertIntent(ctx, row.ID, intent)
+}
+
 func storedVersion(version domain.PolicyVersion) Version {
 	covers := make([]Cover, 0, len(version.Covers))
 	for _, cover := range version.Covers {

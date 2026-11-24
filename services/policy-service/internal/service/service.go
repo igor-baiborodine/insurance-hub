@@ -450,15 +450,16 @@ func (runtime *runningService) composeOffers(
 }
 
 // composePolicies wires the policy lifecycle when storage is configured; otherwise the
-// operations report that policy storage is unavailable. Issuance never calls a provider.
+// operations report that policy storage is unavailable. No lifecycle operation calls a provider.
 func (runtime *runningService) composePolicies(
 	settings config.Config,
 	deps dependencies,
 ) (transport.Handlers, error) {
 	if runtime.pool == nil {
 		return transport.Handlers{
-			IssuePolicy: application.UnavailableIssuance,
-			GetPolicy:   application.UnavailablePolicyDetails,
+			IssuePolicy:     application.UnavailableIssuance,
+			GetPolicy:       application.UnavailablePolicyDetails,
+			TerminatePolicy: application.UnavailableTermination,
 		}, nil
 	}
 	store, err := postgres.NewStore(runtime.pool)
@@ -473,7 +474,15 @@ func (runtime *runningService) composePolicies(
 	if err != nil {
 		return transport.Handlers{}, err
 	}
-	return transport.Handlers{IssuePolicy: issue.Execute, GetPolicy: get.Execute}, nil
+	terminate, err := application.NewTerminatePolicy(store, deps.now, settings.BusinessTimeZone)
+	if err != nil {
+		return transport.Handlers{}, err
+	}
+	return transport.Handlers{
+		IssuePolicy:     issue.Execute,
+		GetPolicy:       get.Execute,
+		TerminatePolicy: terminate.Execute,
+	}, nil
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {

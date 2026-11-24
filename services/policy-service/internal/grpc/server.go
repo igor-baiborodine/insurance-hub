@@ -35,9 +35,10 @@ const (
 
 // operations names the observed RPCs; other methods are not instrumented.
 var operations = map[string]string{
-	policyv1.PolicyService_CreateOffer_FullMethodName: "create_offer",
-	policyv1.PolicyService_IssuePolicy_FullMethodName: "issue_policy",
-	policyv1.PolicyService_GetPolicy_FullMethodName:   "get_policy",
+	policyv1.PolicyService_CreateOffer_FullMethodName:     "create_offer",
+	policyv1.PolicyService_IssuePolicy_FullMethodName:     "issue_policy",
+	policyv1.PolicyService_GetPolicy_FullMethodName:       "get_policy",
+	policyv1.PolicyService_TerminatePolicy_FullMethodName: "terminate_policy",
 }
 
 // CreateOffer is the offer use case invoked by the PolicyService transport.
@@ -49,12 +50,16 @@ type IssuePolicy func(context.Context, application.IssuePolicyCommand) (string, 
 // GetPolicy is the lookup use case for a policy's latest version.
 type GetPolicy func(context.Context, string) (application.PolicyDetails, error)
 
+// TerminatePolicy is the termination use case; it returns the terminated policy number.
+type TerminatePolicy func(context.Context, string) (string, error)
+
 // Handlers are the use cases served by PolicyService. CreateOffer is required; a missing
 // lifecycle use case reports that policy storage is not configured.
 type Handlers struct {
-	CreateOffer CreateOffer
-	IssuePolicy IssuePolicy
-	GetPolicy   GetPolicy
+	CreateOffer     CreateOffer
+	IssuePolicy     IssuePolicy
+	GetPolicy       GetPolicy
+	TerminatePolicy TerminatePolicy
 }
 
 type Settings struct {
@@ -98,6 +103,7 @@ func NewServer(
 			&policyv1.CreateOfferRequest{},
 			&policyv1.IssuePolicyRequest{},
 			&policyv1.GetPolicyRequest{},
+			&policyv1.TerminatePolicyRequest{},
 		),
 		protovalidate.WithDisableLazy(),
 	)
@@ -133,6 +139,9 @@ func NewServer(
 	}
 	if handlers.GetPolicy == nil {
 		handlers.GetPolicy = application.UnavailablePolicyDetails
+	}
+	if handlers.TerminatePolicy == nil {
+		handlers.TerminatePolicy = application.UnavailableTermination
 	}
 	policyv1.RegisterPolicyServiceServer(server, &policyServer{
 		logger:         logger,
@@ -213,6 +222,20 @@ func (server *policyServer) GetPolicy(
 	return &policyv1.GetPolicyResponse{Policy: policyDetails(details)}, nil
 }
 
+func (server *policyServer) TerminatePolicy(
+	ctx context.Context,
+	request *policyv1.TerminatePolicyRequest,
+) (*policyv1.TerminatePolicyResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	number, err := server.handlers.TerminatePolicy(requestCtx, request.GetPolicyNumber())
+	if err != nil {
+		return nil, server.lifecycleError(ctx,
+			policyv1.PolicyService_TerminatePolicy_FullMethodName, err)
+	}
+	return &policyv1.TerminatePolicyResponse{PolicyNumber: number}, nil
+}
+
 // policyDetails maps the latest version; covers are "code - price" texts in sorted order.
 func policyDetails(details application.PolicyDetails) *policyv1.PolicyDetails {
 	version := details.Latest
@@ -286,7 +309,8 @@ func (server *policyServer) lifecycleError(ctx context.Context, rpc string, err 
 	case errors.Is(err, application.ErrOfferNotFound),
 		errors.Is(err, application.ErrPolicyNotFound):
 		return status.Error(codes.NotFound, notFoundMessage)
-	case errors.Is(err, domain.ErrOfferExpired):
+	case errors.Is(err, domain.ErrOfferExpired),
+		errors.Is(err, domain.ErrTerminationOutsideCoverage):
 		return status.Error(codes.FailedPrecondition, conflictMessage)
 	case errors.Is(err, application.ErrStorageUnavailable),
 		errors.Is(err, application.ErrPoliciesUnavailable):

@@ -131,6 +131,92 @@ func TestGetPolicy_Execute_ReturnsTheLatestVersion(t *testing.T) {
 	}
 }
 
+func TestTerminatePolicy_Execute_AppendsTerminalVersionAndIntentInOneTransaction(t *testing.T) {
+	// given
+	repository := &fakePolicyRepository{policy: annualPolicy()}
+	useCase, err := application.NewTerminatePolicy(repository, func() time.Time {
+		return time.Date(2026, 6, 30, 22, 30, 0, 0, time.UTC)
+	}, time.FixedZone("UTC-1", -60*60))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// when
+	number, err := useCase.Execute(t.Context(), "policy-1")
+
+	// then
+	if err != nil || number != "policy-1" {
+		t.Fatalf("terminate = %q (%v)", number, err)
+	}
+	if want := []string{
+		"begin",
+		"load policy:policy-1",
+		"append version",
+		"commit",
+	}; !slices.Equal(
+		repository.calls,
+		want,
+	) {
+		t.Errorf("calls = %v, want %v", repository.calls, want)
+	}
+	// 22:30 UTC on 30 June is 21:30 on 30 June in the UTC-1 business zone.
+	appended := repository.appended[0]
+	if appended.number != "policy-1" || appended.version.Number != 2 ||
+		appended.version.CoverTo != time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC) ||
+		appended.version.TotalPremium != "59.51" ||
+		appended.event.Topic != domain.TopicPolicyTerminated ||
+		appended.event.TotalPremium != "59.51" || appended.event.IntentID == [16]byte{} {
+		t.Errorf("appended %+v", appended)
+	}
+}
+
+func TestTerminatePolicy_Execute_WritesNothingWhenTerminationFails(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		number string
+		now    time.Time
+		want   error
+	}{
+		{
+			"absent policy", "missing", time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC),
+			application.ErrPolicyNotFound,
+		},
+		{
+			"after coverage", "policy-1", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+			domain.ErrTerminationOutsideCoverage,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			repository := &fakePolicyRepository{policy: annualPolicy()}
+			useCase, err := application.NewTerminatePolicy(repository,
+				func() time.Time { return test.now }, time.UTC)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// when
+			_, err = useCase.Execute(t.Context(), test.number)
+
+			// then
+			if !errors.Is(err, test.want) || len(repository.appended) != 0 ||
+				slices.Contains(repository.calls, "commit") {
+				t.Errorf("error = %v, calls %v, want %v without writes", err,
+					repository.calls, test.want)
+			}
+		})
+	}
+}
+
+func annualPolicy() domain.Policy {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	return domain.Policy{Number: "policy-1", Versions: []domain.PolicyVersion{{
+		Number: 1, CoverFrom: from, CoverTo: to, VersionFrom: from, VersionTo: to,
+		TotalPremium: "120.00", Covers: []domain.Cover{{Code: "C1", Price: "120.00"}},
+	}}}
+}
+
 func newIssuePolicy(t *testing.T, repository *fakePolicyRepository) *application.IssuePolicy {
 	t.Helper()
 	useCase, err := application.NewIssuePolicy(repository, func() time.Time {
@@ -160,6 +246,12 @@ type addedPolicy struct {
 	event  domain.PolicyEvent
 }
 
+type appendedVersion struct {
+	number  string
+	version domain.PolicyVersion
+	event   domain.PolicyEvent
+}
+
 // fakePolicyRepository records one transaction's calls; work errors roll it back.
 type fakePolicyRepository struct {
 	offer    domain.Offer
@@ -167,6 +259,7 @@ type fakePolicyRepository struct {
 	policy   domain.Policy
 	calls    []string
 	added    []addedPolicy
+	appended []appendedVersion
 }
 
 func (repository *fakePolicyRepository) WithinTransaction(
@@ -180,6 +273,7 @@ func (repository *fakePolicyRepository) WithinTransaction(
 		return err
 	}
 	repository.added = append(repository.added, pending.added...)
+	repository.appended = append(repository.appended, pending.appended...)
 	repository.calls = append(repository.calls, "commit")
 	return nil
 }
@@ -197,6 +291,7 @@ func (repository *fakePolicyRepository) LoadPolicy(
 type fakePolicyWrites struct {
 	repository *fakePolicyRepository
 	added      []addedPolicy
+	appended   []appendedVersion
 }
 
 func (writes *fakePolicyWrites) LoadOffer(_ context.Context, number string) (domain.Offer, error) {
@@ -211,5 +306,25 @@ func (writes *fakePolicyWrites) AddPolicy(
 ) error {
 	writes.repository.calls = append(writes.repository.calls, "add policy")
 	writes.added = append(writes.added, addedPolicy{policy: policy, event: event})
+	return nil
+}
+
+func (writes *fakePolicyWrites) LoadPolicy(
+	ctx context.Context,
+	number string,
+) (domain.Policy, error) {
+	writes.repository.calls = append(writes.repository.calls, "load policy:"+number)
+	return writes.repository.LoadPolicy(ctx, number)
+}
+
+func (writes *fakePolicyWrites) AppendVersion(
+	_ context.Context,
+	number string,
+	version domain.PolicyVersion,
+	event domain.PolicyEvent,
+) error {
+	writes.repository.calls = append(writes.repository.calls, "append version")
+	writes.appended = append(writes.appended,
+		appendedVersion{number: number, version: version, event: event})
 	return nil
 }

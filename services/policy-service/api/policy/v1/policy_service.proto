@@ -159,6 +159,9 @@ service PolicyService {
 
   // GetPolicy returns the details of a policy's latest version.
   rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+
+  // TerminatePolicy ends a policy's coverage on the business date with a terminal version.
+  rpc TerminatePolicy(TerminatePolicyRequest) returns (TerminatePolicyResponse);
 }
 
 message CreateOfferRequest {
@@ -288,4 +291,15 @@ message PolicyDetails {
   string product_code = 6;
   string account_number = 7;
   repeated string covers = 8;
+}
+
+message TerminatePolicyRequest {
+  string policy_number = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+}
+
+message TerminatePolicyResponse {
+  string policy_number = 1;
 }

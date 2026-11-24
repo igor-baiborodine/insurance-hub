@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PolicyService_CreateOffer_FullMethodName = "/policy.v1.PolicyService/CreateOffer"
-	PolicyService_IssuePolicy_FullMethodName = "/policy.v1.PolicyService/IssuePolicy"
-	PolicyService_GetPolicy_FullMethodName   = "/policy.v1.PolicyService/GetPolicy"
+	PolicyService_CreateOffer_FullMethodName     = "/policy.v1.PolicyService/CreateOffer"
+	PolicyService_IssuePolicy_FullMethodName     = "/policy.v1.PolicyService/IssuePolicy"
+	PolicyService_GetPolicy_FullMethodName       = "/policy.v1.PolicyService/GetPolicy"
+	PolicyService_TerminatePolicy_FullMethodName = "/policy.v1.PolicyService/TerminatePolicy"
 )
 
 // PolicyServiceClient is the client API for PolicyService service.
@@ -36,6 +37,8 @@ type PolicyServiceClient interface {
 	IssuePolicy(ctx context.Context, in *IssuePolicyRequest, opts ...grpc.CallOption) (*IssuePolicyResponse, error)
 	// GetPolicy returns the details of a policy's latest version.
 	GetPolicy(ctx context.Context, in *GetPolicyRequest, opts ...grpc.CallOption) (*GetPolicyResponse, error)
+	// TerminatePolicy ends a policy's coverage on the business date with a terminal version.
+	TerminatePolicy(ctx context.Context, in *TerminatePolicyRequest, opts ...grpc.CallOption) (*TerminatePolicyResponse, error)
 }
 
 type policyServiceClient struct {
@@ -76,6 +79,16 @@ func (c *policyServiceClient) GetPolicy(ctx context.Context, in *GetPolicyReques
 	return out, nil
 }
 
+func (c *policyServiceClient) TerminatePolicy(ctx context.Context, in *TerminatePolicyRequest, opts ...grpc.CallOption) (*TerminatePolicyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TerminatePolicyResponse)
+	err := c.cc.Invoke(ctx, PolicyService_TerminatePolicy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PolicyServiceServer is the server API for PolicyService service.
 // All implementations must embed UnimplementedPolicyServiceServer
 // for forward compatibility.
@@ -88,6 +101,8 @@ type PolicyServiceServer interface {
 	IssuePolicy(context.Context, *IssuePolicyRequest) (*IssuePolicyResponse, error)
 	// GetPolicy returns the details of a policy's latest version.
 	GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error)
+	// TerminatePolicy ends a policy's coverage on the business date with a terminal version.
+	TerminatePolicy(context.Context, *TerminatePolicyRequest) (*TerminatePolicyResponse, error)
 	mustEmbedUnimplementedPolicyServiceServer()
 }
 
@@ -106,6 +121,9 @@ func (UnimplementedPolicyServiceServer) IssuePolicy(context.Context, *IssuePolic
 }
 func (UnimplementedPolicyServiceServer) GetPolicy(context.Context, *GetPolicyRequest) (*GetPolicyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetPolicy not implemented")
+}
+func (UnimplementedPolicyServiceServer) TerminatePolicy(context.Context, *TerminatePolicyRequest) (*TerminatePolicyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TerminatePolicy not implemented")
 }
 func (UnimplementedPolicyServiceServer) mustEmbedUnimplementedPolicyServiceServer() {}
 func (UnimplementedPolicyServiceServer) testEmbeddedByValue()                       {}
@@ -182,6 +200,24 @@ func _PolicyService_GetPolicy_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PolicyService_TerminatePolicy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TerminatePolicyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PolicyServiceServer).TerminatePolicy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PolicyService_TerminatePolicy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PolicyServiceServer).TerminatePolicy(ctx, req.(*TerminatePolicyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PolicyService_ServiceDesc is the grpc.ServiceDesc for PolicyService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +236,10 @@ var PolicyService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPolicy",
 			Handler:    _PolicyService_GetPolicy_Handler,
+		},
+		{
+			MethodName: "TerminatePolicy",
+			Handler:    _PolicyService_TerminatePolicy_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

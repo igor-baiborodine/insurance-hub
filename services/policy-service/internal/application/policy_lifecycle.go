@@ -24,6 +24,15 @@ type PolicyWrites interface {
 	LoadOffer(ctx context.Context, number string) (domain.Offer, error)
 	// AddPolicy stores a new policy with its versions and the event intent it causes.
 	AddPolicy(ctx context.Context, policy domain.Policy, event domain.PolicyEvent) error
+	// LoadPolicy returns the complete policy or ErrPolicyNotFound.
+	LoadPolicy(ctx context.Context, number string) (domain.Policy, error)
+	// AppendVersion adds a version and its covers to the policy with the event intent it causes.
+	AppendVersion(
+		ctx context.Context,
+		number string,
+		version domain.PolicyVersion,
+		event domain.PolicyEvent,
+	) error
 }
 
 // PolicyRepository owns the transactions of policy commands and reads complete policies.
@@ -135,8 +144,61 @@ func (useCase *GetPolicy) Execute(ctx context.Context, number string) (PolicyDet
 	return PolicyDetails{Number: policy.Number, Latest: latest}, nil
 }
 
+// TerminatePolicy ends a policy's coverage on the business date.
+type TerminatePolicy struct {
+	policies PolicyRepository
+	now      func() time.Time
+	zone     *time.Location
+}
+
+// NewTerminatePolicy wires the use case. now and zone define the termination date.
+func NewTerminatePolicy(
+	policies PolicyRepository,
+	now func() time.Time,
+	zone *time.Location,
+) (*TerminatePolicy, error) {
+	if policies == nil || now == nil || zone == nil {
+		return nil, errors.New("terminate policy use case: all dependencies are required")
+	}
+	return &TerminatePolicy{policies: policies, now: now, zone: zone}, nil
+}
+
+// Execute loads the complete policy, appends its terminal version and stores one termination
+// intent in a single transaction. Earlier versions are kept.
+func (useCase *TerminatePolicy) Execute(ctx context.Context, number string) (string, error) {
+	terminationDate := useCase.now().In(useCase.zone)
+	intentID, err := randomUUID()
+	if err != nil {
+		return "", fmt.Errorf("terminate policy: generate intent: %w", err)
+	}
+	err = useCase.policies.WithinTransaction(
+		ctx,
+		func(ctx context.Context, writes PolicyWrites) error {
+			policy, err := writes.LoadPolicy(ctx, number)
+			if err != nil {
+				return err
+			}
+			terminal, err := policy.Terminate(terminationDate)
+			if err != nil {
+				return err
+			}
+			return writes.AppendVersion(ctx, policy.Number, terminal,
+				domain.TerminationEvent(intentID, policy.Number, terminal))
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("terminate policy: %w", err)
+	}
+	return number, nil
+}
+
 // UnavailableIssuance is the issue operation of an instance without storage.
 func UnavailableIssuance(context.Context, IssuePolicyCommand) (string, error) {
+	return "", ErrPoliciesUnavailable
+}
+
+// UnavailableTermination is the terminate operation of an instance without storage.
+func UnavailableTermination(context.Context, string) (string, error) {
 	return "", ErrPoliciesUnavailable
 }
 

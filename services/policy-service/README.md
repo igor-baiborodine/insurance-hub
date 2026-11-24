@@ -11,16 +11,16 @@
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
   - [Offer creation](#offer-creation)
-  - [Policy issuance and lookup](#policy-issuance-and-lookup)
+  - [Policy issuance, lookup and termination](#policy-issuance-lookup-and-termination)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 # Policy service
 
-The Policy service creates priced offers for agents, issues policies from them and returns a
-policy's latest details. Offer creation is exposed privately over direct gRPC and an HTTP gateway;
-issuance and lookup are direct gRPC operations. Its separate management listener serves liveness
+The Policy service creates priced offers for agents, issues policies from them, returns a policy's
+latest details and terminates policies. Offer creation is exposed privately over direct gRPC and an
+HTTP gateway; issuance, lookup and termination are direct gRPC operations. Its separate management listener serves liveness
 and readiness.
 
 ## Prerequisites
@@ -242,7 +242,8 @@ diagnostic handler before enabled providers and restores the previous handler af
 
 `insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
 bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /offers` or `unmatched`;
-gRPC records the fixed `create_offer`, `issue_policy` and `get_policy` operations and final status. Request paths, queries,
+gRPC records the fixed `create_offer`, `issue_policy`, `get_policy` and `terminate_policy`
+operations and final status. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 
@@ -347,7 +348,7 @@ A deployed instance refuses to start without `POLICY_DATABASE_URL` and both prov
 `development` they may be omitted; offers then return 503 and readiness is unaffected. Provider
 availability is not part of readiness: an unreachable provider fails only the affected request.
 
-## Policy issuance and lookup
+## Policy issuance, lookup and termination
 
 `PolicyService/IssuePolicy` issues a stored offer for a policy holder (first name, last name and
 tax ID) and an optional agent login. The business date comes once from the injected clock in
@@ -360,11 +361,23 @@ outbox intent. Product and Pricing are not called. Each successful command creat
 the highest number: validity dates as `YYYY-MM-DD`, the holder's full name, the exact premium,
 product, account and covers formatted as `code - price` with their stored scale.
 
+`PolicyService/TerminatePolicy` ends coverage on the business date, derived once from the injected
+clock in `BUSINESS_TIME_ZONE`. One writer transaction loads the complete policy. If the latest
+version's coverage contains that date (both endpoints included), it appends the next version
+together with one keyed `policy-terminated` outbox intent. Earlier versions, holder, account and
+product are kept. The new version's coverage keeps its start and ends on the termination date,
+while its details apply from the following day until the original validity end. Each cover is
+multiplied by the covered share of the original coverage (covered days divided by total days,
+HALF_UP at scale 20) and rounded HALF_UP to cents; the premium is their sum. For example, one
+120.00 cover for 2026-01-01–2026-12-31 terminated on 2026-06-30 becomes 59.51. The event carries
+the shortened coverage and corrected premium. Repeated and concurrent termination commands have
+no additional protection.
+
 | Failure | gRPC status | Writes |
 | --- | --- | --- |
-| Missing offer number or holder, or a value longer than storage | InvalidArgument | none |
+| Missing offer or policy number or holder, or a value longer than storage | InvalidArgument | none |
 | Absent offer or policy | NotFound | none |
-| Offer older than 30 days | FailedPrecondition | none |
+| Offer older than 30 days, or termination date outside the latest coverage | FailedPrecondition | none |
 | Storage unreachable before the transaction starts, or not configured | Unavailable | none |
 | Rejected commit or another unexpected failure | Internal | none |
 
@@ -396,10 +409,10 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated PolicyService registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
-| `internal/application` | `CreateOffer`, `IssuePolicy` and `GetPolicy` use cases, their `ProductCatalog`, `QuoteCalculator`, `OfferStore` and `PolicyRepository` ports, and their failures. |
-| `internal/domain` | Offer and policy values; NEW status, keyed answers, exact amounts, 30-day offer validity, latest-version selection and lifecycle events. |
+| `internal/application` | `CreateOffer`, `IssuePolicy`, `GetPolicy` and `TerminatePolicy` use cases, their `ProductCatalog`, `QuoteCalculator`, `OfferStore` and `PolicyRepository` ports, and their failures. |
+| `internal/domain` | Offer and policy values; NEW status, keyed answers, exact amounts, 30-day offer validity, latest-version selection, exact termination arithmetic and lifecycle events. |
 | `internal/providers` | Product and Pricing gRPC adapters with bounded calls and status translation. |
-| `internal/postgres` | Writer pool, readiness, aggregate reads, the transactional offer and issuance writes, and the keyed outbox record of each lifecycle event. |
+| `internal/postgres` | Writer pool, readiness, aggregate reads, the transactional offer, issuance and version-append writes, and the keyed outbox record of each lifecycle event. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Completion-log and offer signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |

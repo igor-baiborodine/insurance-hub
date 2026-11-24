@@ -828,6 +828,94 @@ func (x *PolicyDetails) GetCovers() []string {
 	return nil
 }
 
+type TerminatePolicyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PolicyNumber  string                 `protobuf:"bytes,1,opt,name=policy_number,json=policyNumber,proto3" json:"policy_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminatePolicyRequest) Reset() {
+	*x = TerminatePolicyRequest{}
+	mi := &file_policy_v1_policy_service_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminatePolicyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminatePolicyRequest) ProtoMessage() {}
+
+func (x *TerminatePolicyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_policy_v1_policy_service_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminatePolicyRequest.ProtoReflect.Descriptor instead.
+func (*TerminatePolicyRequest) Descriptor() ([]byte, []int) {
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *TerminatePolicyRequest) GetPolicyNumber() string {
+	if x != nil {
+		return x.PolicyNumber
+	}
+	return ""
+}
+
+type TerminatePolicyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PolicyNumber  string                 `protobuf:"bytes,1,opt,name=policy_number,json=policyNumber,proto3" json:"policy_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminatePolicyResponse) Reset() {
+	*x = TerminatePolicyResponse{}
+	mi := &file_policy_v1_policy_service_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminatePolicyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminatePolicyResponse) ProtoMessage() {}
+
+func (x *TerminatePolicyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_policy_v1_policy_service_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminatePolicyResponse.ProtoReflect.Descriptor instead.
+func (*TerminatePolicyResponse) Descriptor() ([]byte, []int) {
+	return file_policy_v1_policy_service_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TerminatePolicyResponse) GetPolicyNumber() string {
+	if x != nil {
+		return x.PolicyNumber
+	}
+	return ""
+}
+
 var File_policy_v1_policy_service_proto protoreflect.FileDescriptor
 
 const file_policy_v1_policy_service_proto_rawDesc = "" +
@@ -901,7 +989,12 @@ const file_policy_v1_policy_service_proto_rawDesc = "" +
 	"\rtotal_premium\x18\x05 \x01(\tR\ftotalPremium\x12!\n" +
 	"\fproduct_code\x18\x06 \x01(\tR\vproductCode\x12%\n" +
 	"\x0eaccount_number\x18\a \x01(\tR\raccountNumber\x12\x16\n" +
-	"\x06covers\x18\b \x03(\tR\x06covers2\xc1\x0e\n" +
+	"\x06covers\x18\b \x03(\tR\x06covers\"I\n" +
+	"\x16TerminatePolicyRequest\x12/\n" +
+	"\rpolicy_number\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\xff\x01R\fpolicyNumber\">\n" +
+	"\x17TerminatePolicyResponse\x12#\n" +
+	"\rpolicy_number\x18\x01 \x01(\tR\fpolicyNumber2\x9b\x0f\n" +
 	"\rPolicyService\x12\x99\r\n" +
 	"\vCreateOffer\x12\x1d.policy.v1.CreateOfferRequest\x1a\x1e.policy.v1.CreateOfferResponse\"\xca\f\x92A\xb4\f2\x10application/json:\x10application/jsonJ\xe4\x01\n" +
 	"\x03200\x12\xdc\x01\n" +
@@ -945,7 +1038,8 @@ const file_policy_v1_policy_service_proto_rawDesc = "" +
 	"\x14\x1a\x12.google.rpc.Status\"I\n" +
 	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\f:\x01*\"\a/offers\x12L\n" +
 	"\vIssuePolicy\x12\x1d.policy.v1.IssuePolicyRequest\x1a\x1e.policy.v1.IssuePolicyResponse\x12F\n" +
-	"\tGetPolicy\x12\x1b.policy.v1.GetPolicyRequest\x1a\x1c.policy.v1.GetPolicyResponseBZZXgithub.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1;policyv1b\x06proto3"
+	"\tGetPolicy\x12\x1b.policy.v1.GetPolicyRequest\x1a\x1c.policy.v1.GetPolicyResponse\x12X\n" +
+	"\x0fTerminatePolicy\x12!.policy.v1.TerminatePolicyRequest\x1a\".policy.v1.TerminatePolicyResponseBZZXgithub.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1;policyv1b\x06proto3"
 
 var (
 	file_policy_v1_policy_service_proto_rawDescOnce sync.Once
@@ -959,7 +1053,7 @@ func file_policy_v1_policy_service_proto_rawDescGZIP() []byte {
 	return file_policy_v1_policy_service_proto_rawDescData
 }
 
-var file_policy_v1_policy_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_policy_v1_policy_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_policy_v1_policy_service_proto_goTypes = []any{
 	(*CreateOfferRequest)(nil),      // 0: policy.v1.CreateOfferRequest
 	(*OfferAnswer)(nil),             // 1: policy.v1.OfferAnswer
@@ -973,28 +1067,32 @@ var file_policy_v1_policy_service_proto_goTypes = []any{
 	(*GetPolicyRequest)(nil),        // 9: policy.v1.GetPolicyRequest
 	(*GetPolicyResponse)(nil),       // 10: policy.v1.GetPolicyResponse
 	(*PolicyDetails)(nil),           // 11: policy.v1.PolicyDetails
-	nil,                             // 12: policy.v1.CreateOfferResponse.CoversPricesEntry
-	nil,                             // 13: policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
-	(*structpb.Value)(nil),          // 14: google.protobuf.Value
+	(*TerminatePolicyRequest)(nil),  // 12: policy.v1.TerminatePolicyRequest
+	(*TerminatePolicyResponse)(nil), // 13: policy.v1.TerminatePolicyResponse
+	nil,                             // 14: policy.v1.CreateOfferResponse.CoversPricesEntry
+	nil,                             // 15: policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
+	(*structpb.Value)(nil),          // 16: google.protobuf.Value
 }
 var file_policy_v1_policy_service_proto_depIdxs = []int32{
 	1,  // 0: policy.v1.CreateOfferRequest.answers:type_name -> policy.v1.OfferAnswer
-	12, // 1: policy.v1.CreateOfferResponse.covers_prices:type_name -> policy.v1.CreateOfferResponse.CoversPricesEntry
-	13, // 2: policy.v1.CreateOfferHTTPResponse.covers_prices:type_name -> policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
-	14, // 3: policy.v1.CreateOfferHTTPRequest.policy_from:type_name -> google.protobuf.Value
-	14, // 4: policy.v1.CreateOfferHTTPRequest.policy_to:type_name -> google.protobuf.Value
+	14, // 1: policy.v1.CreateOfferResponse.covers_prices:type_name -> policy.v1.CreateOfferResponse.CoversPricesEntry
+	15, // 2: policy.v1.CreateOfferHTTPResponse.covers_prices:type_name -> policy.v1.CreateOfferHTTPResponse.CoversPricesEntry
+	16, // 3: policy.v1.CreateOfferHTTPRequest.policy_from:type_name -> google.protobuf.Value
+	16, // 4: policy.v1.CreateOfferHTTPRequest.policy_to:type_name -> google.protobuf.Value
 	5,  // 5: policy.v1.CreateOfferHTTPRequest.answers:type_name -> policy.v1.OfferHTTPAnswer
-	14, // 6: policy.v1.OfferHTTPAnswer.answer:type_name -> google.protobuf.Value
+	16, // 6: policy.v1.OfferHTTPAnswer.answer:type_name -> google.protobuf.Value
 	7,  // 7: policy.v1.IssuePolicyRequest.policy_holder:type_name -> policy.v1.PolicyHolder
 	11, // 8: policy.v1.GetPolicyResponse.policy:type_name -> policy.v1.PolicyDetails
 	0,  // 9: policy.v1.PolicyService.CreateOffer:input_type -> policy.v1.CreateOfferRequest
 	6,  // 10: policy.v1.PolicyService.IssuePolicy:input_type -> policy.v1.IssuePolicyRequest
 	9,  // 11: policy.v1.PolicyService.GetPolicy:input_type -> policy.v1.GetPolicyRequest
-	2,  // 12: policy.v1.PolicyService.CreateOffer:output_type -> policy.v1.CreateOfferResponse
-	8,  // 13: policy.v1.PolicyService.IssuePolicy:output_type -> policy.v1.IssuePolicyResponse
-	10, // 14: policy.v1.PolicyService.GetPolicy:output_type -> policy.v1.GetPolicyResponse
-	12, // [12:15] is the sub-list for method output_type
-	9,  // [9:12] is the sub-list for method input_type
+	12, // 12: policy.v1.PolicyService.TerminatePolicy:input_type -> policy.v1.TerminatePolicyRequest
+	2,  // 13: policy.v1.PolicyService.CreateOffer:output_type -> policy.v1.CreateOfferResponse
+	8,  // 14: policy.v1.PolicyService.IssuePolicy:output_type -> policy.v1.IssuePolicyResponse
+	10, // 15: policy.v1.PolicyService.GetPolicy:output_type -> policy.v1.GetPolicyResponse
+	13, // 16: policy.v1.PolicyService.TerminatePolicy:output_type -> policy.v1.TerminatePolicyResponse
+	13, // [13:17] is the sub-list for method output_type
+	9,  // [9:13] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -1016,7 +1114,7 @@ func file_policy_v1_policy_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_policy_v1_policy_service_proto_rawDesc), len(file_policy_v1_policy_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
