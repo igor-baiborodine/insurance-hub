@@ -1362,3 +1362,64 @@ func offerRequest(productCode string) *policyv1.CreateOfferRequest {
 		SelectedCovers: []string{"C1"},
 	}
 }
+
+func TestRequireDeployedDependencies(t *testing.T) {
+	// given
+	database := loadTestDatabase(t)
+	providers := config.Providers{
+		ProductTarget: "product-service:9090", PricingTarget: "pricing-service:9090",
+		CallTimeout: time.Second,
+	}
+	for _, test := range []struct {
+		name, environment, want string
+		database                bool
+		providers               bool
+	}{
+		{"deployed without database", "qa", "POLICY_DATABASE_URL", false, true},
+		{"deployed without providers", "local-dev", "PRODUCT_GRPC_TARGET", true, false},
+		{"deployed with every dependency", "qa", "", true, true},
+		{"development without dependencies", "development", "", false, false},
+		{"unlabelled test runtime", "", "", false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			settings := testConfig(t)
+			settings.Identity.Environment = test.environment
+			if test.database {
+				settings.Database = database
+			}
+			if test.providers {
+				settings.Providers = providers
+			}
+
+			// when
+			err := requireDeployedDependencies(settings)
+
+			// then
+			if (test.want == "") != (err == nil) ||
+				(err != nil && !strings.Contains(err.Error(), test.want)) {
+				t.Errorf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestRun_RefusesDeployedInstanceWithoutProvidersBeforeStarting(t *testing.T) {
+	// given
+	settings := databaseConfig(t)
+	settings.Identity.Environment = "qa"
+	deps := testDependencies()
+	started := false
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		started = true
+		return nil, errors.New("unexpected telemetry start")
+	}
+
+	// when
+	err := run(context.Background(), settings, discardLogger(), deps)
+
+	// then
+	if err == nil || !strings.Contains(err.Error(), "PRODUCT_GRPC_TARGET is required") ||
+		started {
+		t.Fatalf("expected refusal before startup, got %v (started %t)", err, started)
+	}
+}

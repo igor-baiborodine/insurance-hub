@@ -199,12 +199,12 @@ do not repeat its supplied value.
 | `OTEL_ENABLED` | `false` | Boolean. Disabled mode creates no exporter and needs no collector. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Required when telemetry is enabled. An `http` or `https` OTLP/gRPC URL with host and numeric port; credentials, query, fragment and HTTP path are rejected. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `2s` | Positive duration reserved at the end of `SHUTDOWN_TIMEOUT`. |
-| `POLICY_DATABASE_URL` | unset | Optional. When set, a `postgres`/`postgresql` URL for database `policy` with a password and exactly `sslmode=verify-full` and `sslrootcert`; the pool accepts only login `go_policy_writer`. Unset leaves the service without storage. |
+| `POLICY_DATABASE_URL` | unset | Required unless `DEPLOYMENT_ENVIRONMENT` is `development`. A `postgres`/`postgresql` URL for database `policy` with a password and exactly `sslmode=verify-full` and `sslrootcert`; the pool accepts only login `go_policy_writer`. |
 | `DB_MAX_CONNS` | `4` | Integer from 1 through 16; writer pool size. |
 | `DB_CONNECT_TIMEOUT` | `3s` | Positive duration bounding each connection attempt. |
 | `DB_QUERY_TIMEOUT` | `1s` | Positive duration bounding the readiness query; with a database URL it must not exceed `PROBE_TIMEOUT`. |
-| `PRODUCT_GRPC_TARGET` | unset | Optional `host:port` of the private Product gRPC service. Must be supplied together with `PRICING_GRPC_TARGET`. |
-| `PRICING_GRPC_TARGET` | unset | Optional `host:port` of the private Pricing gRPC service. Must be supplied together with `PRODUCT_GRPC_TARGET`. |
+| `PRODUCT_GRPC_TARGET` | unset | `host:port` of the private Product gRPC service. Required unless `DEPLOYMENT_ENVIRONMENT` is `development`; must be supplied together with `PRICING_GRPC_TARGET`. |
+| `PRICING_GRPC_TARGET` | unset | `host:port` of the private Pricing gRPC service. Required unless `DEPLOYMENT_ENVIRONMENT` is `development`; must be supplied together with `PRODUCT_GRPC_TARGET`. |
 | `BUSINESS_TIME_ZONE` | `UTC` | IANA time zone name defining the creation date of a new offer; `Local` is rejected. |
 | `PROVIDER_CALL_TIMEOUT` | `3s` | Positive duration bounding each Product and Pricing call; with provider targets, twice this value must be less than `REQUEST_TIMEOUT`. A shorter caller deadline still applies. |
 
@@ -338,8 +338,9 @@ debug endpoints and production exposure are not enabled.
 | Caller canceled | 499 / 1 (when a response can still be written) | none |
 | Unexpected defect, including an amount that cannot be stored exactly | 500 / 13 | none |
 
-Offers require `POLICY_DATABASE_URL` and both provider targets. Without them, the operation
-returns 503 and readiness is unaffected. Provider availability is not part of readiness.
+A deployed instance refuses to start without `POLICY_DATABASE_URL` and both provider targets. In
+`development` they may be omitted; offers then return 503 and readiness is unaffected. Provider
+availability is not part of readiness: an unreachable provider fails only the affected request.
 
 ## Reusable baseline and ownership
 

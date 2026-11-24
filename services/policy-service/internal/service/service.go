@@ -205,6 +205,9 @@ func run(
 		settings.ExporterTimeout >= settings.ShutdownTimeout {
 		return errors.New("run service: shutdown budgets must be positive and reserved")
 	}
+	if err := requireDeployedDependencies(settings); err != nil {
+		return fmt.Errorf("run service: %w", err)
+	}
 
 	runtime := &runningService{}
 	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
@@ -365,6 +368,31 @@ func run(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+// requireDeployedDependencies refuses a deployed instance without storage or providers. Only
+// local development may run without them, in which case offers report that they are unavailable.
+func requireDeployedDependencies(settings config.Config) error {
+	if environment := settings.Identity.Environment; environment == "" ||
+		environment == "development" {
+		return nil
+	}
+	for _, dependency := range []struct {
+		setting string
+		missing bool
+	}{
+		{"POLICY_DATABASE_URL", !settings.Database.Configured()},
+		{"PRODUCT_GRPC_TARGET", settings.Providers.ProductTarget == ""},
+		{"PRICING_GRPC_TARGET", settings.Providers.PricingTarget == ""},
+	} {
+		if dependency.missing {
+			return fmt.Errorf(
+				"%s is required for the deployed Policy service",
+				dependency.setting,
+			)
+		}
+	}
+	return nil
 }
 
 // composeOffers wires offer creation when both storage and providers are configured; otherwise
