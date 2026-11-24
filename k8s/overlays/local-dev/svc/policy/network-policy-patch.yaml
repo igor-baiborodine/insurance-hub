@@ -27,3 +27,25 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: product-api
+              app.kubernetes.io/component: api
+      ports:
+        - port: 9090
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: pricing-api
+              app.kubernetes.io/component: api
+      ports:
+        - port: 9090
+          protocol: TCP

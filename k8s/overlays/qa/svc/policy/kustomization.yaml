@@ -22,7 +22,16 @@ configMapGenerator:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
       - SERVICE_VERSION=git-e34da6ce59e1
+      - DB_MAX_CONNS=4
+      - DB_CONNECT_TIMEOUT=3s
+      - DB_QUERY_TIMEOUT=1s
+      - PRODUCT_GRPC_TARGET=qa-product-api.qa-svc.svc.cluster.local:9090
+      - PRICING_GRPC_TARGET=qa-pricing-api.qa-svc.svc.cluster.local:9090
 patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: policy-api
   - path: network-policy-patch.yaml
     target:
       kind: NetworkPolicy

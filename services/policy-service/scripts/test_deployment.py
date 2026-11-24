@@ -74,44 +74,6 @@ def without_database(items: dict[str, dict]) -> dict[str, dict]:
     return items
 
 
-def disposable_smoke_items(items: dict[str, dict], environment: str) -> dict[str, dict]:
-    """Meet the deployed startup contract in a disposable namespace without reaching a provider.
-
-    The rendered database wiring is kept. Provider targets are only defaulted: the smoke's
-    invalid-offer probes are rejected before any provider call, and the rendered egress admits
-    only DNS and the Policy database.
-    """
-    data = items["ConfigMap"]["data"]
-    for name, service in (("PRODUCT_GRPC_TARGET", "product"), ("PRICING_GRPC_TARGET", "pricing")):
-        data.setdefault(
-            name, f"{environment}-{service}-api.{environment}-all.svc.cluster.local:9090"
-        )
-    return items
-
-
-def test_disposable_smoke_items_meet_the_deployed_startup_contract() -> None:
-    # given
-    items = policy.validate_render("local-dev", policy.render("local-dev"))
-    egress = json.dumps(items["NetworkPolicy"]["spec"]["egress"])
-
-    # when
-    smoke = disposable_smoke_items(items, "local-dev")
-
-    # then
-    container = smoke["Deployment"]["spec"]["template"]["spec"]["containers"][0]
-    data = smoke["ConfigMap"]["data"]
-    assert data["DEPLOYMENT_ENVIRONMENT"] == "local-dev"
-    assert any(item["name"] == "POLICY_DATABASE_URL" for item in container["env"])
-    assert data["PRODUCT_GRPC_TARGET"] == (
-        "local-dev-product-api.local-dev-all.svc.cluster.local:9090"
-    )
-    assert data["PRICING_GRPC_TARGET"] == (
-        "local-dev-pricing-api.local-dev-all.svc.cluster.local:9090"
-    )
-    assert json.dumps(smoke["NetworkPolicy"]["spec"]["egress"]) == egress
-    assert "9090" not in egress
-
-
 @pytest.mark.parametrize(
     "defect", ["migrator credential", "extra mount", "missing database egress"]
 )
@@ -129,6 +91,33 @@ def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
     # when / then
     with pytest.raises(DeploymentError):
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+@pytest.mark.parametrize(
+    "defect",
+    ["namespace-wide provider egress", "provider HTTP port", "missing provider target"],
+)
+def test_render_allows_only_the_provider_gRPC_identities(environment: str, defect: str) -> None:
+    # given
+    items = policy.validate_render(environment, policy.render(environment))
+    egress = items["NetworkPolicy"]["spec"]["egress"]
+    product = next(
+        rule
+        for rule in egress
+        if rule["to"][0]["podSelector"]["matchLabels"].get("app.kubernetes.io/name")
+        == "product-api"
+    )
+    if defect == "namespace-wide provider egress":
+        del product["to"][0]["podSelector"]
+    elif defect == "provider HTTP port":
+        product["ports"] = [{"port": 8080, "protocol": "TCP"}]
+    else:
+        del items["ConfigMap"]["data"]["PRICING_GRPC_TARGET"]
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        policy.validate_render(environment, yaml.safe_dump_all(items.values()))
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
@@ -719,7 +708,6 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "type": "Opaque",
         "data": secret_data,
     }
-    items = disposable_smoke_items(items, target.environment)
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
 

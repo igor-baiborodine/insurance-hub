@@ -27,3 +27,35 @@ spec:
       ports:
         - port: 4317
           protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-data
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: qa-postgres-policy
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-svc
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: product-api
+              app.kubernetes.io/component: api
+      ports:
+        - port: 9090
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: qa-svc
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: pricing-api
+              app.kubernetes.io/component: api
+      ports:
+        - port: 9090
+          protocol: TCP
