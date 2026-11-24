@@ -1,4 +1,4 @@
-"""Inspect, ensure and verify the Policy PostgreSQL administration boundary.
+"""Inspect, ensure and verify the Policy PostgreSQL and Kafka trust boundaries.
 
 Run through `make -C services/policy-service resource-{inspect,ensure,verify}`. Every target
 coordinate is explicit and must equal the selected environment's contract:
@@ -11,11 +11,12 @@ coordinate is explicit and must equal the selected environment's contract:
     POLICY_RESOURCE_DB_HOST    read-write service host
     POLICY_RESOURCE_CONFIRM    ensure only: ensure-<environment>-policy-resources
 
-`inspect` prints one JSON document and never mutates. `ensure` publishes recoverable Secrets
-before it creates or updates roles, so an interrupted run is retried with the same credentials,
-then runs `verify`. `verify` reads catalog state and probes each login's denials inside
-rolled-back transactions. Each child command has a 30-second deadline; the CNPG primary is
-reached through `kubectl exec` (administrator) or an owned loopback port-forward (logins).
+`inspect` prints one JSON document and never mutates. `ensure` copies the selected Strimzi public
+CA into a Policy-owned Secret and publishes recoverable database Secrets before it creates or
+updates roles, so an interrupted run is retried with the same credentials, then runs `verify`.
+`verify` compares Kafka trust, reads catalog state and probes each login's denials inside rolled-
+back transactions. Each child command has a 30-second deadline; the CNPG primary is reached
+through `kubectl exec` (administrator) or an owned loopback port-forward (logins).
 Exit status: 0 success, 1 operational failure, 2 usage error, 130/143 interruption.
 """
 
@@ -193,6 +194,9 @@ class Kubernetes:
         self.kubectl_path = os.environ.get("KUBECTL", "kubectl")
         self.cluster = f"{environment}-postgres-policy"
         self.ca_name = f"{environment}-postgres-policy-ca"
+        self.kafka_cluster = f"{environment}-kafka"
+        self.kafka_public_ca_secret = f"{self.kafka_cluster}-cluster-ca-cert"
+        self.kafka_ca_secret = f"{environment}-policy-kafka-ca"
         self.target_secret = f"{environment}-postgres-policy-admin-target"
         self.hostname = f"{self.cluster}-rw.{self.data_ns}.svc.cluster.local"
         expected = {
@@ -271,8 +275,8 @@ class Kubernetes:
             record["metadata"]["name"] == name and record["metadata"]["namespace"] == namespace,
             "Secret identity mismatch",
         )
-        if name == self.ca_name:
-            require(namespace == self.data_ns, "database CA Secret namespace differs")
+        if name in {self.ca_name, self.kafka_public_ca_secret}:
+            require(namespace == self.data_ns, "public CA Secret namespace differs")
         elif namespace == self.svc_ns:
             labels = record["metadata"].get("labels", {})
             require(
@@ -321,6 +325,16 @@ class Kubernetes:
             source is not None
             and source.get("ca.crt", b"").startswith(b"-----BEGIN CERTIFICATE-----"),
             "database CA Secret has no usable ca.crt",
+        )
+        return source["ca.crt"]
+
+    def kafka_ca(self) -> bytes:
+        source = self.get_secret(self.kafka_public_ca_secret, self.data_ns)
+        require(
+            source is not None
+            and set(source) == {"ca.crt"}
+            and source["ca.crt"].startswith(b"-----BEGIN CERTIFICATE-----"),
+            "Kafka public CA Secret has no usable ca.crt",
         )
         return source["ca.crt"]
 
@@ -492,6 +506,12 @@ def ensure(manager: Kubernetes) -> None:
     roles = existing_roles(manager)
     passwords, stored, target, target_stored = read_inputs(manager)
     ca = manager.ca()
+    kafka_ca = manager.kafka_ca()
+    stored_kafka_ca = manager.get_secret(manager.kafka_ca_secret, manager.svc_ns)
+    require(
+        stored_kafka_ca is None or stored_kafka_ca == {"ca.crt": kafka_ca},
+        "Policy Kafka CA Secret differs from the Strimzi public CA",
+    )
     for role, value in stored.items():
         require(value is None or value["ca.crt"] == ca, f"{role} Secret CA differs from CNPG CA")
         require(role not in roles or value is not None, f"{role} exists without its Secret")
@@ -508,6 +528,8 @@ def ensure(manager: Kubernetes) -> None:
             "postgres-administration",
             {"target.json": json.dumps(target, sort_keys=True).encode()},
         )
+    if stored_kafka_ca is None:
+        manager.put_secret(manager.kafka_ca_secret, "kafka-producer", {"ca.crt": kafka_ca})
     for role, value in stored.items():
         if value is None:
             manager.put_secret(
@@ -541,6 +563,11 @@ def verify(manager: Kubernetes) -> None:
     )
     require(manager.admin(INSPECT_ACCESS_SQL.read_text()) == "t", "Policy grants differ")
     ca = manager.ca()
+    kafka_ca = manager.kafka_ca()
+    require(
+        manager.get_secret(manager.kafka_ca_secret, manager.svc_ns) == {"ca.crt": kafka_ca},
+        "Policy Kafka CA Secret differs from the Strimzi public CA",
+    )
     migrated = manager.admin(MIGRATED_SQL) == "t"
     for role, value in stored.items():
         require(value["ca.crt"] == ca, f"{role} Secret CA differs from CNPG CA")
@@ -570,6 +597,8 @@ def inspect(manager: Kubernetes) -> dict[str, object]:
     ca = manager.ca()
     marker = read_marker(manager)
     roles = existing_roles(manager)
+    kafka_ca = manager.kafka_ca()
+    stored_kafka_ca = manager.get_secret(manager.kafka_ca_secret, manager.svc_ns)
     return {
         "databaseCompatible": manager.admin(BOUNDARY_SQL) == "t",
         "roles": sorted(roles),
@@ -588,6 +617,11 @@ def inspect(manager: Kubernetes) -> dict[str, object]:
         if target_stored and marker == marker_document(target)
         else "differs",
         "migrated": manager.admin(MIGRATED_SQL) == "t",
+        "kafkaCA": "missing"
+        if stored_kafka_ca is None
+        else "matches"
+        if stored_kafka_ca == {"ca.crt": kafka_ca}
+        else "differs",
         "accessMatches": len(roles) == len(ROLES)
         and marker is not None
         and manager.admin(INSPECT_ACCESS_SQL.read_text()) == "t",

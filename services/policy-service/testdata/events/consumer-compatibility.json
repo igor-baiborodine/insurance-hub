@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "ownership": "policy-service",
+  "producerOrder": [
+    "registration",
+    "termination"
+  ],
+  "events": {
+    "registration": {
+      "topic": "policy-registered",
+      "key": "SYN-442-001",
+      "value": {
+        "policy": {
+          "number": "SYN-442-001",
+          "from": [
+            2026,
+            1,
+            1
+          ],
+          "to": [
+            2026,
+            12,
+            31
+          ],
+          "policyHolder": "Synthetic Holder",
+          "productCode": "HSI",
+          "totalPremium": 120.00
+        }
+      }
+    },
+    "termination": {
+      "topic": "policy-terminated",
+      "key": "SYN-442-001",
+      "value": {
+        "policy": {
+          "number": "SYN-442-001",
+          "from": [
+            2026,
+            1,
+            1
+          ],
+          "to": [
+            2026,
+            6,
+            30
+          ],
+          "policyHolder": "Synthetic Holder",
+          "productCode": "HSI",
+          "totalPremium": 59.51
+        }
+      }
+    }
+  }
+}

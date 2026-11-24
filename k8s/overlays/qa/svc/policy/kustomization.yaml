@@ -27,6 +27,12 @@ configMapGenerator:
       - DB_QUERY_TIMEOUT=1s
       - PRODUCT_GRPC_TARGET=qa-product-api.qa-svc.svc.cluster.local:9090
       - PRICING_GRPC_TARGET=qa-pricing-api.qa-svc.svc.cluster.local:9090
+      - EVENT_PUBLISHER_ENABLED=true
+      - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc:9093
+      - KAFKA_REGISTERED_TOPIC=policy-registered
+      - KAFKA_TERMINATED_TOPIC=policy-terminated
+      - KAFKA_CA_FILE=/etc/policy-service/kafka/ca.crt
+      - KAFKA_PUBLISH_TIMEOUT=3s
 patches:
   - path: deployment-patch.yaml
     target:

@@ -66,8 +66,10 @@ def without_database(items: dict[str, dict]) -> dict[str, dict]:
     pod = items["Deployment"]["spec"]["template"]["spec"]
     container = pod["containers"][0]
     container["env"] = [item for item in container["env"] if item["name"] != "POLICY_DATABASE_URL"]
-    container.pop("volumeMounts")
-    pod.pop("volumes")
+    container["volumeMounts"] = [
+        item for item in container["volumeMounts"] if item["name"] != "postgres-ca"
+    ]
+    pod["volumes"] = [item for item in pod["volumes"] if item["name"] != "postgres-ca"]
     for key in policy.DATABASE_CONFIG:
         items["ConfigMap"]["data"].pop(key)
     items["NetworkPolicy"]["spec"]["egress"] = items["NetworkPolicy"]["spec"]["egress"][:1]
@@ -86,11 +88,46 @@ def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
     elif defect == "extra mount":
         pod["containers"][0]["volumeMounts"].append({"name": "admin", "mountPath": "/admin"})
     else:
-        items["NetworkPolicy"]["spec"]["egress"].pop()
+        items["NetworkPolicy"]["spec"]["egress"] = [
+            rule
+            for rule in items["NetworkPolicy"]["spec"]["egress"]
+            if rule["ports"] != [{"port": policy.DATABASE_PORT, "protocol": "TCP"}]
+        ]
 
     # when / then
     with pytest.raises(DeploymentError):
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+@pytest.mark.parametrize(
+    "defect", ["wrong topic", "wrong CA Secret", "namespace-wide Kafka egress"]
+)
+def test_render_scopes_the_policy_kafka_producer(environment: str, defect: str) -> None:
+    # given
+    items = policy.validate_render(environment, policy.render(environment))
+    pod = items["Deployment"]["spec"]["template"]["spec"]
+    kafka_egress = next(
+        rule
+        for rule in items["NetworkPolicy"]["spec"]["egress"]
+        if rule["to"][0]
+        .get("podSelector", {})
+        .get("matchLabels", {})
+        .get("strimzi.io/component-type")
+        == "kafka"
+    )
+    if defect == "wrong topic":
+        items["ConfigMap"]["data"]["KAFKA_REGISTERED_TOPIC"] = "shared-business-events"
+    elif defect == "wrong CA Secret":
+        next(volume for volume in pod["volumes"] if volume["name"] == "kafka-ca")["secret"][
+            "secretName"
+        ] = "unrelated-kafka-ca"
+    else:
+        del kafka_egress["to"][0]["podSelector"]
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        policy.validate_render(environment, yaml.safe_dump_all(items.values()))
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])

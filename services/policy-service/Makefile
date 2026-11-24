@@ -314,9 +314,9 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make test-integration Run service composition and disposable PostgreSQL migration smoke tests' \
 		'  make migration        Run migrate/status through a tunnel to the enrolled target' \
 		'  make gen-sql          Regenerate sqlc queries; check-sql-drift verifies them' \
-		'  make resource-inspect Inspect Policy PostgreSQL resources without mutation' \
+		'  make resource-inspect Inspect Policy database and Kafka trust resources' \
 		'  make resource-ensure  Confirmed role, grant, enrollment and Secret setup' \
-		'  make resource-verify  Verify effective grants and SQL denials'
+		'  make resource-verify  Verify effective grants, Kafka trust and SQL denials'
 
 .PHONY: migration gen-sql check-sql-drift
 
@@ -347,9 +347,9 @@ migration: python-runtime-check ## Run POLICY_MIGRATION_OPERATION=migrate|status
 
 .PHONY: resource-inspect resource-ensure resource-verify resource-test-fast
 
-resource-inspect: ## Inspect Policy PostgreSQL roles, grants, enrollment and Secrets without mutation
-resource-ensure: ## Ensure Policy PostgreSQL roles, grants, enrollment and workload Secrets (confirmed)
-resource-verify: ## Verify Policy resources, effective grants and SQL denials
+resource-inspect: ## Inspect Policy database and Kafka trust resources without mutation
+resource-ensure: ## Ensure Policy database roles, grants, enrollment and workload Secrets (confirmed)
+resource-verify: ## Verify Policy grants, Kafka trust and SQL denials
 resource-inspect resource-ensure resource-verify: python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
 		"$(PYTHON)" scripts/resource_administration.py '$(@:resource-%=%)'
