@@ -110,6 +110,7 @@ func TestPolicyService_CreateOffer_MapsFailuresToSafeStatuses(t *testing.T) {
 		{"unknown product", application.ErrProductNotFound, codes.NotFound, "not found"},
 		{"provider unavailable", application.ErrProviderUnavailable, codes.Unavailable, "service unavailable"},
 		{"not configured", application.ErrOffersUnavailable, codes.Unavailable, "service unavailable"},
+		{"storage unavailable", application.ErrStorageUnavailable, codes.Unavailable, "service unavailable"},
 		{"deadline", context.DeadlineExceeded, codes.DeadlineExceeded, "context deadline exceeded"},
 		{"canceled", context.Canceled, codes.Canceled, "context canceled"},
 		{"unexpected", errors.New(privateMarker), codes.Internal, "internal error"},

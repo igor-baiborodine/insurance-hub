@@ -18,6 +18,8 @@ var (
 	ErrQuoteRejected = errors.New("quote input rejected")
 	// ErrProviderUnavailable reports that Product or Pricing cannot currently serve the call.
 	ErrProviderUnavailable = errors.New("provider unavailable")
+	// ErrStorageUnavailable reports that offer storage could not be reached before any write.
+	ErrStorageUnavailable = errors.New("offer storage unavailable")
 	// ErrOffersUnavailable reports that this instance has no storage or providers for offers.
 	ErrOffersUnavailable = errors.New("offer creation is not configured")
 )

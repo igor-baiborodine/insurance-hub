@@ -196,6 +196,7 @@ func (server *policyServer) offerError(ctx context.Context, err error) error {
 	case errors.Is(err, application.ErrProductNotFound):
 		return status.Error(codes.NotFound, notFoundMessage)
 	case errors.Is(err, application.ErrProviderUnavailable),
+		errors.Is(err, application.ErrStorageUnavailable),
 		errors.Is(err, application.ErrOffersUnavailable):
 		return status.Error(codes.Unavailable, unavailableMessage)
 	default:

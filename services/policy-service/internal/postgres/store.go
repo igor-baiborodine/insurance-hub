@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres/dbgen"
 )
@@ -221,7 +223,7 @@ func (s *Store) readOnly(
 		IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {
-		return fmt.Errorf("begin Policy read transaction: %w", err)
+		return beginError(ctx, "begin Policy read transaction", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(
@@ -257,7 +259,7 @@ func (s *Store) InTransaction(
 ) (resultErr error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("begin Policy transaction: %w", err)
+		return beginError(ctx, "begin Policy transaction", err)
 	}
 	defer func() {
 		if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil &&
@@ -370,6 +372,18 @@ func (t Transaction) Issue(ctx context.Context, issuance Issuance) (int64, error
 		return 0, fmt.Errorf("insert outbox intent: %w", err)
 	}
 	return policyID, nil
+}
+
+// beginError keeps cancellation and deadlines distinct and reports a failed connection attempt,
+// which happens before any statement runs, as unavailable storage.
+func beginError(ctx context.Context, operation string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%s: %w", operation, ctxErr)
+	}
+	if _, connect := errors.AsType[*pgconn.ConnectError](err); connect {
+		return fmt.Errorf("%s: %w: %w", operation, application.ErrStorageUnavailable, err)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func readError(record string, err error) error {

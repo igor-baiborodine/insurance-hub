@@ -336,7 +336,8 @@ debug endpoints and production exposure are not enabled.
 | Malformed command or repeated question code | 400 / 3 | none; no provider call |
 | Unknown product | 404 / 5 | none; Pricing is not called |
 | Pricing rejects the input | 400 / 3 | none |
-| Product or Pricing unavailable, or offers not configured | 503 / 14 | none |
+| Product or Pricing unavailable, offer storage unreachable before the transaction starts, or offers not configured | 503 / 14 | none |
+| Storage failure after the transaction starts | 500 / 13 | none (rolled back) |
 | Provider or request deadline exceeded | 504 / 4 | none |
 | Caller canceled | 499 / 1 (when a response can still be written) | none |
 | Unexpected defect, including an amount that cannot be stored exactly | 500 / 13 | none |
