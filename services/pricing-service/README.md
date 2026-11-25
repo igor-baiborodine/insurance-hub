@@ -221,11 +221,14 @@ flush and shutdown use bounded contexts. Safe export diagnostics are rate-limite
 seconds; queue saturation has a separate safe warning. The executable installs the shared
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
-`insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /pricing/calculate` or
-`unmatched`; gRPC records the fixed `pricing.v1.PricingService/CalculatePrice` operation and final status. Request paths, queries,
-payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
-the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
+`insurance_hub.pricing.requests` and `insurance_hub.pricing.request.duration` separately record
+bounded HTTP and gRPC transport outcomes. Their labels are `insurance_hub.pricing.operation`
+(`calculate_price`, or `unknown` for an unmatched HTTP route), `insurance_hub.pricing.transport`
+(`http` or `grpc`), `insurance_hub.pricing.outcome` and the final `http.response.status_code` or
+`rpc.response.status_code`. The `/pricing/calculate` route template is a span attribute only.
+Request paths, queries, payloads, raw errors, headers and instance IDs are not metric labels. The
+same provider connects the HTTP server, gRPC client and gRPC server trace. Service identity stays on
+the resource.
 
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
