@@ -259,7 +259,7 @@ disposable harnesses.
 | Failed provider RPC | **Upstream RPC outcomes** by `rpc_method` and status | One provider method fails with transport codes while Policy readiness stays 1 | The failure ratio for that method returns below 5% and an offer completes |
 | Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` and `kafka` stay 1 | `database` readiness is 1, `/readyz` returns `200 ready` and pending intents drain |
 | Delayed outbox publication | **Event publication outcomes** with both readiness gauges | Deferred warnings without `error` outcomes, or pending intents with both gauges at 1 | Pending intents return to zero and `success` publications resume |
-| Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The group's committed offset is stationary while the log-end offset grows | The committed offset moves past the record and lag falls |
+| Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The committed offset is stationary while the log-end offset grows, and an active assigned member repeatedly fails at that offset | The committed offset moves past the record and lag falls |
 
 #### Release/Pod mismatch
 
@@ -375,15 +375,39 @@ kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- \
 ```
 
 In the example, partition `0` reports `CURRENT-OFFSET 42` on repeated reads while
-`LOG-END-OFFSET` and `LAG` grow. Policy has already acknowledged the record at offset 42, so the
-problem is in the consumer. A publisher retry would act on the wrong boundary: it could only
-append a duplicate after offset 42, and the group would stay at 42.
+`LOG-END-OFFSET` and `LAG` grow. Policy has acknowledged its records, so a publisher retry would act
+on the wrong boundary: it could only append a duplicate after offset 42. A stationary offset alone
+does not show that the record at offset 42 blocks the group. A stopped consumer, a lost assignment
+or a fetch failure produces the same picture.
 
-**Identify the record without reading the payload.** Find the consumer's failure log for that
-period and follow its `trace_id` into Tempo. Policy forwards its persisted trace context as Kafka
-headers, so the trace links back to the Policy command that produced the event. Rule out a
-consumer-wide outage first: a group that fails on every record has a dependency problem, not a
-single blocking record.
+**Establish that the consumer is running and stuck at that position.** Require all of the
+following before considering any skip:
+
+1. The group has an active member assigned partition `0`:
+
+   ```sh
+   kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- \
+     /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+     --describe --group dashboard-service --members --verbose
+   ```
+
+   One member's `ASSIGNMENT` must include `policy-registered(0)`. No member, or no owner for
+   partition `0`, means the consumer is stopped or rebalancing; the group owner restores it, and
+   offsets stay unchanged.
+2. The consuming workload is Ready, is not restarting, and logs the same failure repeatedly
+   across several poll intervals while offset 42 stays stationary.
+3. The failure is attributable to that position, through one of two paths:
+   - **Record-handling failure.** The consumer decoded the record and logs a failure for
+     partition `0`, offset 42. Follow its `trace_id`, when present, into Tempo. Policy forwards its
+     persisted trace context as Kafka headers, so the trace links back to the Policy command that
+     produced the event. Do not read the payload.
+   - **Fetch failure.** The client fails before it has a record, so no record trace ID exists.
+     Attribute the failure from the group assignment above, the stationary partition and offset,
+     and the broker batch metadata for the batch containing offset 42 (below).
+
+Rule out a consumer-wide outage: a group that fails on every record, partition or topic has a
+dependency problem, not a single blocking record. When any requirement is missing or the
+attribution is inconclusive, leave offsets unchanged and hand the evidence to the group owner.
 
 **Check the batch encoding.** Policy sends record batches uncompressed, so every consumer can
 decode them without native compression libraries. Confirm the stalled batch reports
@@ -400,7 +424,8 @@ kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- sh -
 ```
 
 Run it on a broker Pod that hosts partition `0`; an empty result on another broker is not
-evidence. It reads only batch headers; do not add `--print-data-log`. A codec other than `none`
+evidence. The printed `baseOffset`, `lastOffset` and codec are the batch metadata for the
+fetch-failure path. It reads only batch headers; do not add `--print-data-log`. A codec other than `none`
 points to a different producer on the shared topic, not to this record's content.
 
 **Effect of skipping the record.** Offsets belong to each group. Advancing `dashboard-service`
@@ -412,7 +437,8 @@ published.
 **Authorization.** The QA Kafka TLS listener on port 9093 and the broker-local plain listener
 have no client authentication or ACLs. A successful broker connection therefore shows neither
 client isolation nor downstream processing, and nothing at the broker stops any reachable client
-from committing offsets for any group. Only procedure limits scoped advancement. It needs explicit
+from committing offsets for any group. Only procedure limits scoped advancement. It applies only after the diagnosis above is
+established, and it needs explicit
 authorization from the owner of group `dashboard-service` for exactly that group, topic, partition
 and target offset. That authorization does not extend to any other group, partition or shared
 topic. During qualification and routine investigation, leave live offsets and topics unchanged.
@@ -428,7 +454,8 @@ kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- \
 ```
 
 Replace `--dry-run` with `--execute` once, then the owner restarts its consumers through a
-reviewed change. Record the skipped group, topic, partition, offset and trace ID as evidence.
+reviewed change. Record the skipped group, topic, partition, offset, the failure path and the trace ID when one
+exists as evidence.
 
 **Recovery check.** Describe the group again over several minutes. `CURRENT-OFFSET` for partition
 `0` must move past 43 and `LAG` must fall toward zero as the group catches up. Policy's publication
