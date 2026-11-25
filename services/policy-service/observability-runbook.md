@@ -257,7 +257,7 @@ disposable harnesses.
 | --- | --- | --- | --- |
 | Release/Pod mismatch | [Release/Pod mismatch](#releasepod-mismatch) | The running image, version or Pod differs from the Flux-applied release | Status and verification pass with the recorded digest; `PolicyUnavailable` clears |
 | Failed provider RPC | **Upstream RPC outcomes** by `rpc_method` and status | One provider method fails with transport codes while Policy readiness stays 1 | The failure ratio for that method returns below 5% and an offer completes |
-| Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` and `kafka` stay 1 | `database` readiness is 1, `/readyz` returns `200 ready` and pending intents drain |
+| Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` stays 1; `kafka` is unchecked by that probe | `database` and `kafka` readiness are 1, `/readyz` returns `200 ready` and pending intents drain |
 | Delayed outbox publication | **Event publication outcomes** with both readiness gauges | Deferred warnings without `error` outcomes, or pending intents with both gauges at 1 | Pending intents return to zero and `success` publications resume |
 | Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The committed offset is stationary while the log-end offset grows, and an active assigned member repeatedly fails at that offset | The committed offset moves past the record and lag falls |
 
@@ -332,8 +332,11 @@ disposable harnesses.
    Run the `curl` commands in another terminal. During the outage expect `/livez` 200 and
    `/readyz` 503. Repeat them during recovery and confirm the Pod UID is unchanged: a new UID
    means a restart, not a recovery of the same process.
-2. `database` readiness 0 with `gateway` and `kafka` at 1 isolates PostgreSQL. Lifecycle gRPC
-   calls end `UNAVAILABLE`, and publication is deferred.
+2. `database` readiness 0 with `gateway` at 1 isolates PostgreSQL. The probe checks the gateway,
+   then the database, and stops at the first failure, so a failing database probe never checks
+   Kafka. Treat `kafka` as unknown while `database` is 0: the series may be absent or show an
+   earlier probe. Confirm Kafka on the first complete probe after recovery. Lifecycle gRPC calls
+   end `UNAVAILABLE`, and publication is deferred.
 3. Check the `qa-postgres-policy` cluster in `qa-data`, the NetworkPolicy path to its Pods on
    port 5432, and the writer Secret `qa-postgres-policy-writer-creds` and its CA:
 
@@ -345,8 +348,8 @@ disposable harnesses.
    For credential, TLS or grant causes, run the read-only `resource-inspect` and migration
    `status` with QA coordinates as described in
    [PostgreSQL storage](deployment-runbook.md#postgresql-storage).
-4. Confirm `database` readiness returns to 1, `/readyz` returns `200 ready` and pending outbox
-   intents drain.
+4. Confirm `database` readiness returns to 1, a later `kafka` sample is 1, `/readyz` returns
+   `200 ready` and pending outbox intents drain.
 
 #### Delayed outbox publication
 
