@@ -340,8 +340,8 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         for line in metric_transform.splitlines()
         if "keep_matching_keys(attributes" in line and "metric.name" in line
     ]
-    if len(metric_dimension_allowlists) != 14:
-        raise ValidationError("shared Go metric policy must contain fourteen dimension allowlists")
+    if len(metric_dimension_allowlists) != 15:
+        raise ValidationError("shared Go metric policy must contain fifteen dimension allowlists")
     if any(
         'resource.attributes["insurance_hub.service.implementation"] == "go"' not in line
         for line in metric_dimension_allowlists
@@ -349,7 +349,7 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         raise ValidationError("metric datapoint allowlists must remain Go-service scoped")
     if re.search(r"insurance_hub\\\\\.[a-z0-9_]+", metric_transform):
         raise ValidationError("shared Go metric policy must not encode one service namespace")
-    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 14:
+    if metric_transform.count('resource.attributes["insurance_hub.expected.service.domain"]') < 15:
         raise ValidationError(
             "metric policy must bind instruments and dimensions to service domain"
         )
@@ -363,7 +363,7 @@ def validate_source_policy(config: str, values: str, makefile: str, operations: 
         "events",
         r"event\\.duration",
         "dependencies",
-        r"dependency\\.duration",
+        r"dependency\\.(duration|ready)",
     ):
         if instrument not in metric_filter:
             raise ValidationError(
@@ -702,6 +702,8 @@ def sanitize_datapoint(
             f"{application_prefix}.stage",
             f"{application_prefix}.outcome",
         )
+    elif metric_name == f"{application_prefix}.dependency.ready":
+        dimensions = (f"{application_prefix}.dependency",)
     elif metric_name == f"{application_prefix}.lookup.results":
         dimensions = (
             f"{application_prefix}.operation",

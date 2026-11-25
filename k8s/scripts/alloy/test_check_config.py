@@ -247,6 +247,10 @@ class TestMetricPolicy:
                 },
             ),
             (
+                "insurance_hub.alpha.dependency.ready",
+                {"insurance_hub.alpha.dependency": "database"},
+            ),
+            (
                 "insurance_hub.alpha.lookup.results",
                 {
                     "insurance_hub.alpha.operation": "find_documents",
