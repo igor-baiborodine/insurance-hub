@@ -25,7 +25,7 @@ type CallObserver interface {
 		dependency string,
 		operation string,
 		elapsed time.Duration,
-		err error,
+		outcome string,
 	)
 }
 
@@ -61,7 +61,13 @@ func (catalog *ProductCatalog) CheckProduct(ctx context.Context, code string) er
 	defer cancel()
 	started := time.Now()
 	_, err := catalog.client.GetProduct(callCtx, &productv1.GetProductRequest{Code: code})
-	catalog.observer.ObserveCall(ctx, "product", "get_product", time.Since(started), err)
+	catalog.observer.ObserveCall(
+		ctx,
+		"product",
+		"get_product",
+		time.Since(started),
+		callOutcome(err, codes.NotFound),
+	)
 	return providerError("get product", err, codes.NotFound, application.ErrProductNotFound)
 }
 
@@ -119,7 +125,10 @@ func (calculator *PricingCalculator) CalculatePrice(
 		SelectedCovers: append([]string(nil), request.SelectedCovers...),
 		Answers:        answers,
 	})
-	calculator.observer.ObserveCall(ctx, "pricing", "calculate_price", time.Since(started), err)
+	calculator.observer.ObserveCall(
+		ctx, "pricing", "calculate_price", time.Since(started),
+		callOutcome(err, codes.InvalidArgument),
+	)
 	if err := providerError(
 		"calculate price", err, codes.InvalidArgument, application.ErrQuoteRejected,
 	); err != nil {
@@ -129,6 +138,23 @@ func (calculator *PricingCalculator) CalculatePrice(
 		TotalPrice:  response.GetTotalPrice(),
 		CoverPrices: maps.Clone(response.GetCoversPrices()),
 	}, nil
+}
+
+// callOutcome classifies a provider status like providerError: only the provider's expected
+// business status is invalid_request, and every unexpected status is a provider error.
+func callOutcome(err error, expected codes.Code) string {
+	switch code := status.Code(err); code {
+	case codes.OK:
+		return "success"
+	case codes.Canceled:
+		return "cancelled"
+	case codes.DeadlineExceeded:
+		return "deadline_exceeded"
+	case expected:
+		return "invalid_request"
+	default:
+		return "error"
+	}
 }
 
 // providerError translates a provider status into a failure meaningful to the use case while

@@ -76,16 +76,17 @@ func TestPricingCalculator_CalculatePrice_MapsAnswersAndExactAmounts(t *testing.
 
 func TestProductCatalog_CheckProduct_MapsStatuses(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		err  error
-		want error
+		name    string
+		err     error
+		want    error
+		outcome string
 	}{
-		{"existing product", nil, nil},
-		{"missing product", status.Error(codes.NotFound, "product not found"), application.ErrProductNotFound},
-		{"unavailable", status.Error(codes.Unavailable, "unavailable"), application.ErrProviderUnavailable},
-		{"provider deadline", status.Error(codes.DeadlineExceeded, "deadline"), context.DeadlineExceeded},
-		{"invalid argument", status.Error(codes.InvalidArgument, "invalid"), nil},
-		{"internal", status.Error(codes.Internal, "internal"), nil},
+		{"existing product", nil, nil, "success"},
+		{"missing product", status.Error(codes.NotFound, "product not found"), application.ErrProductNotFound, "invalid_request"},
+		{"unavailable", status.Error(codes.Unavailable, "unavailable"), application.ErrProviderUnavailable, "error"},
+		{"provider deadline", status.Error(codes.DeadlineExceeded, "deadline"), context.DeadlineExceeded, "deadline_exceeded"},
+		{"invalid argument", status.Error(codes.InvalidArgument, "invalid"), nil, "error"},
+		{"internal", status.Error(codes.Internal, "internal"), nil, "error"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
@@ -110,7 +111,7 @@ func TestProductCatalog_CheckProduct_MapsStatuses(t *testing.T) {
 			}
 			observer.requireCall(
 				t,
-				"product get_product "+status.Code(test.err).String(),
+				"product get_product "+test.outcome,
 			)
 		})
 	}
@@ -118,15 +119,18 @@ func TestProductCatalog_CheckProduct_MapsStatuses(t *testing.T) {
 
 func TestPricingCalculator_CalculatePrice_MapsStatuses(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		err  error
-		want error
+		name    string
+		err     error
+		want    error
+		outcome string
 	}{
-		{"rejected input", status.Error(codes.InvalidArgument, "invalid"), application.ErrQuoteRejected},
-		{"unavailable", status.Error(codes.Unavailable, "unavailable"), application.ErrProviderUnavailable},
-		{"provider deadline", status.Error(codes.DeadlineExceeded, "deadline"), context.DeadlineExceeded},
-		{"not found", status.Error(codes.NotFound, "missing"), nil},
-		{"internal", status.Error(codes.Internal, "internal"), nil},
+		{"rejected input", status.Error(codes.InvalidArgument, "invalid"), application.ErrQuoteRejected, "invalid_request"},
+		{"unavailable", status.Error(codes.Unavailable, "unavailable"), application.ErrProviderUnavailable, "error"},
+		{"provider deadline", status.Error(codes.DeadlineExceeded, "deadline"), context.DeadlineExceeded, "deadline_exceeded"},
+		{"cancelled", status.Error(codes.Canceled, "cancelled"), context.Canceled, "cancelled"},
+		{"not found", status.Error(codes.NotFound, "missing"), nil, "error"},
+		{"unimplemented", status.Error(codes.Unimplemented, "missing method"), nil, "error"},
+		{"internal", status.Error(codes.Internal, "internal"), nil, "error"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
@@ -147,7 +151,7 @@ func TestPricingCalculator_CalculatePrice_MapsStatuses(t *testing.T) {
 			requireMappedError(t, err, test.err, test.want)
 			observer.requireCall(
 				t,
-				"pricing calculate_price "+status.Code(test.err).String(),
+				"pricing calculate_price "+test.outcome,
 			)
 		})
 	}
@@ -386,7 +390,7 @@ func requireClosed(t *testing.T, signal <-chan struct{}, failure string) {
 	}
 }
 
-// fakeObserver records each provider call as "dependency operation status".
+// fakeObserver records each provider call as "dependency operation outcome".
 type fakeObserver struct {
 	mu    sync.Mutex
 	calls []string
@@ -397,13 +401,13 @@ func (observer *fakeObserver) ObserveCall(
 	dependency string,
 	operation string,
 	_ time.Duration,
-	err error,
+	outcome string,
 ) {
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
 	observer.calls = append(
 		observer.calls,
-		dependency+" "+operation+" "+status.Code(err).String(),
+		dependency+" "+operation+" "+outcome,
 	)
 }
 

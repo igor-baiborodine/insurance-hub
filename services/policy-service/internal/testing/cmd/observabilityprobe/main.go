@@ -77,8 +77,20 @@ func run(traceIDValue string) error {
 		dependencyObserver.Record(ctx, dependency, nil)
 	}
 	request := requestObserver.StartHTTP(ctx, "POST /offers")
-	dependencyObserver.ObserveCall(ctx, "product", "get_product", 20*time.Millisecond, nil)
-	dependencyObserver.ObserveCall(ctx, "pricing", "calculate_price", 30*time.Millisecond, nil)
+	dependencyObserver.ObserveCall(
+		ctx,
+		"product",
+		"get_product",
+		20*time.Millisecond,
+		"success",
+	)
+	dependencyObserver.ObserveCall(
+		ctx,
+		"pricing",
+		"calculate_price",
+		30*time.Millisecond,
+		"success",
+	)
 	request.FinishHTTP(ctx, 200)
 
 	for _, eventType := range []string{"registered", "terminated"} {

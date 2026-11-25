@@ -373,10 +373,12 @@ disposable harnesses.
 1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by
    `insurance_hub_policy_dependency` (`PolicyUpstreamRPCFailure`): `product` is the Product
    `GetProduct` call and `pricing` is the Pricing `CalculatePrice` call.
-2. Only the `error` outcome (`UNAVAILABLE`, `INTERNAL`, `UNKNOWN` and `DATA_LOSS`) and
-   `deadline_exceeded` count as provider failures. `invalid_request` covers business codes such
-   as `NOT_FOUND`, which reflect the request, and `cancelled` reflects the caller. Policy readiness
-   stays 1 because providers are not part of readiness.
+2. Only the `error` outcome and `deadline_exceeded` count as provider failures. `error` covers
+   every status the provider is not expected to return, such as `UNAVAILABLE`, `INTERNAL` or
+   `UNIMPLEMENTED`. `invalid_request` covers only each provider's expected business status:
+   Product `NOT_FOUND` for an unknown product and Pricing `INVALID_ARGUMENT` for a rejected
+   quote. `cancelled` reflects the caller. Policy readiness stays 1 because providers are not part
+   of readiness.
 3. Check the provider Deployment and Policy's path to it:
 
    ```sh

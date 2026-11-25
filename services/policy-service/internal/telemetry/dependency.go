@@ -7,8 +7,6 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // DependencyObserver records the latest readiness result of each required dependency so an
@@ -66,14 +64,14 @@ func (observer *DependencyObserver) Record(ctx context.Context, dependency strin
 	))
 }
 
-// ObserveCall records one provider call by its fixed dependency, operation and status class,
-// without request data or error details.
+// ObserveCall records one provider call by its fixed dependency, operation and the outcome the
+// provider adapter classified, without request data or error details.
 func (observer *DependencyObserver) ObserveCall(
 	ctx context.Context,
 	dependency string,
 	operation string,
 	elapsed time.Duration,
-	err error,
+	outcome string,
 ) {
 	options := metric.WithAttributes(
 		attribute.String("insurance_hub.policy.dependency", boundedProvider(dependency)),
@@ -81,28 +79,18 @@ func (observer *DependencyObserver) ObserveCall(
 			"insurance_hub.policy.operation",
 			boundedProviderOperation(operation),
 		),
-		attribute.String("insurance_hub.policy.outcome", providerOutcome(err)),
+		attribute.String("insurance_hub.policy.outcome", boundedProviderOutcome(outcome)),
 	)
 	observer.calls.Add(ctx, 1, options)
 	observer.duration.Record(ctx, elapsed.Seconds(), options)
 }
 
-// providerOutcome separates business rejections from provider failures: only error and
-// deadline_exceeded indicate an unhealthy provider.
-func providerOutcome(err error) string {
-	switch status.Code(err) {
-	case codes.OK:
-		return "success"
-	case codes.Canceled:
-		return "cancelled"
-	case codes.DeadlineExceeded:
-		return "deadline_exceeded"
-	case codes.InvalidArgument, codes.NotFound, codes.AlreadyExists, codes.PermissionDenied,
-		codes.FailedPrecondition, codes.Aborted, codes.OutOfRange, codes.Unimplemented,
-		codes.Unauthenticated, codes.ResourceExhausted:
-		return "invalid_request"
+func boundedProviderOutcome(outcome string) string {
+	switch outcome {
+	case "success", "invalid_request", "cancelled", "deadline_exceeded", "error":
+		return outcome
 	default:
-		return "error"
+		return "unknown"
 	}
 }
 

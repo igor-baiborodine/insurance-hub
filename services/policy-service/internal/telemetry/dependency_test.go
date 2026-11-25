@@ -11,8 +11,6 @@ import (
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestDependencyObserver_RecordsLatestBoundedReadiness(t *testing.T) {
@@ -76,16 +74,12 @@ func TestDependencyObserver_ObserveCall_RecordsBoundedOutcomes(t *testing.T) {
 	elapsed := 40 * time.Millisecond
 
 	// when
-	observer.ObserveCall(ctx, "product", "get_product", elapsed, nil)
-	observer.ObserveCall(ctx, "product", "get_product", elapsed,
-		status.Error(codes.NotFound, marker))
-	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed,
-		status.Error(codes.Unavailable, marker))
-	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed,
-		status.Error(codes.DeadlineExceeded, marker))
-	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed,
-		status.Error(codes.Canceled, marker))
-	observer.ObserveCall(ctx, marker, marker, elapsed, errors.New(marker))
+	observer.ObserveCall(ctx, "product", "get_product", elapsed, "success")
+	observer.ObserveCall(ctx, "product", "get_product", elapsed, "invalid_request")
+	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed, "error")
+	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed, "deadline_exceeded")
+	observer.ObserveCall(ctx, "pricing", "calculate_price", elapsed, "cancelled")
+	observer.ObserveCall(ctx, marker, marker, elapsed, marker)
 
 	// then
 	var metrics metricdata.ResourceMetrics
@@ -131,7 +125,7 @@ func TestDependencyObserver_ObserveCall_RecordsBoundedOutcomes(t *testing.T) {
 		"insurance_hub.policy.dependency=product,insurance_hub.policy.operation=get_product," +
 			"insurance_hub.policy.outcome=success",
 		"insurance_hub.policy.dependency=unknown,insurance_hub.policy.operation=unknown," +
-			"insurance_hub.policy.outcome=error",
+			"insurance_hub.policy.outcome=unknown",
 	}
 	if fmt.Sprint(calls) != fmt.Sprint(want) {
 		t.Errorf("dependency calls =\n%v\nwant\n%v", calls, want)
