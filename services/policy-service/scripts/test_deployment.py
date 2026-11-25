@@ -522,11 +522,15 @@ def test_gateway_route_accepts_only_reviewed_java_or_go_service(
         shutil.copyfile(policy.ROOT / relative, target)
     monkeypatch.setattr(policy, "ROOT", tmp_path)
     expected_java = f"http://{environment}-policy-api-legacy:80"
-    assert policy.configured_gateway_route(environment) == expected_java
-    override = tmp_path / policy.GATEWAY_OVERRIDE.format(environment=environment)
-    document = yaml.safe_load(override.read_text())
     namespace = {"local-dev": "local-dev-all", "qa": "qa-svc"}[environment]
     expected_go = f"http://{environment}-policy-api.{namespace}.svc.cluster.local:80"
+    expected_current = expected_go if environment == "local-dev" else expected_java
+    assert policy.configured_gateway_route(environment) == expected_current
+    override = tmp_path / policy.GATEWAY_OVERRIDE.format(environment=environment)
+    document = yaml.safe_load(override.read_text())
+    document["micronaut"]["http"]["services"].pop("policy-service", None)
+    override.write_text(yaml.safe_dump(document))
+    assert policy.configured_gateway_route(environment) == expected_java
     document["micronaut"]["http"]["services"]["policy-service"] = {"urls": [expected_go]}
     override.write_text(yaml.safe_dump(document))
     assert policy.configured_gateway_route(environment) == expected_go

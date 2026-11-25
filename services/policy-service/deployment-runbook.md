@@ -22,11 +22,12 @@
 
 Use catalog key `policy`. The Go workload is `<environment>-policy-api`, selected by
 `app.kubernetes.io/name=policy-api`; other Policy workloads keep their own selectors. The workload
-uses Pod loopback for business HTTP and gRPC, and Pod port 8081 for kubelet health.
-Operators use a loopback-bound Kubernetes API port-forward. The workload has no Kubernetes
-Service, ingress route or workload token. In each environment it uses Policy PostgreSQL as
-`go_policy_writer` (see [PostgreSQL storage](#postgresql-storage)) and calls Product and Pricing
-over private gRPC (see [Provider access](#provider-access)).
+uses Pod-reachable business HTTP, loopback-only gRPC and Pod port 8081 for kubelet health. Its
+ClusterIP Service exposes only business HTTP to the exact gateway identity selected by the
+environment NetworkPolicy. Operators use loopback-bound Kubernetes API port-forwards for private
+qualification. The workload has no public ingress or workload token. In each environment it uses
+Policy PostgreSQL as `go_policy_writer` (see [PostgreSQL storage](#postgresql-storage)) and calls
+Product and Pricing over private gRPC (see [Provider access](#provider-access)).
 
 | Target | Context | Namespace | Owner |
 | --- | --- | --- | --- |
@@ -44,6 +45,8 @@ Run from the repository root with the pinned Python, Go, Docker, Kind and kubect
 make go-svc-deploy-check go-svc-deploy-test-tooling SVC_NAME=policy
 make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=qa
+kubectl kustomize k8s/overlays/local-dev/svc/agent-portal-gateway/legacy
+kubectl kustomize k8s/overlays/qa/svc/agent-portal-gateway/legacy
 ```
 
 The QA overlay uses an inactive release placeholder until release preparation activates the Policy
@@ -130,8 +133,8 @@ to match the ready Pod image ID.
 three listeners. It checks that HTTP and generated-client gRPC reject an empty offer with
 `InvalidArgument` (HTTP 400) before any provider call or write, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. It also reads the configured gateway routing without mutation to ensure this private workload
-does not change shared routing. For manual troubleshooting, forward
+UID. It also reads every serving gateway Pod's effective Policy route and its ready Service
+endpoints without mutation. For manual troubleshooting, forward
 the exact Pod selected by status.
 
 ```bash
