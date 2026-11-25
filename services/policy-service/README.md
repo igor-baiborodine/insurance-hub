@@ -387,7 +387,8 @@ no additional protection.
 The producer sends pending intents only after their aggregate transaction commits. It holds a
 per-row database lock through broker acknowledgement, marks `published_at` afterward, and excludes
 a policy's later intent while any earlier one is pending. A lost acknowledgement can therefore
-repeat the same keyed payload, but cannot make termination overtake registration. Only persisted
+repeat the same keyed payload, but cannot make termination overtake registration. Record batches
+are sent uncompressed so consumers without native compression libraries can read them. Only persisted
 W3C `traceparent` and `tracestate` fields become Kafka headers. A `tracestate` longer than 512
 characters is dropped rather than failing the command. Diagnostics and bounded telemetry never
 include the policy key or payload.

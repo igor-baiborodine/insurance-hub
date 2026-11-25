@@ -162,6 +162,9 @@ func TestRun_PolicyEventPublisherRecovery(t *testing.T) {
 		if string(record.Key) != recoveryPolicy {
 			t.Fatalf("record key = %q", record.Key)
 		}
+		if codec := record.Attrs.CompressionType(); codec != 0 {
+			t.Fatalf("record compression codec = %d, want none", codec)
+		}
 		switch record.Topic {
 		case registeredTopic:
 			registrations++
