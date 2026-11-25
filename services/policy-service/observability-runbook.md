@@ -157,47 +157,72 @@ alter shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo, PostgreS
 monitoring assets, except the separately authorized Alloy release below.
 
 The shared Alloy release decides which Policy metrics reach Prometheus. Check that the reviewed
-shared configuration is effective before provisioning the dashboard or rules:
+shared configuration is effective before provisioning the dashboard or rules. Every read must
+succeed; only then does the comparison decide between a match and drift:
 
 ```sh
 test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
-helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
-  > "$MONITORING_EVIDENCE_DIR/prior-alloy-helm-status.json"
-kubectl --context qa-insurance-hub -n qa-monitoring get deployment/qa-alloy -o json \
-  > "$MONITORING_EVIDENCE_DIR/prior-alloy-deployment.json"
-kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
-  > "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json"
-jq -er '.data["config.alloy"]' \
-  "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json" \
-  > "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
-cmp k8s/overlays/qa/infra/alloy/config.alloy \
-  "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
+rm -f "$MONITORING_EVIDENCE_DIR/alloy.ok" "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"
+(
+  set -eu
+  dir="$MONITORING_EVIDENCE_DIR"
+  k() { kubectl --context qa-insurance-hub --request-timeout=30s "$@"; }
+
+  helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+    > "$dir/prior-alloy-helm-status.json"
+  k -n qa-monitoring get deployment/qa-alloy -o json > "$dir/prior-alloy-deployment.json"
+  k -n qa-monitoring get configmap/qa-alloy -o json > "$dir/prior-alloy-configmap.json"
+  jq -er '.data["config.alloy"]' "$dir/prior-alloy-configmap.json" \
+    > "$dir/effective-alloy-before.alloy"
+  if cmp -s k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-before.alloy"; then
+    : > "$dir/alloy.ok"
+  else
+    diff k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-before.alloy" \
+      > "$dir/alloy-drift.diff" || true
+  fi
+)
+if test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"; then
+  echo "Alloy: reviewed configuration is effective"
+elif test -s "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"; then
+  echo "STOP: Alloy configuration drift; separate Alloy release required" >&2
+else
+  echo "STOP: Alloy read failed" >&2
+fi
 ```
 
-If `cmp` succeeds, the reviewed shared configuration is already effective and no Alloy rollout is
-needed. If it differs, stop this workflow. Retain a sanitized diff, review the entire
-shared-collector delta and obtain separate authorization for the Alloy release. Only that separate
-release may run:
+`alloy.ok` means every read succeeded and the effective configuration matches the reviewed file;
+no Alloy rollout is needed. A non-empty `alloy-drift.diff` without `alloy.ok` means the reads
+succeeded and the configuration differs. Stop this workflow, review the entire shared-collector
+delta from a sanitized copy of that diff and obtain separate authorization for the Alloy release.
+Neither file means a read failed; resolve the access error and rerun this block. Only that
+separate release may run, and it writes `alloy.ok` only after the rollout, status and read-back
+all succeed:
 
 ```sh
-make -C k8s alloy-install
-kubectl --context qa-insurance-hub -n qa-monitoring rollout status \
-  deployment/qa-alloy --timeout=10m
-make -C k8s alloy-status
-helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
-  > "$MONITORING_EVIDENCE_DIR/applied-alloy-helm-status.json"
-kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
-  > "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json"
-jq -er '.data["config.alloy"]' \
-  "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json" \
-  > "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
-cmp k8s/overlays/qa/infra/alloy/config.alloy \
-  "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -s "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"
+(
+  set -eu
+  dir="$MONITORING_EVIDENCE_DIR"
+  k() { kubectl --context qa-insurance-hub --request-timeout=30s "$@"; }
+
+  make -C k8s alloy-install
+  k -n qa-monitoring rollout status deployment/qa-alloy --timeout=10m
+  make -C k8s alloy-status
+  helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+    > "$dir/applied-alloy-helm-status.json"
+  k -n qa-monitoring get configmap/qa-alloy -o json > "$dir/applied-alloy-configmap.json"
+  jq -er '.data["config.alloy"]' "$dir/applied-alloy-configmap.json" \
+    > "$dir/effective-alloy-after.alloy"
+  cmp k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-after.alloy"
+  : > "$dir/alloy.ok"
+)
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok" || echo "STOP: Alloy release failed" >&2
 ```
 
-After an authorized Alloy rollout, require the Deployment to be ready and recheck the shared
-collector's existing routes, delivery counters and backend signals before continuing. Stop if any
-regress. Then confirm that the Policy application series arrive:
+After an authorized Alloy rollout, recheck the shared collector's existing routes, delivery
+counters and backend signals before continuing. Stop if any regress. Rendering and provisioning
+below require `alloy.ok` in addition to `preflight.ok`. Then confirm that the Policy application series arrive:
 
 ```promql
 count by (__name__) ({service_name="policy-service",__name__=~"insurance_hub_policy_.*"})
@@ -211,6 +236,7 @@ persisting either:
 
 ```sh
 test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"
 make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy \
   > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
 make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy \
@@ -235,6 +261,7 @@ objects:
 
 ```sh
 test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=policy
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=policy
 ```
