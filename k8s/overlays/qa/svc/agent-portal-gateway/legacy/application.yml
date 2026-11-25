@@ -4,6 +4,9 @@ micronaut:
       product-service:
         urls:
           - http://qa-product-api.qa-svc.svc.cluster.local:80
+      policy-service:
+        urls:
+          - http://qa-policy-api.qa-svc.svc.cluster.local:80
       policy-search-service:
         urls:
           - http://qa-policy-search-api.qa-svc.svc.cluster.local:80
