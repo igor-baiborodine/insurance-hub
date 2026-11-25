@@ -548,7 +548,7 @@ def test_gateway_route_accepts_only_reviewed_java_or_go_service(
     expected_java = f"http://{environment}-policy-api-legacy:80"
     namespace = {"local-dev": "local-dev-all", "qa": "qa-svc"}[environment]
     expected_go = f"http://{environment}-policy-api.{namespace}.svc.cluster.local:80"
-    expected_current = expected_go if environment == "local-dev" else expected_java
+    expected_current = expected_go
     assert policy.configured_gateway_route(environment) == expected_current
     override = tmp_path / policy.GATEWAY_OVERRIDE.format(environment=environment)
     document = yaml.safe_load(override.read_text())
@@ -741,11 +741,8 @@ def test_gateway_route_observes_effective_destination_beside_healthy_java(
     go_pod = {"metadata": {"name": "go-0"}}
 
     # when / then
-    if routing == "java":
+    with pytest.raises(DeploymentError, match="Policy upstream"):
         policy.verify_gateway_route(target, go_pod)
-    else:
-        with pytest.raises(DeploymentError, match="Policy upstream"):
-            policy.verify_gateway_route(target, go_pod)
 
 
 def test_gateway_route_rejects_one_stale_java_target_after_switch(

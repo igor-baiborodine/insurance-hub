@@ -12,6 +12,7 @@
   - [Run and stop the service](#run-and-stop-the-service)
   - [Offer creation](#offer-creation)
   - [Policy issuance, lookup and termination](#policy-issuance-lookup-and-termination)
+    - [Transactional outbox and consumers](#transactional-outbox-and-consumers)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -19,8 +20,9 @@
 # Policy service
 
 The Policy service creates priced offers for agents, issues policies from them, returns a policy's
-latest details and terminates policies. Offer creation is exposed privately over direct gRPC and an
-HTTP gateway; issuance, lookup and termination are direct gRPC operations. Its separate management listener serves liveness
+latest details and terminates policies. Authenticated agents use the Agent Portal Gateway, which
+forwards the four lifecycle operations to Policy's private business HTTP service. The private gRPC
+service remains available inside the process, and a separate management listener serves liveness
 and readiness.
 
 ## Prerequisites
@@ -366,6 +368,35 @@ availability is not part of readiness: an unreachable provider fails only the af
 
 ## Policy issuance, lookup and termination
 
+The Agent Portal Gateway owns authentication and supplies the authenticated principal as the agent
+login when it issues a policy. Policy does not trust a conflicting login submitted by the caller.
+The private Kubernetes Service is a ClusterIP selected only by Policy Pods, and its network policy
+allows business HTTP only from the intended gateway Pods.
+
+```mermaid
+flowchart TD
+    agent["Authenticated agent"] --> gateway["Agent Portal Gateway<br/>authenticated principal"]
+    gateway -->|"POST /api/offers/"| quote["POST /offers<br/>create quote"]
+    gateway -->|"POST /api/policies/create"| issue["POST /policies<br/>issue saved quote"]
+    gateway -->|"GET /api/policies/{policyNumber}"| lookup["GET /policies/{policy_number}<br/>return latest version"]
+    gateway -->|"POST /api/policies/terminate"| terminate["POST /policies/terminate<br/>end coverage"]
+
+    quote --> product["Product<br/>validate product"]
+    product --> pricing["Pricing<br/>calculate cover prices"]
+    pricing --> offer["Store NEW offer<br/>saved total and cover prices<br/>no event"]
+
+    offer --> age{"Offer age on issue date"}
+    age -->|"day 0 through day 30"| issue
+    age -->|"day 31 or later"| expired["Reject expired offer"]
+    issue --> v1["Store policy version 1<br/>authenticated agent and saved price"]
+    v1 --> registered["Create policy-registered intent"]
+
+    v1 --> lookup
+    terminate --> v2["Append next version<br/>retain earlier history"]
+    v2 --> lookup
+    v2 --> terminated["Create policy-terminated intent"]
+```
+
 `PolicyService/IssuePolicy` issues a stored offer for a policy holder (first name, last name and
 tax ID) and an optional agent login. The business date comes once from the injected clock in
 `BUSINESS_TIME_ZONE`; an offer can be issued until 30 days after its creation date. One writer
@@ -385,9 +416,57 @@ product are kept. The new version's coverage keeps its start and ends on the ter
 while its details apply from the following day until the original validity end. Each cover is
 multiplied by the covered share of the original coverage (covered days divided by total days,
 HALF_UP at scale 20) and rounded HALF_UP to cents; the premium is their sum. For example, one
-120.00 cover for 2026-01-01–2026-12-31 terminated on 2026-06-30 becomes 59.51. The event carries
-the shortened coverage and corrected premium. Repeated and concurrent termination commands have
-no additional protection.
+120.00 cover for 2026-01-01–2026-12-31 terminated on 2026-06-30 covers 181 of 365 days and becomes
+59.51. Coverage ends on June 30, and the new version's details are effective on July 1. The event
+carries the shortened coverage and corrected premium.
+
+Issue and termination commands have no deduplication key. Resubmitting an issue creates another
+policy, while resubmitting a termination can append another version when the business date still
+falls within the latest coverage. Callers must inspect the result of an uncertain command before
+retrying it. A lookup is read-only and always returns the highest stored version.
+
+### Transactional outbox and consumers
+
+Issuance and termination write the aggregate change and its keyed event intent in the same
+PostgreSQL transaction. A rejected transaction leaves neither the new aggregate/version nor the
+intent. After commit, the publisher selects the oldest eligible pending row; a later row for the
+same policy remains ineligible until every earlier row is marked published. The selected row stays
+locked through broker acknowledgement and the published-marker commit.
+
+```mermaid
+flowchart TD
+    command["Issue or terminate command"] --> aggregate["Write policy aggregate or version"]
+    aggregate --> intent["Write policy-keyed outbox intent<br/>same PostgreSQL transaction"]
+    intent --> transaction{"Transaction result"}
+    transaction -->|"rollback"| nochange["No aggregate change<br/>no intent"]
+    transaction -->|"commit"| pending["Committed pending intent"]
+
+    pending --> select["Select oldest eligible intent<br/>block later intent for same policy"]
+    select --> lock["Lock row for publish transaction"]
+    lock --> send["Send uncompressed keyed Kafka record"]
+    send -->|"send fails"| retry["Rollback marker transaction<br/>intent remains pending"]
+    send -->|"acknowledgement uncertain"| ambiguous["Record may exist<br/>intent remains pending"]
+    send -->|"acknowledged"| marker["Set published_at"]
+    marker -->|"marker commit fails"| ambiguous
+    marker -->|"marker commit succeeds"| published["Intent published"]
+    retry --> select
+    ambiguous --> select
+
+    published --> registeredTopic["policy-registered"]
+    published --> terminatedTopic["policy-terminated"]
+    registeredTopic --> dashboard["Dashboard statistics"]
+    registeredTopic --> document["Policy document"]
+    registeredTopic --> payment["Payment account"]
+    registeredTopic --> search["Policy Search projection"]
+    terminatedTopic --> searchUpdate["Policy Search<br/>shortened coverage"]
+```
+
+A failed send retries the same stored intent; it is not a new business command. An uncertain
+acknowledgement or a failed marker commit can publish the same keyed record more than once, so
+delivery is at least once and consumers must tolerate duplicates. The policy key keeps a policy's
+records on one partition within each topic, while the outbox eligibility rule prevents termination
+from being sent before registration. Resubmitting a command is different: it can create a new
+aggregate change and a new intent.
 
 The producer sends pending intents only after their aggregate transaction commits. It holds a
 per-row database lock through broker acknowledgement, marks `published_at` afterward, and excludes
@@ -398,6 +477,10 @@ W3C `traceparent` and `tracestate` fields become Kafka headers. A `tracestate` l
 characters is dropped rather than failing the command. Diagnostics and bounded telemetry never
 include the policy key or payload.
 
+Use the [deployment runbook](deployment-runbook.md) for deployment and private verification. Use
+the [observability runbook](observability-runbook.md) for delayed publication, duplicate-delivery
+analysis and consumer recovery.
+
 | Failure | gRPC status | Writes |
 | --- | --- | --- |
 | Missing offer or policy number or holder, or a value longer than storage | InvalidArgument | none |
@@ -407,9 +490,10 @@ include the policy key or payload.
 | Rejected commit or another unexpected failure | Internal | none |
 
 
-Product is the reference for operational foundations, not a runtime dependency. Both modules own
-independent runtime code and use the repository's shared non-runtime Go Make tooling. New copies
-must define their own contracts, persistence, authorization, exposure and deployment requirements.
+Policy uses Product as an operational-design reference and calls Product's API only while creating
+an offer. The modules keep independent runtime code and use the repository's shared non-runtime Go
+Make tooling. New copies must define their own contracts, persistence, authorization, exposure and
+deployment requirements.
 
 | Foundation | Product reference | Policy foundation |
 | --- | --- | --- |
@@ -417,7 +501,7 @@ must define their own contracts, persistence, authorization, exposure and deploy
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed offer operation, bounded transport signals and configurable HTTP/gRPC limits. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, four fixed lifecycle operations, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness including the optional database, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | Business architecture | Product application-owned catalog ports and injected adapters | `CreateOffer` owns its Product, Pricing and offer-store ports; adapters are injected by composition. |
 
@@ -439,7 +523,7 @@ proof. Existing services adopt later fixes through their own reviewed changes.
 | `internal/providers` | Product and Pricing gRPC adapters with bounded calls and status translation. |
 | `internal/postgres` | Writer pool, readiness, aggregate reads, the transactional offer, issuance and version-append writes, and the keyed outbox record of each lifecycle event. |
 | `internal/config` | Compose shared setting groups, load the environment and apply Policy identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and offer signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Completion-log and lifecycle signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/policy/v1`, `gen/policy/v1`, `gen/openapiv2/policy/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 | `api/product/v1`, `api/pricing/v1`, `gen/product/v1`, `gen/pricing/v1` | Exact provider contract copies and the generated Policy-local clients. |
