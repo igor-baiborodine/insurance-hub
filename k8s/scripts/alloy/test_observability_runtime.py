@@ -15,6 +15,7 @@ from unittest import mock
 import probe_chat
 import probe_dashboard
 import probe_document
+import probe_policy
 import probe_pricing
 import probe_product
 import pytest
@@ -329,6 +330,64 @@ def test_document_probe_timeout_reclaims_owned_process(tmp_path: Path) -> None:
         pytest.raises(probe_document.ProbeError, match="timed out"),
     ):
         probe_document.execute_in_root(args, tmp_path)
+    assert terminate.call_count == 2
+    assert not ownership.exists()
+
+
+def test_policy_probe_uses_fixed_identity_over_inherited_values() -> None:
+    # given
+    args = type(
+        "Args",
+        (),
+        {
+            "version": "git-443000000000",
+            "instance_id": "policy-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+
+    # when
+    with mock.patch.dict(
+        os.environ,
+        {"SERVICE_NAME": "foreign-service", "OTEL_ENABLED": "false"},
+    ):
+        values = probe_policy.environment(args)
+
+    # then
+    assert values["SERVICE_NAME"] == "policy-service"
+    assert values["DEPLOYMENT_ENVIRONMENT"] == "qa"
+    assert values["OTEL_ENABLED"] == "true"
+    assert values["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://127.0.0.1:4317"
+    assert values["GOMEMLIMIT"] == "256MiB"
+
+
+def test_policy_probe_timeout_reclaims_owned_process(tmp_path: Path) -> None:
+    # given
+    ownership = tmp_path / "owned"
+    args = type(
+        "Args",
+        (),
+        {
+            "service_root": tmp_path,
+            "log_file": tmp_path / "service.log",
+            "ownership_file": ownership,
+            "trace_id": "a" * 32,
+            "version": "git-443000000000",
+            "instance_id": "policy-probe",
+            "otlp_endpoint": "http://127.0.0.1:4317",
+        },
+    )()
+    process = mock.Mock(pid=4443)
+    process.wait.side_effect = subprocess.TimeoutExpired("probe", 60)
+
+    # when / then
+    with (
+        mock.patch.object(probe_policy, "run"),
+        mock.patch.object(probe_policy.subprocess, "Popen", return_value=process),
+        mock.patch.object(probe_policy.alloy_runtime, "terminate_process_group") as terminate,
+        pytest.raises(probe_policy.ProbeError, match="timed out"),
+    ):
+        probe_policy.execute_in_root(args, tmp_path)
     assert terminate.call_count == 2
     assert not ownership.exists()
 
