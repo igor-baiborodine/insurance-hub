@@ -51,6 +51,8 @@ type PolicyOutbox struct {
 	Topic       string
 	MessageKey  string
 	Payload     []byte
+	TraceParent pgtype.Text
+	TraceState  pgtype.Text
 	CreatedAt   pgtype.Timestamptz
 	PublishedAt pgtype.Timestamptz
 }

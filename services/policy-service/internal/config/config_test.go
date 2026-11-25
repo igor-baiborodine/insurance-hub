@@ -630,6 +630,109 @@ func TestLoad_DatabaseIsOptionalAndRedacted(t *testing.T) {
 	}
 }
 
+func TestLoad_EventPublisherIsOptInAndTyped(t *testing.T) {
+	// given
+	values := map[string]string{
+		databaseURLSetting:     validDatabaseURL,
+		eventPublisherSetting:  "true",
+		kafkaBrokersSetting:    "kafka-a.example:9093, kafka-b.example:9093",
+		kafkaRegisteredSetting: defaultRegisteredTopic,
+		kafkaTerminatedSetting: defaultTerminatedTopic,
+		kafkaCAFileSetting:     "/etc/policy-service/kafka/ca.crt",
+		kafkaPublishSetting:    "2s",
+	}
+
+	// when
+	got, err := load(mapLookup(values))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Events.Enabled || len(got.Events.Brokers) != 2 ||
+		got.Events.RegisteredTopic != defaultRegisteredTopic ||
+		got.Events.TerminatedTopic != defaultTerminatedTopic ||
+		got.Events.CAFile != values[kafkaCAFileSetting] ||
+		got.Events.PublishTimeout != 2*time.Second {
+		t.Fatalf("event settings = %+v", got.Events)
+	}
+}
+
+func TestLoad_EventPublisherRejectsIncompleteOrIgnoredSettings(t *testing.T) {
+	// given
+	valid := map[string]string{
+		databaseURLSetting:    validDatabaseURL,
+		eventPublisherSetting: "true",
+		kafkaBrokersSetting:   "kafka.example:9093",
+		kafkaCAFileSetting:    "/etc/policy-service/kafka/ca.crt",
+	}
+	tests := []struct {
+		name    string
+		setting string
+		change  func(map[string]string)
+	}{
+		{
+			"database", databaseURLSetting,
+			func(values map[string]string) { delete(values, databaseURLSetting) },
+		},
+		{
+			"brokers", kafkaBrokersSetting,
+			func(values map[string]string) { delete(values, kafkaBrokersSetting) },
+		},
+		{
+			"broker address",
+			kafkaBrokersSetting,
+			func(values map[string]string) { values[kafkaBrokersSetting] = "missing-port" },
+		},
+		{
+			"foreign registration topic",
+			kafkaRegisteredSetting,
+			func(values map[string]string) { values[kafkaRegisteredSetting] = "foreign-topic" },
+		},
+		{
+			"foreign termination topic",
+			kafkaTerminatedSetting,
+			func(values map[string]string) { values[kafkaTerminatedSetting] = "foreign-topic" },
+		},
+		{
+			"CA", kafkaCAFileSetting,
+			func(values map[string]string) { delete(values, kafkaCAFileSetting) },
+		},
+		{
+			"drain budget", kafkaPublishSetting,
+			func(values map[string]string) { values[kafkaPublishSetting] = "8s" },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			values := make(map[string]string, len(valid))
+			for key, value := range valid {
+				values[key] = value
+			}
+			test.change(values)
+
+			// when
+			_, err := load(mapLookup(values))
+
+			// then
+			if err == nil {
+				t.Fatal("invalid event publisher settings accepted")
+			}
+			setting, _ := kitconfig.ErrorDetails(err)
+			if setting != test.setting {
+				t.Fatalf("setting = %q, want %q: %v", setting, test.setting, err)
+			}
+		})
+	}
+
+	// when
+	_, err := load(mapLookup(map[string]string{kafkaBrokersSetting: "kafka.example:9093"}))
+
+	// then
+	if setting, _ := kitconfig.ErrorDetails(err); setting != kafkaBrokersSetting {
+		t.Fatalf("ignored disabled setting = %q (%v)", setting, err)
+	}
+}
+
 func TestLoad_RejectsUnsafeDatabaseSettings(t *testing.T) {
 	for _, test := range []struct{ name, setting, value, reason string }{
 		{"empty URL", databaseURLSetting, " ", "must not be empty"},

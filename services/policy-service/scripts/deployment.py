@@ -37,11 +37,14 @@ ALLOY_EGRESS = (
     {"app.kubernetes.io/name": "alloy", "app.kubernetes.io/instance": "qa-alloy"},
     [(4317, "TCP")],
 )
-# Each environment reaches its Policy CNPG cluster as the writer and both providers over gRPC.
+# Each environment reaches its Policy CNPG cluster as the writer, Kafka as the producer and both
+# providers over gRPC.
 DATABASE_PORT = 5432
+KAFKA_PORT = 9093
 PROVIDER_PORT = 9090
 DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
 WRITER_CA_DIRECTORY = "/etc/policy-service/postgres"
+KAFKA_CA_DIRECTORY = "/etc/policy-service/kafka"
 PROBE_IMAGE = (
     "docker.io/curlimages/curl:8.16.0@"
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
@@ -112,6 +115,14 @@ def provider_egress(namespace: str, provider: str) -> tuple:
     )
 
 
+def kafka_egress(environment: str, namespace: str) -> tuple:
+    return (
+        namespace,
+        {"strimzi.io/cluster": f"{environment}-kafka", "strimzi.io/component-type": "kafka"},
+        [(KAFKA_PORT, "TCP")],
+    )
+
+
 def provider_targets(environment: str, namespace: str) -> dict[str, str]:
     return {
         f"{provider.upper()}_GRPC_TARGET": (
@@ -128,6 +139,7 @@ def expected_policy(environment: str, data_namespace: str, service_namespace: st
         database_egress(environment, data_namespace),
         provider_egress(service_namespace, "product"),
         provider_egress(service_namespace, "pricing"),
+        kafka_egress(environment, data_namespace),
     )
     egress = [
         {
@@ -185,6 +197,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         )
 
     writer_secret = f"{environment}-postgres-policy-writer-creds"
+    kafka_ca_secret = f"{environment}-policy-kafka-ca"
     deployment = items["Deployment"]
     spec = deployment["spec"]
     template = spec["template"]
@@ -268,10 +281,13 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
         },
         "Policy container security, ports, resources or identity binding differs",
     )
-    # Only the writer credential and its CA reach the serving Pod.
+    # Only the writer credential and the two public trust roots reach the serving Pod.
     require(
         container["volumeMounts"]
-        == [{"name": "postgres-ca", "mountPath": WRITER_CA_DIRECTORY, "readOnly": True}]
+        == [
+            {"name": "postgres-ca", "mountPath": WRITER_CA_DIRECTORY, "readOnly": True},
+            {"name": "kafka-ca", "mountPath": KAFKA_CA_DIRECTORY, "readOnly": True},
+        ]
         and pod["volumes"]
         == [
             {
@@ -280,9 +296,17 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
                     "secretName": writer_secret,
                     "items": [{"key": "ca.crt", "path": "ca.crt"}],
                 },
-            }
+            },
+            {
+                "name": "kafka-ca",
+                "secret": {
+                    "secretName": kafka_ca_secret,
+                    "items": [{"key": "ca.crt", "path": "ca.crt"}],
+                    "defaultMode": 292,
+                },
+            },
         ],
-        "Policy database credential or CA mount differs",
+        "Policy database credential or trust-root mount differs",
     )
     for name, path, period, failures in (
         ("startupProbe", "/livez", 2, 30),
@@ -312,6 +336,20 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     }
     expected_data.update(DATABASE_CONFIG)
     expected_data.update(provider_targets(environment, target["namespace"]))
+    expected_data.update(
+        {
+            "EVENT_PUBLISHER_ENABLED": "true",
+            "KAFKA_BROKERS": (
+                "local-dev-kafka-kafka-bootstrap:9093"
+                if environment == "local-dev"
+                else "qa-kafka-kafka-bootstrap.qa-data.svc:9093"
+            ),
+            "KAFKA_REGISTERED_TOPIC": "policy-registered",
+            "KAFKA_TERMINATED_TOPIC": "policy-terminated",
+            "KAFKA_CA_FILE": f"{KAFKA_CA_DIRECTORY}/ca.crt",
+            "KAFKA_PUBLISH_TIMEOUT": "3s",
+        }
+    )
     if environment == "qa":
         expected_data["OTEL_EXPORTER_OTLP_ENDPOINT"] = (
             "http://qa-alloy.qa-monitoring.svc.cluster.local:4317"

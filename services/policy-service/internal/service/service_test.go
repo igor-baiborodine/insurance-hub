@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,9 +38,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	policyv1 "github.com/igor-baiborodine/insurance-hub/services/policy-service/gen/policy/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
+	policykafka "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 )
 
@@ -1199,6 +1203,40 @@ func (provider *recordingProvider) Shutdown(ctx context.Context) error {
 	return provider.tracerProvider.Shutdown(ctx)
 }
 
+type fakeEventPublisher struct {
+	available atomic.Bool
+	shutdown  atomic.Bool
+	started   chan struct{}
+}
+
+func newFakeEventPublisher() *fakeEventPublisher {
+	publisher := &fakeEventPublisher{started: make(chan struct{})}
+	publisher.available.Store(true)
+	return publisher
+}
+
+func (publisher *fakeEventPublisher) Preflight(context.Context) error {
+	return publisher.Check(context.Background())
+}
+
+func (publisher *fakeEventPublisher) Check(context.Context) error {
+	if !publisher.available.Load() {
+		return errors.New("publisher unavailable")
+	}
+	return nil
+}
+
+func (publisher *fakeEventPublisher) Run(ctx context.Context) error {
+	close(publisher.started)
+	<-ctx.Done()
+	return nil
+}
+
+func (publisher *fakeEventPublisher) Shutdown(context.Context) error {
+	publisher.shutdown.Store(true)
+	return nil
+}
+
 type fakePool struct{ closed atomic.Bool }
 
 func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
@@ -1282,6 +1320,80 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	}
 	if !pool.closed.Load() {
 		t.Fatal("database pool was not closed during shutdown")
+	}
+}
+
+func TestRun_EventPublisherJoinsReadinessAndBoundedShutdown(t *testing.T) {
+	// given
+	settings := databaseConfig(t)
+	caPath := filepath.Join(t.TempDir(), "kafka-ca.crt")
+	if err := os.WriteFile(caPath, []byte("synthetic CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings.Events = config.Events{
+		Enabled: true, Brokers: []string{"kafka.example:9093"},
+		RegisteredTopic: "policy-registered", TerminatedTopic: "policy-terminated",
+		CAFile: caPath, PublishTimeout: 100 * time.Millisecond,
+	}
+	pool := &fakePool{}
+	publisher := newFakeEventPublisher()
+	deps := testDependencies()
+	deps.openPool = func(context.Context, postgres.PoolSettings) (databasePool, error) {
+		return pool, nil
+	}
+	deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
+		return nil
+	}
+	deps.newPublisher = func(
+		settings policykafka.Settings,
+		store application.EventIntentStore,
+		logger *slog.Logger,
+	) (eventPublisher, error) {
+		if settings.ClientID != "policy-service" ||
+			settings.RegisteredTopic != "policy-registered" ||
+			settings.TerminatedTopic != "policy-terminated" ||
+			store == nil || logger == nil {
+			return nil, errors.New("unexpected publisher composition")
+		}
+		return publisher, nil
+	}
+	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
+		return newStatefulGatewayConnection(connectivity.Ready), nil
+	}
+	deps.newGateway = func(policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error) {
+		return http.NotFoundHandler(), nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- run(ctx, settings, discardLogger(), deps) }()
+	_, _ = receiveString(t, addresses), receiveString(t, addresses)
+	health := "http://" + receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	receiveSignal(t, publisher.started, "publisher did not start")
+
+	// when
+	publisher.available.Store(false)
+
+	// then
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusServiceUnavailable)
+	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+	publisher.available.Store(true)
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	cancel()
+	if err := receiveError(t, result, "service did not stop"); err != nil {
+		t.Fatal(err)
+	}
+	if !publisher.shutdown.Load() || !pool.closed.Load() {
+		t.Fatal("publisher or database was not closed during shutdown")
 	}
 }
 

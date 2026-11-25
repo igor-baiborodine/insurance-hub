@@ -17,6 +17,9 @@ spec:
             - name: postgres-ca
               mountPath: /etc/policy-service/postgres
               readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/policy-service/kafka
+              readOnly: true
       volumes:
         - name: postgres-ca
           secret:
@@ -24,3 +27,10 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+        - name: kafka-ca
+          secret:
+            secretName: qa-policy-kafka-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292

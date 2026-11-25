@@ -27,6 +27,14 @@ const (
 	pricingTargetSetting    = "PRICING_GRPC_TARGET"
 	providerTimeoutSetting  = "PROVIDER_CALL_TIMEOUT"
 	businessZoneSetting     = "BUSINESS_TIME_ZONE"
+	eventPublisherSetting   = "EVENT_PUBLISHER_ENABLED"
+	kafkaBrokersSetting     = "KAFKA_BROKERS"
+	kafkaRegisteredSetting  = "KAFKA_REGISTERED_TOPIC"
+	kafkaTerminatedSetting  = "KAFKA_TERMINATED_TOPIC"
+	kafkaCAFileSetting      = "KAFKA_CA_FILE"
+	kafkaPublishSetting     = "KAFKA_PUBLISH_TIMEOUT"
+	defaultRegisteredTopic  = "policy-registered"
+	defaultTerminatedTopic  = "policy-terminated"
 )
 
 // Database holds the optional Policy writer connection and pool limits. An absent URL leaves the
@@ -61,10 +69,22 @@ type Providers struct {
 // Configured reports whether both provider targets were supplied.
 func (providers Providers) Configured() bool { return providers.ProductTarget != "" }
 
+// Events holds the opt-in Policy outbox publisher settings. Disabled publishers need no Kafka
+// settings, which keeps local contract and migration commands independent of a broker.
+type Events struct {
+	Enabled         bool
+	Brokers         []string
+	RegisteredTopic string
+	TerminatedTopic string
+	CAFile          string
+	PublishTimeout  time.Duration
+}
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
 	Database  Database
 	Providers Providers
+	Events    Events
 	// BusinessTimeZone defines the calendar date of a new offer.
 	BusinessTimeZone *time.Location
 	kitconfig.Runtime
@@ -309,10 +329,15 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	events, err := loadEvents(lookup, database, runtime.ShutdownTimeout-otelTimeout)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Database:           database,
 		Providers:          providers,
+		Events:             events,
 		BusinessTimeZone:   businessZone,
 		Runtime:            runtime,
 		GRPC:               grpc,
@@ -325,6 +350,127 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxBodyBytes:   maxBodyBytes,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadEvents(
+	lookup lookupEnv,
+	database Database,
+	drainBudget time.Duration,
+) (Events, error) {
+	enabledValue, err := kitconfig.ValueOrDefault(lookup, eventPublisherSetting, "false")
+	if err != nil {
+		return Events{}, err
+	}
+	enabled, err := kitconfig.ParseBool(eventPublisherSetting, enabledValue)
+	if err != nil {
+		return Events{}, err
+	}
+	settings := []string{
+		kafkaBrokersSetting,
+		kafkaRegisteredSetting,
+		kafkaTerminatedSetting,
+		kafkaCAFileSetting,
+		kafkaPublishSetting,
+	}
+	if !enabled {
+		for _, setting := range settings {
+			if _, present := lookup(setting); present {
+				return Events{}, kitconfig.Invalid(
+					setting,
+					"must be unset when event publication is disabled",
+				)
+			}
+		}
+		return Events{}, nil
+	}
+	if !database.Configured() {
+		return Events{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"is required when event publication is enabled",
+		)
+	}
+	brokersValue, err := requiredEventSetting(lookup, kafkaBrokersSetting)
+	if err != nil {
+		return Events{}, err
+	}
+	brokers := strings.Split(brokersValue, ",")
+	for index := range brokers {
+		brokers[index] = strings.TrimSpace(brokers[index])
+		if brokers[index] == "" || !validBroker(brokers[index]) {
+			return Events{}, kitconfig.Invalid(
+				kafkaBrokersSetting,
+				"must contain comma-separated host:port brokers",
+			)
+		}
+	}
+	registered, err := kitconfig.ValueOrDefault(
+		lookup,
+		kafkaRegisteredSetting,
+		defaultRegisteredTopic,
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	if registered != defaultRegisteredTopic {
+		return Events{}, kitconfig.Invalid(
+			kafkaRegisteredSetting,
+			"must select the Policy registration topic",
+		)
+	}
+	terminated, err := kitconfig.ValueOrDefault(
+		lookup,
+		kafkaTerminatedSetting,
+		defaultTerminatedTopic,
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	if terminated != defaultTerminatedTopic {
+		return Events{}, kitconfig.Invalid(
+			kafkaTerminatedSetting,
+			"must select the Policy termination topic",
+		)
+	}
+	caFile, err := requiredEventSetting(lookup, kafkaCAFileSetting)
+	if err != nil {
+		return Events{}, err
+	}
+	publishTimeout, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		kafkaPublishSetting,
+		"3s",
+	)
+	if err != nil {
+		return Events{}, err
+	}
+	if publishTimeout >= drainBudget {
+		return Events{}, kitconfig.Invalid(
+			kafkaPublishSetting,
+			"must leave time to drain before telemetry shutdown",
+		)
+	}
+	return Events{
+		Enabled: enabled, Brokers: brokers,
+		RegisteredTopic: registered, TerminatedTopic: terminated,
+		CAFile: caFile, PublishTimeout: publishTimeout,
+	}, nil
+}
+
+func requiredEventSetting(lookup lookupEnv, name string) (string, error) {
+	value, present := lookup(name)
+	if !present || strings.TrimSpace(value) == "" {
+		return "", kitconfig.Invalid(name, "is required when event publication is enabled")
+	}
+	if value != strings.TrimSpace(value) {
+		return "", kitconfig.Invalid(name, "must not contain surrounding whitespace")
+	}
+	return value, nil
+}
+
+func validBroker(value string) bool {
+	parsed, err := url.Parse("tcp://" + value)
+	return err == nil && parsed.Host == value && kitconfig.ValidHost(parsed.Hostname()) &&
+		parsed.Port() != ""
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {

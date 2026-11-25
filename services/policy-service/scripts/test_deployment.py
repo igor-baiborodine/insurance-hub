@@ -66,8 +66,10 @@ def without_database(items: dict[str, dict]) -> dict[str, dict]:
     pod = items["Deployment"]["spec"]["template"]["spec"]
     container = pod["containers"][0]
     container["env"] = [item for item in container["env"] if item["name"] != "POLICY_DATABASE_URL"]
-    container.pop("volumeMounts")
-    pod.pop("volumes")
+    container["volumeMounts"] = [
+        item for item in container["volumeMounts"] if item["name"] != "postgres-ca"
+    ]
+    pod["volumes"] = [item for item in pod["volumes"] if item["name"] != "postgres-ca"]
     for key in policy.DATABASE_CONFIG:
         items["ConfigMap"]["data"].pop(key)
     items["NetworkPolicy"]["spec"]["egress"] = items["NetworkPolicy"]["spec"]["egress"][:1]
@@ -86,11 +88,46 @@ def test_local_render_mounts_only_the_writer_database_path(defect: str) -> None:
     elif defect == "extra mount":
         pod["containers"][0]["volumeMounts"].append({"name": "admin", "mountPath": "/admin"})
     else:
-        items["NetworkPolicy"]["spec"]["egress"].pop()
+        items["NetworkPolicy"]["spec"]["egress"] = [
+            rule
+            for rule in items["NetworkPolicy"]["spec"]["egress"]
+            if rule["ports"] != [{"port": policy.DATABASE_PORT, "protocol": "TCP"}]
+        ]
 
     # when / then
     with pytest.raises(DeploymentError):
         policy.validate_render("local-dev", yaml.safe_dump_all(items.values()))
+
+
+@pytest.mark.parametrize("environment", ["local-dev", "qa"])
+@pytest.mark.parametrize(
+    "defect", ["wrong topic", "wrong CA Secret", "namespace-wide Kafka egress"]
+)
+def test_render_scopes_the_policy_kafka_producer(environment: str, defect: str) -> None:
+    # given
+    items = policy.validate_render(environment, policy.render(environment))
+    pod = items["Deployment"]["spec"]["template"]["spec"]
+    kafka_egress = next(
+        rule
+        for rule in items["NetworkPolicy"]["spec"]["egress"]
+        if rule["to"][0]
+        .get("podSelector", {})
+        .get("matchLabels", {})
+        .get("strimzi.io/component-type")
+        == "kafka"
+    )
+    if defect == "wrong topic":
+        items["ConfigMap"]["data"]["KAFKA_REGISTERED_TOPIC"] = "shared-business-events"
+    elif defect == "wrong CA Secret":
+        next(volume for volume in pod["volumes"] if volume["name"] == "kafka-ca")["secret"][
+            "secretName"
+        ] = "unrelated-kafka-ca"
+    else:
+        del kafka_egress["to"][0]["podSelector"]
+
+    # when / then
+    with pytest.raises(DeploymentError):
+        policy.validate_render(environment, yaml.safe_dump_all(items.values()))
 
 
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
@@ -733,6 +770,15 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         and set(secret_data) == {"database-url", "ca.crt"},
         "disposable smoke requires the exact Policy writer Secret",
     )
+    kafka_secret_name = f"{target.environment}-policy-kafka-ca"
+    source_kafka_secret = target.json("get", "secret", kafka_secret_name)
+    kafka_secret_data = source_kafka_secret.get("data")
+    require(
+        source_kafka_secret.get("type") == "Opaque"
+        and isinstance(kafka_secret_data, dict)
+        and set(kafka_secret_data) == {"ca.crt"},
+        "disposable smoke requires the exact Policy Kafka CA Secret",
+    )
     token = uuid.uuid4().hex[:12]
     target.namespace = f"policy-smoke-{token}"
     namespace = {
@@ -740,8 +786,10 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
-    # The writer Secret is copied into the owned namespace and removed with it. The workload
-    # only runs its read-only readiness query; the invalid-offer probes write nothing.
+    # The writer and public Kafka CA Secrets are copied into the owned namespace and removed with
+    # it. The workload only runs its read-only readiness query; the invalid-offer probes write
+    # nothing. The fully qualified broker name preserves the ordinary cluster while DNS originates
+    # in the disposable namespace.
     writer_secret = {
         "apiVersion": "v1",
         "kind": "Secret",
@@ -749,13 +797,24 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         "type": "Opaque",
         "data": secret_data,
     }
+    kafka_secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": kafka_secret_name, "namespace": target.namespace},
+        "type": "Opaque",
+        "data": kafka_secret_data,
+    }
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
+    items["ConfigMap"]["data"]["KAFKA_BROKERS"] = (
+        "local-dev-kafka-kafka-bootstrap.local-dev-all.svc:9093"
+    )
 
     try:
         # when
         target.kubectl("create", "-f", "-", input_text=json.dumps(namespace))
         target.kubectl("create", "-f", "-", input_text=json.dumps(writer_secret))
+        target.kubectl("create", "-f", "-", input_text=json.dumps(kafka_secret))
         policy.run(
             ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
             timeout=120,
@@ -764,7 +823,10 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         policy.rollout(target)
 
         # then
-        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "1")
+        # Provider ingress policy intentionally trusts only the real environment namespace.
+        # The disposable namespace qualifies the workload itself; the direct environment
+        # verification below owns the cross-workload allow/deny probes.
+        monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "0")
         policy.verify_workload(target, items)
         policy.stop(target, items)
         assert target.json("get", "deployment", target.deployment)["spec"]["replicas"] == 0

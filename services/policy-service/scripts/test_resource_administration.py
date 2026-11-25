@@ -12,6 +12,7 @@ from scripts.python.process_runner import CommandError
 
 CLUSTER_UID = "11111111-1111-4111-8111-111111111111"
 CA = b"-----BEGIN CERTIFICATE-----\nsynthetic\n"
+KAFKA_CA = b"-----BEGIN CERTIFICATE-----\nsynthetic-kafka\n"
 
 
 class FakeTarget:
@@ -25,6 +26,7 @@ class FakeTarget:
     cluster_uid = CLUSTER_UID
     hostname = "local-dev-postgres-policy-rw.local-dev-all.svc.cluster.local"
     target_secret = "local-dev-postgres-policy-admin-target"
+    kafka_ca_secret = "local-dev-policy-kafka-ca"
 
     def __init__(self, roles: str = ""):
         self.secrets: dict[str, dict[str, bytes]] = {}
@@ -47,6 +49,9 @@ class FakeTarget:
 
     def ca(self):
         return CA
+
+    def kafka_ca(self):
+        return KAFKA_CA
 
     def admin(self, sql, *, sensitive=()):
         if sql == resources.BOUNDARY_SQL:
@@ -111,6 +116,7 @@ def test_interrupted_ensure_retries_with_published_credentials(monkeypatch):
     published = dict(target.secrets)
     assert target.mutations == [
         target.target_secret,
+        target.kafka_ca_secret,
         *(target.role_secret(role) for role in resources.ROLES),
         "postgres",
     ]
@@ -157,6 +163,7 @@ def test_secret_owned_by_another_service_is_refused(monkeypatch):
     # given
     manager = object.__new__(resources.Kubernetes)
     manager.ca_name = "local-dev-postgres-policy-ca"
+    manager.kafka_public_ca_secret = "local-dev-kafka-cluster-ca-cert"
     manager.data_ns = "local-dev-all"
     manager.svc_ns = "local-dev-all"
     record = {
@@ -181,6 +188,7 @@ def test_cnpg_ca_secret_does_not_require_application_labels(monkeypatch):
     # given
     manager = object.__new__(resources.Kubernetes)
     manager.ca_name = "local-dev-postgres-policy-ca"
+    manager.kafka_public_ca_secret = "local-dev-kafka-cluster-ca-cert"
     manager.data_ns = manager.svc_ns = "local-dev-all"
     record = {
         "metadata": {
@@ -196,6 +204,32 @@ def test_cnpg_ca_secret_does_not_require_application_labels(monkeypatch):
 
     # then
     assert secret == {"ca.crt": CA}
+
+
+def test_strimzi_public_ca_secret_does_not_require_application_labels(monkeypatch):
+    # given
+    manager = object.__new__(resources.Kubernetes)
+    manager.ca_name = "local-dev-postgres-policy-ca"
+    manager.kafka_public_ca_secret = "local-dev-kafka-cluster-ca-cert"
+    manager.data_ns = manager.svc_ns = "local-dev-all"
+    record = {
+        "metadata": {
+            "name": manager.kafka_public_ca_secret,
+            "namespace": manager.data_ns,
+        },
+        "data": {
+            "ca.crt": base64.b64encode(KAFKA_CA).decode(),
+            "ca.p12": base64.b64encode(b"synthetic-pkcs12").decode(),
+            "ca.password": base64.b64encode(b"synthetic-password").decode(),
+        },
+    }
+    monkeypatch.setattr(manager, "kubectl", lambda *_, **__: json.dumps(record), raising=False)
+
+    # when
+    secret = manager.kafka_ca()
+
+    # then
+    assert secret == KAFKA_CA
 
 
 def test_each_role_query_uses_a_fresh_owned_port_forward(monkeypatch):
@@ -268,6 +302,7 @@ def test_command_failure_redacts_subprocess_output(monkeypatch, capsys):
 def test_verify_requires_permission_denied_sqlstate(monkeypatch):
     # given
     target = FakeTarget()
+    target.secrets[target.kafka_ca_secret] = {"ca.crt": KAFKA_CA}
     stored = {role: {"ca.crt": CA} for role in resources.ROLES}
     document = {"environment": "local-dev", "instanceID": "x", "clusterUID": CLUSTER_UID}
     monkeypatch.setattr(

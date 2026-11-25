@@ -7,6 +7,7 @@
   - [Flux-owned QA](#flux-owned-qa)
   - [Private smoke and recovery](#private-smoke-and-recovery)
   - [Provider access](#provider-access)
+  - [Kafka producer access](#kafka-producer-access)
   - [PostgreSQL storage](#postgresql-storage)
     - [Target selection](#target-selection)
     - [Fresh installation order](#fresh-installation-order)
@@ -151,9 +152,10 @@ curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz
 ```
 
-Local-dev permits only TCP and UDP 53 to kube-dns, port 5432 of its Policy CNPG Pods and gRPC
-port 9090 of the Product and Pricing Pods, and disables telemetry. QA additionally permits
-OTLP/gRPC to the selected Alloy Pods. Inspect the six identity fields in the Policy
+Local-dev permits only TCP and UDP 53 to kube-dns, port 5432 of its Policy CNPG Pods, gRPC
+port 9090 of the Product and Pricing Pods and TLS port 9093 of its Strimzi Kafka Pods. QA permits
+the same scoped data-plane access and additionally permits OTLP/gRPC to the selected Alloy Pods.
+Inspect the six identity fields in the Policy
 startup record and verify corresponding telemetry by `service.name=policy-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
@@ -186,6 +188,20 @@ service namespace, addressed by `PRODUCT_GRPC_TARGET` and `PRICING_GRPC_TARGET`.
 the same-environment `policy-api` Pods on port 9090 only, and Pricing admits `policy-api` on port
 9090 only. Neither provider exposes its HTTP port to Policy. Provider calls are bounded by
 `PROVIDER_CALL_TIMEOUT`; provider availability is not part of readiness.
+
+## Kafka producer access
+
+The local-dev and QA overlays enable Policy's producer only for `policy-registered` and
+`policy-terminated`, mount the Policy-owned public CA Secret at `/etc/policy-service/kafka`, and
+allow egress only to the selected environment's Strimzi Kafka Pods on TLS port 9093. The current
+private listener has no Kafka authentication or ACLs, so the NetworkPolicy identity and the two
+fixed application topic settings are the available producer boundary; do not describe them as
+broker-enforced topic authorization.
+
+`resource-ensure` reads `<environment>-kafka-cluster-ca-cert` from the data namespace and creates
+`<environment>-policy-kafka-ca` in the service namespace when absent. It refuses to replace a
+Policy Secret whose `ca.crt` differs. `resource-verify` independently compares the mounted copy
+with the selected Strimzi public CA before deployment.
 
 ## PostgreSQL storage
 
@@ -240,12 +256,13 @@ kubectl config use-context kind-local-dev-insurance-hub
    `Cluster in healthy state` and a ready primary.
 3. `make -C services/policy-service resource-inspect` reports missing roles and Secrets without
    mutation. Then `POLICY_RESOURCE_CONFIRM=ensure-local-dev-policy-resources make -C
-   services/policy-service resource-ensure` publishes the enrollment and both credential Secrets,
-   creates the logins and marker, and runs `resource-verify`.
+   services/policy-service resource-ensure` publishes the enrollment, both database credential
+   Secrets and the Policy Kafka CA Secret, creates the logins and marker, and runs
+   `resource-verify`.
 4. `POLICY_MIGRATION_OPERATION=status make -C services/policy-service migration` reports
    `uninitialized`. Then `POLICY_MIGRATION_OPERATION=migrate
    POLICY_MIGRATION_CONFIRM=migrate-local-dev-policy-schema make -C services/policy-service
-   migration` returns `version=1`, and status confirms it. The command runs the checkout's migrator
+   migration` returns `version=2`, and status confirms it. The command runs the checkout's migrator
    through an owned port-forward to the primary. It writes the enrollment, CA and tunnel URL only
    to a private temporary directory.
 5. `make -C services/policy-service resource-verify` now also proves writer reads and SQLSTATE

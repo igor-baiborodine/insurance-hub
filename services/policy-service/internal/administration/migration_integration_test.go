@@ -61,7 +61,7 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 
 	// then
 	for index := range results {
-		if failures[index] != nil || results[index] != "version=1" {
+		if failures[index] != nil || results[index] != "version=2" {
 			t.Fatalf(
 				"concurrent migrate %d: got %q (%v)",
 				index,
@@ -70,14 +70,14 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 			)
 		}
 	}
-	fixture.Call(t, ctx, "status", "version=1")
+	fixture.Call(t, ctx, "status", "version=2")
 	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != managedAllocators {
 		t.Fatalf("fresh allocators: got %q", got)
 	}
 	history := fixture.Query(t, ctx, readMigrationHistoryQuery)
 	if !strings.HasPrefix(history, "0:true:") || !strings.Contains(history, ",1:true:") ||
-		strings.Count(history, ",") != 1 {
-		t.Fatalf("expected one base and one applied history row, got %q", history)
+		!strings.Contains(history, ",2:true:") || strings.Count(history, ",") != 2 {
+		t.Fatalf("expected one base and two applied history rows, got %q", history)
 	}
 	if got := generatedAggregate(t, ctx, fixture, true); got != "1,1,1,1:t" {
 		t.Fatalf("fresh writer insert: got %q", got)
@@ -86,7 +86,7 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 
 	t.Run("retry keeps one history", func(t *testing.T) {
 		// when
-		fixture.Call(t, ctx, "migrate", "version=1")
+		fixture.Call(t, ctx, "migrate", "version=2")
 
 		// then
 		if snapshot(t, ctx, fixture) != migrated {
@@ -122,10 +122,10 @@ func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
 	fixture.Call(t, ctx, "status", "unmanaged")
 
 	// when
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 
 	// then
-	fixture.Call(t, ctx, "status", "version=1")
+	fixture.Call(t, ctx, "status", "version=2")
 	requireBusinessData(t, ctx, fixture, baseline)
 	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != managedAllocators {
 		t.Fatalf("adopted allocators retain the Java sequence or lack identities: %q", got)
@@ -142,7 +142,7 @@ func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
 		migrated := snapshot(t, ctx, fixture)
 
 		// when
-		fixture.Call(t, ctx, "migrate", "version=1")
+		fixture.Call(t, ctx, "migrate", "version=2")
 
 		// then
 		if snapshot(t, ctx, fixture) != migrated {

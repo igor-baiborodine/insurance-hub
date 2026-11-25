@@ -14,7 +14,7 @@ import (
 )
 
 // AppliedStatus is the status reported for the current managed schema.
-const AppliedStatus = "version=1"
+const AppliedStatus = "version=2"
 
 const cleanupBudget = 5 * time.Second
 
@@ -22,7 +22,8 @@ const cleanupBudget = 5 * time.Second
 var migrationSQL embed.FS
 
 // Migrate verifies the protected target and schema under the same session lock Goose uses for
-// history setup and version-1 execution. Replays validate even when version 1 is applied.
+// each migration. Applying explicit versions keeps Goose from initializing history before the
+// validating lock has rejected a wrong target or incompatible schema.
 func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	source, err := fs.Sub(migrationSQL, "migrations")
 	if err != nil {
@@ -47,13 +48,11 @@ func Migrate(parent context.Context, db *sql.DB, target Target) error {
 	if err != nil {
 		return fmt.Errorf("configure Policy migration: %w", err)
 	}
-	if _, err := provider.ApplyVersion(
-		parent,
-		1,
-		true,
-	); err != nil &&
-		!isOnlyAlreadyApplied(err) {
-		return fmt.Errorf("apply Policy migration: %w", err)
+	for _, version := range []int64{1, 2} {
+		if _, err := provider.ApplyVersion(parent, version, true); err != nil &&
+			!isOnlyAlreadyApplied(err) {
+			return fmt.Errorf("apply Policy migration version %d: %w", version, err)
+		}
 	}
 	return applyGrants(parent, db, target)
 }

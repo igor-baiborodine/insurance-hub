@@ -30,11 +30,8 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 	case tables == 0 && !outbox && !javaAllocator:
 	case tables == businessTables && outbox && !javaAllocator:
 		managed = true
-		if err := inspectPolicy(ctx, db, true); err != nil {
-			return "", err
-		}
 	case tables == businessTables && !outbox:
-		if err := inspectPolicy(ctx, db, false); err != nil {
+		if err := inspectPolicy(ctx, db, false, false); err != nil {
 			return "", err
 		}
 	default:
@@ -50,7 +47,16 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 			return "unmanaged", nil
 		}
 	}
-	return inspectHistory(ctx, db, managed)
+	status, err := inspectHistory(ctx, db, managed)
+	if err != nil {
+		return "", err
+	}
+	if managed {
+		if err := inspectPolicy(ctx, db, true, status == AppliedStatus); err != nil {
+			return "", err
+		}
+	}
+	return status, nil
 }
 
 func inspectPlatform(ctx context.Context, db queryRower, target Target) error {
@@ -68,9 +74,9 @@ func inspectPlatform(ctx context.Context, db queryRower, target Target) error {
 	return nil
 }
 
-func inspectPolicy(ctx context.Context, db queryRower, managed bool) error {
+func inspectPolicy(ctx context.Context, db queryRower, managed, traceColumns bool) error {
 	var accepted bool
-	if err := db.QueryRowContext(ctx, inspectPolicySchemaQuery, managed).
+	if err := db.QueryRowContext(ctx, inspectPolicySchemaQuery, managed, traceColumns).
 		Scan(&accepted); err != nil {
 		return fmt.Errorf("inspect Policy schema: %w", err)
 	}

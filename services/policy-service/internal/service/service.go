@@ -2,12 +2,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -26,6 +29,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/grpc"
+	policykafka "github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/providers"
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/telemetry"
@@ -79,6 +83,13 @@ type providerConnection interface {
 	Close() error
 }
 
+type eventPublisher interface {
+	Preflight(context.Context) error
+	Check(context.Context) error
+	Run(context.Context) error
+	Shutdown(context.Context) error
+}
+
 type dependencies struct {
 	openPool       func(context.Context, postgres.PoolSettings) (databasePool, error)
 	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
@@ -87,6 +98,7 @@ type dependencies struct {
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Handlers) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
 	newProvider    func(string, telemetryProvider) (providerConnection, error)
+	newPublisher   func(policykafka.Settings, application.EventIntentStore, *slog.Logger) (eventPublisher, error)
 	now            func() time.Time
 	newGateway     func(policyv1.PolicyServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
@@ -115,8 +127,15 @@ func productionDependencies() dependencies {
 				handlers,
 			)
 		},
-		newConnection:  newGatewayConnection,
-		newProvider:    newProviderConnection,
+		newConnection: newGatewayConnection,
+		newProvider:   newProviderConnection,
+		newPublisher: func(
+			settings policykafka.Settings,
+			store application.EventIntentStore,
+			logger *slog.Logger,
+		) (eventPublisher, error) {
+			return policykafka.NewPublisher(settings, store, logger)
+		},
 		now:            time.Now,
 		newGateway:     gateway.NewHandler,
 		newUnavailable: gateway.NewUnavailableHandler,
@@ -190,6 +209,10 @@ type runningService struct {
 	managementServer   httpServer
 	managementListener net.Listener
 	tracker            *handlerTracker
+	publisher          eventPublisher
+	publisherCancel    context.CancelFunc
+	publisherResult    chan error
+	publisherWG        sync.WaitGroup
 }
 
 func run(
@@ -247,6 +270,25 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	eventObserver, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+	)
+	if err != nil {
+		return fail(err)
+	}
+	if settings.Events.Enabled {
+		if err := runtime.configurePublisher(
+			settings.Events,
+			logger,
+			deps,
+			eventObserver,
+			provider.HTTPPropagator(),
+		); err != nil {
+			return fail(fmt.Errorf("run service: %w", err))
+		}
+	}
 	createOffer, err := runtime.composeOffers(settings, provider, deps)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -302,6 +344,13 @@ func run(
 	}
 	readyContext, cancelReady := context.WithTimeout(ctx, settings.ProbeTimeout)
 	err = waitForConnection(readyContext, runtime.connection)
+	if err == nil && runtime.publisher != nil {
+		err = runtime.publisher.Preflight(readyContext)
+	}
+	if err == nil {
+		runtime.startPublisher(ctx)
+		err = runtime.checkPublisher(readyContext)
+	}
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
@@ -311,7 +360,10 @@ func run(
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return checkDatabase(ctx)
+		if err := checkDatabase(ctx); err != nil {
+			return err
+		}
+		return runtime.checkPublisher(ctx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -350,6 +402,8 @@ func run(
 		return fail(unexpectedServeError("business HTTP", err))
 	case err := <-managementResult:
 		return fail(unexpectedServeError("management HTTP", err))
+	case err := <-runtime.publisherResult:
+		return fail(unexpectedPublisherError(err))
 	default:
 	}
 	runtime.state.SetReady(true)
@@ -368,11 +422,95 @@ func run(
 		serveErr = unexpectedServeError("business HTTP", err)
 	case err := <-managementResult:
 		serveErr = unexpectedServeError("management HTTP", err)
+	case err := <-runtime.publisherResult:
+		if ctx.Err() == nil {
+			serveErr = unexpectedPublisherError(err)
+		}
 	}
 	return errors.Join(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configurePublisher(
+	settings config.Events,
+	logger *slog.Logger,
+	deps dependencies,
+	eventObserver *telemetry.EventObserver,
+	propagator propagation.TextMapPropagator,
+) error {
+	if runtime.pool == nil {
+		return errors.New("configure Policy event publisher: database is required")
+	}
+	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
+	if err != nil {
+		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
+	}
+	store, err := postgres.NewStore(runtime.pool)
+	if err != nil {
+		return err
+	}
+	runtime.publisher, err = deps.newPublisher(policykafka.Settings{
+		Brokers: settings.Brokers, ClientID: "policy-service",
+		RegisteredTopic: settings.RegisteredTopic,
+		TerminatedTopic: settings.TerminatedTopic,
+		CACert:          caCertificate,
+		PublishTimeout:  settings.PublishTimeout,
+		Propagator:      propagator,
+		Observe: func(ctx context.Context, eventType string) (
+			context.Context,
+			func(context.Context, string, error),
+		) {
+			observedCtx, observation := eventObserver.Start(ctx, eventType)
+			return observedCtx, observation.Finish
+		},
+	}, store, logger)
+	return err
+}
+
+func readBoundedFile(path string, maximum int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
+	if err != nil || int64(len(data)) > maximum {
+		return nil, errors.New("file exceeds accepted certificate size")
+	}
+	return data, nil
+}
+
+func (runtime *runningService) checkPublisher(ctx context.Context) error {
+	if runtime.publisher == nil {
+		return nil
+	}
+	return runtime.publisher.Check(ctx)
+}
+
+func (runtime *runningService) startPublisher(parent context.Context) {
+	if runtime.publisher == nil {
+		return
+	}
+	publisherCtx, cancel := context.WithCancel(parent)
+	runtime.publisherCancel = cancel
+	runtime.publisherResult = make(chan error, 1)
+	runtime.publisherWG.Add(1)
+	go func() {
+		defer runtime.publisherWG.Done()
+		runtime.publisherResult <- runtime.publisher.Run(publisherCtx)
+	}()
+}
+
+func unexpectedPublisherError(err error) error {
+	if err == nil {
+		err = errors.New("stopped unexpectedly")
+	}
+	return fmt.Errorf("event publisher stopped: %w", err)
 }
 
 // requireDeployedDependencies refuses a deployed instance without storage or providers. Only
@@ -556,6 +694,27 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 			shutdownErrors,
 			fmt.Errorf("drain business HTTP handlers: %w", graceful.Err()),
 		)
+	}
+	if runtime.publisherCancel != nil {
+		runtime.publisherCancel()
+		publisherStopped := make(chan struct{})
+		go func() { runtime.publisherWG.Wait(); close(publisherStopped) }()
+		select {
+		case <-publisherStopped:
+		case <-graceful.Done():
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("stop event publisher: %w", graceful.Err()),
+			)
+		}
+	}
+	if runtime.publisher != nil {
+		if err := runtime.publisher.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown event publisher: %w", err),
+			)
+		}
 	}
 	if runtime.connection != nil {
 		if err := runtime.connection.Close(); err != nil {

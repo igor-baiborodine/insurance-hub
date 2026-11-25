@@ -48,7 +48,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
 	fixture.LoadJavaData(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 	pool, err := postgres.OpenPool(ctx, postgres.PoolSettings{
 		URL: fixture.WriterURL(
 			"policy",
@@ -267,7 +267,7 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 
 	// when
 	unmigrated := postgres.CheckReadiness(ctx, pool, time.Second)
-	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Call(t, ctx, "migrate", "version=2")
 	migrated := postgres.CheckReadiness(ctx, pool, time.Second)
 
 	// then
@@ -516,7 +516,8 @@ func requireSQLCSchemaMatchesMigration(
 		t.Fatal("apply sqlc schema:", err)
 	}
 	var matches bool
-	if err := connection.QueryRow(ctx, string(inspection), true).Scan(&matches); err != nil ||
+	if err := connection.QueryRow(ctx, string(inspection), true, true).
+		Scan(&matches); err != nil ||
 		!matches {
 		t.Fatalf("sqlc schema differs from the managed migration shape (%v)", err)
 	}

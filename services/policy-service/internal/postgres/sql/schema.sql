@@ -55,6 +55,8 @@ CREATE TABLE public.policy_outbox (
     topic varchar(64) NOT NULL CHECK (topic IN ('policy-registered', 'policy-terminated')),
     message_key varchar(255) NOT NULL,
     payload jsonb NOT NULL,
+    trace_parent varchar(55),
+    trace_state varchar(512),
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at timestamptz
 );

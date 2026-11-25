@@ -70,10 +70,12 @@ type Cover struct {
 
 // Intent is one logical event intent, stored with the aggregate change that caused it.
 type Intent struct {
-	ID      [16]byte
-	Topic   string
-	Key     string
-	Payload []byte
+	ID          [16]byte
+	Topic       string
+	Key         string
+	Payload     []byte
+	TraceParent string
+	TraceState  string
 }
 
 // Issuance is a new policy with its first version and registration intent.
@@ -392,6 +394,8 @@ func (t Transaction) insertIntent(ctx context.Context, policyID int64, intent In
 	if _, err := t.queries.InsertOutboxIntent(ctx, dbgen.InsertOutboxIntentParams{
 		IntentID: pgtype.UUID{Bytes: intent.ID, Valid: true}, PolicyID: policyID,
 		Topic: intent.Topic, MessageKey: intent.Key, Payload: intent.Payload,
+		TraceParent: nullableString(intent.TraceParent),
+		TraceState:  nullableString(intent.TraceState),
 	}); err != nil {
 		return fmt.Errorf("insert outbox intent: %w", err)
 	}
@@ -470,6 +474,13 @@ func nullableText(value *string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: *value, Valid: true}
+}
+
+func nullableString(value string) pgtype.Text {
+	if value == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: value, Valid: true}
 }
 
 func nullableDate(value *time.Time) pgtype.Date {
