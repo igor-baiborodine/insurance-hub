@@ -300,8 +300,38 @@ disposable harnesses.
 
 #### Database readiness loss
 
-1. Read **Database readiness** (`PolicyDatabaseNotReady`) and probe `/readyz` through the private
-   port-forward in [Private smoke and recovery](deployment-runbook.md#private-smoke-and-recovery).
+1. Read **Database readiness** (`PolicyDatabaseNotReady`). The single QA replica is unready
+   during the outage, so a procedure that selects the ready Pod cannot reach it. Select the
+   running Pod by namespace, Deployment ownership and UID instead, and forward only its
+   management port:
+
+   ```sh
+   k() { kubectl --context qa-insurance-hub -n qa-svc "$@"; }
+   deploy="$(k get deployment/qa-policy-api -o json)"
+   selector="$(jq -r '.spec.selector.matchLabels | to_entries
+     | map("\(.key)=\(.value)") | join(",")' <<<"$deploy")"
+   owners="$(k get replicaset -l "$selector" -o json | jq -c \
+     --arg uid "$(jq -r .metadata.uid <<<"$deploy")" '[.items[]
+       | select(any(.metadata.ownerReferences[]?; .uid == $uid)) | .metadata.uid]')"
+   k get pod -l "$selector" -o json | jq -r --argjson owners "$owners" '.items[]
+     | select(.status.phase == "Running")
+     | select(any(.metadata.ownerReferences[]?; .uid as $u | $owners | index($u)))
+     | "\(.metadata.name) \(.metadata.uid)"'
+   ```
+
+   Require exactly one line, record its Pod UID, then forward that Pod:
+
+   ```sh
+   : "${POLICY_POD:?set the running Go Policy Pod name from the previous command}"
+   kubectl --context qa-insurance-hub -n qa-svc port-forward --address 127.0.0.1 \
+     "pod/$POLICY_POD" 18081:8081
+   curl -sS --max-time 5 -w ' %{http_code}\n' http://127.0.0.1:18081/livez
+   curl -sS --max-time 5 -w ' %{http_code}\n' http://127.0.0.1:18081/readyz
+   ```
+
+   Run the `curl` commands in another terminal. During the outage expect `/livez` 200 and
+   `/readyz` 503. Repeat them during recovery and confirm the Pod UID is unchanged: a new UID
+   means a restart, not a recovery of the same process.
 2. `database` readiness 0 with `gateway` and `kafka` at 1 isolates PostgreSQL. Lifecycle gRPC
    calls end `UNAVAILABLE`, and publication is deferred.
 3. Check the `qa-postgres-policy` cluster in `qa-data`, the NetworkPolicy path to its Pods on
