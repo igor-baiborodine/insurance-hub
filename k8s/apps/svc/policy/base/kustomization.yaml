@@ -8,6 +8,7 @@ labels:
       app.kubernetes.io/managed-by: kustomize
 resources:
   - deployment.yaml
+  - service.yaml
   - network-policy.yaml
 generatorOptions:
   disableNameSuffixHash: true
@@ -15,7 +16,7 @@ configMapGenerator:
   - name: policy-config
     literals:
       - SERVICE_NAME=policy-service
-      - HTTP_ADDR=127.0.0.1:8080
+      - HTTP_ADDR=0.0.0.0:8080
       - GRPC_ADDR=127.0.0.1:9090
       - HEALTH_ADDR=0.0.0.0:8081
       - OTEL_ENABLED=false

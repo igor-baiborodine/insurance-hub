@@ -14,8 +14,11 @@ import uuid
 from contextlib import ExitStack
 from ipaddress import IPv4Address
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
+
+# isort: split
 from scripts.go.service import deployment as lifecycle
 from scripts.go.service.configuration import service_record, target_record
 from scripts.go.service.tooling_contracts import (
@@ -42,6 +45,7 @@ ALLOY_EGRESS = (
 DATABASE_PORT = 5432
 KAFKA_PORT = 9093
 PROVIDER_PORT = 9090
+BUSINESS_CLIENT_LABEL = "insurance-hub.io/policy-business-client"
 DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
 WRITER_CA_DIRECTORY = "/etc/policy-service/postgres"
 KAFKA_CA_DIRECTORY = "/etc/policy-service/kafka"
@@ -62,7 +66,6 @@ PROBE_SHELL_FUNCTIONS = (
     'allowed() { output=$(curl --verbose --connect-timeout 2 --max-time 3 "telnet://$1" 2>&1) '
     '|| true; connected "$output"; }; '
 )
-# Agents keep reaching Java Policy through the gateway until the later direct transfer.
 JAVA_SELECTOR = {
     "app.kubernetes.io/name": "policy-api-legacy",
     "app.kubernetes.io/component": "api",
@@ -123,6 +126,28 @@ def kafka_egress(environment: str, namespace: str) -> tuple:
     )
 
 
+def gateway_selector(environment: str) -> dict[str, str]:
+    return {
+        "app.kubernetes.io/name": "agent-portal-gateway-legacy",
+        "app.kubernetes.io/instance": "insurance-hub-agent-portal-gateway-legacy",
+        "app.kubernetes.io/component": "gateway",
+        "environment": environment,
+        BUSINESS_CLIENT_LABEL: "true",
+    }
+
+
+def gateway_ingress(environment: str, namespace: str) -> dict:
+    return {
+        "from": [
+            {
+                "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}},
+                "podSelector": {"matchLabels": gateway_selector(environment)},
+            }
+        ],
+        "ports": [{"port": PORTS["http"], "protocol": "TCP"}],
+    }
+
+
 def provider_targets(environment: str, namespace: str) -> dict[str, str]:
     return {
         f"{provider.upper()}_GRPC_TARGET": (
@@ -158,7 +183,7 @@ def expected_policy(environment: str, data_namespace: str, service_namespace: st
     return {
         "podSelector": {"matchLabels": SELECTOR},
         "policyTypes": ["Ingress", "Egress"],
-        "ingress": [],
+        "ingress": [gateway_ingress(environment, service_namespace)],
         "egress": egress,
     }
 
@@ -179,13 +204,14 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     kinds = {
         "ConfigMap": "policy-config",
         "Deployment": "policy-api",
+        "Service": "policy-api",
         "NetworkPolicy": "policy-api",
     }
     require(
         len(documents) == len(kinds)
         and all(isinstance(item, dict) for item in documents)
         and {item.get("kind") for item in documents} == kinds.keys(),
-        "Policy render must contain exactly its Deployment, ConfigMap and NetworkPolicy",
+        "Policy render must contain exactly its Deployment, Service, ConfigMap and NetworkPolicy",
     )
     items = {item["kind"]: item for item in documents}
     for kind, suffix in kinds.items():
@@ -328,7 +354,7 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     expected_data = {
         "SERVICE_NAME": "policy-service",
         "DEPLOYMENT_ENVIRONMENT": environment,
-        "HTTP_ADDR": "127.0.0.1:8080",
+        "HTTP_ADDR": "0.0.0.0:8080",
         "GRPC_ADDR": "127.0.0.1:9090",
         "HEALTH_ADDR": "0.0.0.0:8081",
         "SERVICE_VERSION": version,
@@ -381,6 +407,16 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
             image == f"insurance-hub-policy-api:1.0.0-local.{version[4:]}",
             "local image and release version differ",
         )
+    service = items["Service"]
+    require(
+        service["spec"]
+        == {
+            "type": "ClusterIP",
+            "selector": SELECTOR,
+            "ports": [{"name": "http", "port": 80, "targetPort": "http", "protocol": "TCP"}],
+        },
+        "Policy Service must expose only business HTTP to the Go Policy selector",
+    )
     require(
         policy_spec(items["NetworkPolicy"]["spec"])
         == expected_policy(environment, target["dataNamespace"], target["namespace"]),
@@ -407,14 +443,33 @@ def gateway_services(relative: str) -> dict:
     return document.get("micronaut", {}).get("http", {}).get("services", {})
 
 
-def check_gateway_route(environment: str) -> None:
+def configured_gateway_route(environment: str) -> str:
     profile = gateway_services(GATEWAY_PROFILE.format(environment=environment))
     override = gateway_services(GATEWAY_OVERRIDE.format(environment=environment))
+    target = target_record(ROOT, service_record(ROOT, "policy"), environment)
+    legacy = f"http://{environment}-policy-api-legacy:80"
+    go = f"http://{environment}-policy-api.{target['namespace']}.svc.cluster.local:80"
+    profile_urls = profile.get("policy-service", {}).get("urls")
+    override_urls = override.get("policy-service", {}).get("urls")
     require(
-        profile.get("policy-service", {}).get("urls")
-        == [f"http://{environment}-policy-api-legacy:80"]
-        and "policy-service" not in override,
-        "gateway Policy upstream must remain the Java Policy Service",
+        profile_urls == [legacy] and (override_urls is None or override_urls == [go]),
+        "reviewed gateway Policy upstream is unsupported or ambiguous",
+    )
+    return (override_urls or profile_urls)[0]
+
+
+def check_gateway_route(environment: str) -> None:
+    configured_gateway_route(environment)
+    overlay = ROOT / f"k8s/overlays/{environment}/svc/agent-portal-gateway/legacy"
+    rendered = list(
+        yaml.safe_load_all(run([os.environ.get("KUBECTL", "kubectl"), "kustomize", str(overlay)]))
+    )
+    deployments = [item for item in rendered if item.get("kind") == "Deployment"]
+    require(len(deployments) == 1, "rendered gateway Deployment identity differs")
+    labels = deployments[0]["spec"]["template"]["metadata"]["labels"]
+    require(
+        gateway_selector(environment).items() <= labels.items(),
+        "gateway workload lacks the exact Policy business-client identity",
     )
 
 
@@ -495,7 +550,7 @@ class Target:
 
     def live(self, items: dict[str, dict], *, require_deployment: bool) -> dict:
         deployment = self.json("get", "deployment", self.deployment, "--ignore-not-found")
-        for kind in ("Deployment", "ConfigMap", "NetworkPolicy"):
+        for kind in ("Deployment", "Service", "ConfigMap", "NetworkPolicy"):
             desired = items[kind]
             actual = (
                 deployment
@@ -518,6 +573,18 @@ class Target:
                 require(
                     actual["spec"]["selector"] == {"matchLabels": SELECTOR}, "live selector differs"
                 )
+            if kind == "Service":
+                actual_spec = actual.get("spec", {})
+                require(
+                    actual_spec.get("type") == "ClusterIP"
+                    and actual_spec.get("selector") == desired["spec"]["selector"]
+                    and actual_spec.get("ports") == desired["spec"]["ports"]
+                    and not any(
+                        field in actual_spec
+                        for field in ("externalIPs", "loadBalancerIP", "externalName")
+                    ),
+                    "live Policy Service differs or is externally exposed",
+                )
             if require_deployment and kind == "ConfigMap":
                 require(actual.get("data") == desired["data"], "live Policy configuration differs")
             if require_deployment and kind == "NetworkPolicy":
@@ -525,7 +592,7 @@ class Target:
                     policy_spec(actual["spec"]) == desired["spec"],
                     "live Policy NetworkPolicy differs",
                 )
-        check_requested_route(self)
+        check_requested_route(self, items["Service"], required=require_deployment)
         for network_policy in self.json("get", "networkpolicies").get("items", []):
             if network_policy["metadata"]["name"] == self.deployment:
                 continue
@@ -642,15 +709,17 @@ def secret_and_image(target: Target, image: str) -> None:
     image_id(target, image)
 
 
-def check_requested_route(target: Target) -> None:
-    # A namespaced Service is required for ordinary Ingress and Gateway routes.
+def check_requested_route(target: Target, desired: dict, *, required: bool) -> None:
+    selected = []
     for service in target.json("get", "services").get("items", []):
-        selector = service["spec"].get("selector") or {}
-        require(
-            not (selector and selector.items() <= target.template_labels.items())
-            and service["metadata"]["name"] != target.deployment,
-            "unexpected Service may expose Policy",
-        )
+        selector = service.get("spec", {}).get("selector") or {}
+        if selector and selector.items() <= target.template_labels.items():
+            selected.append(service)
+    require(
+        len(selected) in ({1} if required else {0, 1})
+        and all(service["metadata"]["name"] == desired["metadata"]["name"] for service in selected),
+        "Go Policy must have exactly its intended private HTTP Service",
+    )
 
 
 def rollout(target: Target) -> None:
@@ -734,8 +803,8 @@ def verify_direct_rpc(module_path: str, port: int) -> None:
 def verify(target: Target, items: dict[str, dict]) -> None:
     """Accept an environment: the private workload plus Java coexistence."""
     pod = verify_workload(target, items)
-    verify_gateway_route(target)
-    verify_java_route(target, pod)
+    verify_go_service(target, pod)
+    verify_gateway_route(target, pod)
 
 
 def verify_workload(target: Target, items: dict[str, dict]) -> dict:
@@ -810,6 +879,7 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
     )
     if probe == "1":
         verify_denial(target, pod)
+        verify_business_access(target)
         verify_provider_access(target, items)
     return pod
 
@@ -855,10 +925,21 @@ def mounted_config(target: Target, pod: dict, path: str) -> dict:
         raise lifecycle.DeploymentError(f"gateway config file {path} is unreadable") from error
 
 
-def verify_gateway_route(target: Target) -> None:
-    """Observe each serving gateway Pod's effective Policy destination without mutation."""
-    service = f"{target.environment}-agent-portal-gateway-legacy"
-    names = ready_endpoint_pods(target, service)
+def verify_go_service(target: Target, pod: dict) -> None:
+    names = ready_endpoint_pods(target, target.deployment)
+    require(names == [pod["metadata"]["name"]], "Go Policy Service ready endpoints differ")
+    labels = target.json("get", "pod", names[0]).get("metadata", {}).get("labels", {})
+    require(SELECTOR.items() <= labels.items(), "Go Policy Service endpoint is not Go Policy")
+
+
+def verify_gateway_route(target: Target, go_pod: dict) -> None:
+    """Observe every serving gateway Pod's effective Policy destination without mutation."""
+    expected_route = configured_gateway_route(target.environment)
+    profile_route = gateway_services(GATEWAY_PROFILE.format(environment=target.environment))[
+        "policy-service"
+    ]["urls"][0]
+    gateway_service = f"{target.environment}-agent-portal-gateway-legacy"
+    names = ready_endpoint_pods(target, gateway_service)
     require(bool(names), "gateway has no ready Pods")
     for name in names:
         pod = target.json("get", "pod", name)
@@ -875,35 +956,55 @@ def verify_gateway_route(target: Target) -> None:
             ),
             "gateway environment may override the Policy upstream",
         )
+        actual_route = profile_route
         for path in filter(None, (env.get("MICRONAUT_CONFIG_FILES") or "").split(",")):
             services = mounted_config(target, pod, path.strip())
             services = services.get("micronaut", {}).get("http", {}).get("services", {})
-            require(
-                "policy-service" not in services,
-                f"gateway config file {path} overrides the Policy upstream",
-            )
-    print(
-        f"Gateway Pods {names} use the {target.environment} profile without a Policy override: "
-        f"http://{target.environment}-policy-api-legacy:80"
-    )
+            urls = services.get("policy-service", {}).get("urls")
+            if urls is not None:
+                require(
+                    isinstance(urls, list) and len(urls) == 1 and isinstance(urls[0], str),
+                    f"gateway config file {path} has an ambiguous Policy upstream",
+                )
+                actual_route = urls[0]
+        require(
+            actual_route == expected_route,
+            f"gateway Pod {name} Policy upstream differs from reviewed configuration",
+        )
+        labels = pod.get("metadata", {}).get("labels", {})
+        require(
+            gateway_selector(target.environment).items() <= labels.items(),
+            f"gateway Pod {name} lacks the Policy business-client identity",
+        )
 
-
-def verify_java_route(target: Target, pod: dict) -> None:
-    service = f"{target.environment}-policy-api-legacy"
-    actual = target.json("get", "service", service)
+    parsed = urlparse(expected_route)
+    require(parsed.scheme == "http" and parsed.port == 80, "gateway Policy route must use HTTP 80")
+    route_service = (parsed.hostname or "").split(".", 1)[0]
+    expected_selector = SELECTOR if route_service == target.deployment else JAVA_SELECTOR
     require(
-        actual.get("spec", {}).get("selector", {}).items() >= JAVA_SELECTOR.items(),
-        "Java Policy Service selector differs",
+        route_service in {target.deployment, f"{target.environment}-policy-api-legacy"},
+        "gateway Policy route names an unexpected Service",
     )
-    names = ready_endpoint_pods(target, service)
+    routed = target.json("get", "service", route_service)
     require(
-        bool(names) and pod["metadata"]["name"] not in names,
-        "Java Policy Service must select only ready Java Policy Pods",
+        routed.get("spec", {}).get("type") == "ClusterIP"
+        and routed.get("spec", {}).get("selector", {}).items() >= expected_selector.items(),
+        "gateway Policy route Service selector differs",
     )
-    for name in names:
+    endpoint_names = ready_endpoint_pods(target, route_service)
+    require(bool(endpoint_names), "gateway Policy route has no ready endpoints")
+    if route_service == target.deployment:
+        require(
+            endpoint_names == [go_pod["metadata"]["name"]],
+            "gateway Policy route does not select only the ready Go workload",
+        )
+    for name in endpoint_names:
         labels = target.json("get", "pod", name).get("metadata", {}).get("labels", {})
-        require(JAVA_SELECTOR.items() <= labels.items(), "Java Policy endpoint is not Java Policy")
-    print(f"Java Policy Service {service} selects ready Java Policy Pods: {names}")
+        require(
+            expected_selector.items() <= labels.items(),
+            f"gateway Policy route endpoint {name} has the wrong workload identity",
+        )
+    print(f"Gateway Pods {names} use {expected_route}; ready endpoints: {endpoint_names}")
 
 
 def run_probe(
@@ -1008,6 +1109,26 @@ def verify_denial(target: Target, pod: dict) -> None:
         observed == [f"Policy port {port} denied" for port in PORTS.values()],
         "Policy workload denial result differs",
     )
+
+
+def verify_business_access(target: Target) -> None:
+    address = f"{target.deployment}:80"
+    allowed = run_probe(
+        target,
+        "policy-gateway-allowed",
+        "gateway allow",
+        ['allowed "$1" || exit 1; echo "allowed $1"', address],
+        labels=gateway_selector(target.environment),
+    )
+    require(allowed == [f"allowed {address}"], "gateway identity cannot reach Policy HTTP")
+    denied = run_probe(
+        target,
+        "policy-http-denied",
+        "HTTP denial",
+        ['denied "$1" || exit 1; echo "denied $1"', address],
+    )
+    require(denied == [f"denied {address}"], "an unrelated workload reaches Policy HTTP")
+    print("Policy HTTP passed for the gateway identity and was denied otherwise")
 
 
 def verify_provider_access(target: Target, items: dict[str, dict]) -> None:

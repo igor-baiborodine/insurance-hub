@@ -21,6 +21,7 @@ spec:
         app.kubernetes.io/version: "latest"
         app.kubernetes.io/component: gateway
         insurance-hub.io/dashboard-business-client: "true"
+        insurance-hub.io/policy-business-client: "true"
         insurance-hub.io/policy-search-business-client: "true"
         insurance-hub.io/product-business-client: "true"
     spec:
