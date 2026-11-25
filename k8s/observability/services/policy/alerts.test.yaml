@@ -186,6 +186,30 @@ tests:
           - labels: '{}'
             value: 0
 
+  - name: first publication error on a healthy producer fires and clears
+    interval: 30s
+    input_series:
+      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="success"}'
+        values: '0+5x40'
+      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="error"}'
+        values: '0x10 1x30'
+    promql_expr_test:
+      - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 4m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+
   - name: cancelled publication or another service does not fire publication failure
     interval: 30s
     input_series:
