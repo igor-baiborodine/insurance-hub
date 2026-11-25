@@ -10,3 +10,6 @@ micronaut:
       document-service:
         urls:
           - http://local-dev-document-api.local-dev-all.svc.cluster.local:80
+      policy-service:
+        urls:
+          - http://local-dev-policy-api.local-dev-all.svc.cluster.local:80

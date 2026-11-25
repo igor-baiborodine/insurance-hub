@@ -3,7 +3,21 @@ kind: NetworkPolicy
 metadata:
   name: policy-api
 spec:
-  ingress: []
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: local-dev-all
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-portal-gateway-legacy
+              app.kubernetes.io/instance: insurance-hub-agent-portal-gateway-legacy
+              app.kubernetes.io/component: gateway
+              environment: local-dev
+              insurance-hub.io/policy-business-client: "true"
+      ports:
+        - port: 8080
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:
