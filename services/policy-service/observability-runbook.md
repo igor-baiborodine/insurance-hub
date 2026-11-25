@@ -36,13 +36,22 @@ following this procedure.
 
 ## Signal and decision boundary
 
-Policy exports bounded HTTP request outcome/duration signals, Go runtime signals, outbound provider
-RPC client signals for `product.v1.ProductService/GetProduct` and
-`pricing.v1.PricingService/CalculatePrice`, event publication outcome/duration by event type, and
-one readiness gauge per dependency: `insurance_hub_policy_dependency_ready` with
-`insurance_hub_policy_dependency` set to `gateway`, `database` or `kafka`. The dashboard adds Pod
-availability, resource and restart views and shared Alloy delivery health. Labels never contain
-policy keys, payloads, customer values, topics, groups, credentials or trace IDs.
+Policy exports these application metrics, all named `insurance_hub_policy_*` so the shared QA
+collector keeps them with their bounded dimensions:
+
+- request outcome and duration by operation and transport: `insurance_hub_policy_requests_total`
+  and `insurance_hub_policy_request_duration_seconds`;
+- provider call outcome and duration: `insurance_hub_policy_dependencies_total` and
+  `insurance_hub_policy_dependency_duration_seconds`, with `insurance_hub_policy_dependency` set to
+  `product` (operation `get_product`) or `pricing` (operation `calculate_price`);
+- event publication outcome and duration by event type: `insurance_hub_policy_events_total` and
+  `insurance_hub_policy_event_duration_seconds`;
+- one readiness gauge per dependency: `insurance_hub_policy_dependency_ready` with
+  `insurance_hub_policy_dependency` set to `gateway`, `database` or `kafka`.
+
+Go runtime signals complete the set. The dashboard adds Pod availability, resource and restart
+views and shared Alloy delivery health. Labels never contain policy keys, routes, payloads,
+customer values, topics, groups, credentials or trace IDs.
 
 The thresholds and windows in `k8s/observability/services/policy/acceptance.json` are operating
 limits, not production SLOs. Provider availability is not part of readiness: an unreachable
@@ -69,12 +78,16 @@ From the repository root, validate the exact candidate before any QA operation:
 ```sh
 make monitoring-assets-check ENV_NAME=qa SVC_NAME=policy
 make test-monitoring ENV_NAME=qa SVC_NAME=policy
+make -C k8s alloy-config-check
+make -C k8s test-observability-backends OBSERVABILITY_SERVICE_DOMAIN=policy
 ```
 
 The first command validates the typed inventory, the pinned chart render, Prometheus rule syntax
 and the rule fixtures. The second queries every dashboard expression against collected disposable
-data and requires healthy alerts to stay inactive. Neither applies QA resources or proves live
-signal delivery. The shared `verify-service-observability` target has no Policy probe; verify live
+data and requires healthy alerts to stay inactive. The third validates the reviewed shared Alloy
+configuration. The fourth sends real Policy request, provider call, event and readiness signals
+through that configuration into disposable backends and requires each series to arrive with its
+bounded dimensions. None of them applies QA resources or proves live signal delivery. The shared `verify-service-observability` target has no Policy probe; verify live
 Policy signals with the bounded queries in [Investigation workflow](#investigation-workflow).
 
 ## QA preflight and stop conditions
@@ -141,13 +154,118 @@ Stop before mutation when the context, namespace, source revision, object name o
 image identity or current asset source differs from the reviewed record. Also stop for missing
 Policy signals, unexplained firing alerts, a mutable Grafana provider or any operation that would
 alter shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo, PostgreSQL, Kafka or other
-monitoring assets.
+monitoring assets, except the separately authorized Alloy release below.
+
+The shared Alloy release decides which Policy metrics reach Prometheus. Check that the reviewed
+shared configuration is effective before provisioning the dashboard or rules. Every read must
+succeed; only then does the comparison decide between a match and drift:
+
+```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+rm -f "$MONITORING_EVIDENCE_DIR/alloy.ok" "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"
+(
+  set -eu
+  dir="$MONITORING_EVIDENCE_DIR"
+  k() { kubectl --context qa-insurance-hub --request-timeout=30s "$@"; }
+
+  helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+    > "$dir/prior-alloy-helm-status.json"
+  k -n qa-monitoring get deployment/qa-alloy -o json > "$dir/prior-alloy-deployment.json"
+  k -n qa-monitoring get configmap/qa-alloy -o json > "$dir/prior-alloy-configmap.json"
+  jq -er '.data["config.alloy"]' "$dir/prior-alloy-configmap.json" \
+    > "$dir/effective-alloy-before.alloy"
+  if cmp -s k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-before.alloy"; then
+    : > "$dir/alloy.ok"
+  else
+    diff k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-before.alloy" \
+      > "$dir/alloy-drift.diff" || true
+  fi
+)
+if test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"; then
+  echo "Alloy: reviewed configuration is effective"
+elif test -s "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"; then
+  echo "STOP: Alloy configuration drift; separate Alloy release required" >&2
+else
+  echo "STOP: Alloy read failed" >&2
+fi
+```
+
+`alloy.ok` means every read succeeded and the effective configuration matches the reviewed file;
+no Alloy rollout is needed. A non-empty `alloy-drift.diff` without `alloy.ok` means the reads
+succeeded and the configuration differs. Stop this workflow, review the entire shared-collector
+delta from a sanitized copy of that diff and obtain separate authorization for the Alloy release.
+Neither file means a read failed; resolve the access error and rerun this block. Only that
+separate release may run, and it writes `alloy.ok` only after the rollout, status and read-back
+all succeed:
+
+```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -s "$MONITORING_EVIDENCE_DIR/alloy-drift.diff"
+(
+  set -eu
+  dir="$MONITORING_EVIDENCE_DIR"
+  k() { kubectl --context qa-insurance-hub --request-timeout=30s "$@"; }
+
+  make -C k8s alloy-install
+  k -n qa-monitoring rollout status deployment/qa-alloy --timeout=10m
+  make -C k8s alloy-status
+  helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+    > "$dir/applied-alloy-helm-status.json"
+  k -n qa-monitoring get configmap/qa-alloy -o json > "$dir/applied-alloy-configmap.json"
+  jq -er '.data["config.alloy"]' "$dir/applied-alloy-configmap.json" \
+    > "$dir/effective-alloy-after.alloy"
+  cmp k8s/overlays/qa/infra/alloy/config.alloy "$dir/effective-alloy-after.alloy"
+  : > "$dir/alloy.ok"
+)
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok" || echo "STOP: Alloy release failed" >&2
+```
+
+After an authorized Alloy rollout, recheck the shared collector's existing routes, delivery
+counters and backend signals before continuing. Stop if any regress. Rendering and provisioning
+below require `alloy.ok` in addition to `preflight.ok`.
+
+Then confirm that the Policy application series arrive from the candidate Pod itself. Take
+`<service-version>` and `<pod-uid>` from the recorded running Policy `service.version` and Pod
+UID; the collector sets `service_instance_id` to the Pod UID. A series from another replica or
+version, such as an older Pod still serving during a rolling update, does not count.
+
+At startup, before any traffic, the candidate exports its readiness gauge and the zero baseline of
+failed event publications:
+
+```promql
+count by (__name__, insurance_hub_policy_dependency, insurance_hub_policy_event_type,
+  insurance_hub_policy_outcome) ({__name__=~"insurance_hub_policy_(dependency_ready|events_total)",
+  service_name="policy-service", deployment_environment_name="qa",
+  service_version="<service-version>", service_instance_id="<pod-uid>"})
+```
+
+Expect `dependency_ready` for `gateway`, `database` and `kafka`, and `events_total` with outcome
+`error` for `registered` and `terminated`. The successful `events_total` series and
+`event_duration_seconds` appear only after a real publication; an offer does not publish, so do
+not require them here.
+
+Run this query immediately before and again after the single approved offer smoke:
+
+```promql
+sum by (__name__, insurance_hub_policy_operation, insurance_hub_policy_dependency,
+  insurance_hub_policy_outcome) ({__name__=~"insurance_hub_policy_(requests_total|request_duration_seconds_count|dependencies_total|dependency_duration_seconds_count)",
+  service_name="policy-service", deployment_environment_name="qa",
+  service_version="<service-version>", service_instance_id="<pod-uid>"})
+```
+
+A series absent before the offer counts as zero. Expect each `create_offer` request series with
+outcome `success`, and each `product`/`get_product` and `pricing`/`calculate_price` dependency
+series with outcome `success`, to increase across the offer window. Stop when a series is missing,
+does not increase or appears only for another Pod.
+
+Authorization to apply the dashboard and rules does not authorize the Alloy release.
 
 Render the exact objects, keep their hashes and ask the API server to admit them without
 persisting either:
 
 ```sh
 test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"
 make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy \
   > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
 make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy \
@@ -172,6 +290,7 @@ objects:
 
 ```sh
 test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -f "$MONITORING_EVIDENCE_DIR/alloy.ok"
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=policy
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=policy
 ```
@@ -218,15 +337,17 @@ min by (insurance_hub_policy_dependency) (insurance_hub_policy_dependency_ready{
 ```
 
 ```promql
-sum by (rpc_method, rpc_response_status_code) (rate(rpc_client_call_duration_seconds_count{
-  service_name="policy-service",deployment_environment_name="qa",
-  rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"
-}[5m]))
+sum by (insurance_hub_policy_dependency, insurance_hub_policy_outcome) (
+  rate(insurance_hub_policy_dependencies_total{
+    service_name="policy-service",deployment_environment_name="qa",
+    insurance_hub_policy_dependency=~"product|pricing"
+  }[5m])
+)
 ```
 
 ```promql
-sum by (insurance_hub_policy_event_type, insurance_hub_policy_event_outcome) (
-  increase(insurance_hub_policy_event_publications_total{
+sum by (insurance_hub_policy_event_type, insurance_hub_policy_outcome) (
+  increase(insurance_hub_policy_events_total{
     service_name="policy-service",deployment_environment_name="qa"
   }[15m])
 )
@@ -256,7 +377,7 @@ disposable harnesses.
 | Case | First check | Distinguishing observation | Recovery check |
 | --- | --- | --- | --- |
 | Release/Pod mismatch | [Release/Pod mismatch](#releasepod-mismatch) | The running image, version or Pod differs from the Flux-applied release | Status and verification pass with the recorded digest; `PolicyUnavailable` clears |
-| Failed provider RPC | **Upstream RPC outcomes** by `rpc_method` and status | One provider method fails with transport codes while Policy readiness stays 1 | The failure ratio for that method returns below 5% and an offer completes |
+| Failed provider RPC | **Upstream RPC outcomes** by dependency and outcome | One provider ends `error` or `deadline_exceeded` while Policy readiness stays 1 | The failure ratio for that provider returns below 5% and an offer completes |
 | Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` stays 1; `kafka` is unchecked by that probe | `database` and `kafka` readiness are 1, `/readyz` returns `200 ready` and pending intents drain |
 | Delayed outbox publication | **Event publication outcomes** with both readiness gauges | Deferred warnings without `error` outcomes, or pending intents with both gauges at 1 | Pending intents return to zero and `success` publications resume |
 | Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The committed offset is stationary while the log-end offset grows, and an active assigned member repeatedly fails at that offset | The committed offset moves past the record and lag falls |
@@ -278,12 +399,15 @@ disposable harnesses.
 
 #### Failed provider RPC
 
-1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by `rpc_method`
-   (`PolicyUpstreamRPCFailure`). The method names the provider: `GetProduct` is Product and
-   `CalculatePrice` is Pricing.
-2. Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL` and `UNKNOWN` count as provider failures.
-   Business codes such as `NOT_FOUND` reflect the request. Policy readiness stays 1 because
-   providers are not part of readiness.
+1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by
+   `insurance_hub_policy_dependency` (`PolicyUpstreamRPCFailure`): `product` is the Product
+   `GetProduct` call and `pricing` is the Pricing `CalculatePrice` call.
+2. Only the `error` outcome and `deadline_exceeded` count as provider failures. `error` covers
+   every status the provider is not expected to return, such as `UNAVAILABLE`, `INTERNAL` or
+   `UNIMPLEMENTED`. `invalid_request` covers only each provider's expected business status:
+   Product `NOT_FOUND` for an unknown product and Pricing `INVALID_ARGUMENT` for a rejected
+   quote. `cancelled` reflects the caller. Policy readiness stays 1 because providers are not part
+   of readiness.
 3. Check the provider Deployment and Policy's path to it:
 
    ```sh
@@ -293,10 +417,10 @@ disposable harnesses.
 
    Egress must reach gRPC port 9090 of the provider Pods, as described in
    [Provider access](deployment-runbook.md#provider-access). Rising latency up to
-   `PROVIDER_CALL_TIMEOUT` with `DEADLINE_EXCEEDED` points to a slow provider; `UNAVAILABLE` points
-   to an unavailable or unreachable one.
-4. After the provider is ready, confirm the failure ratio for that method returns below 5% and a
-   forwarded offer completes.
+   `PROVIDER_CALL_TIMEOUT` with `deadline_exceeded` points to a slow provider; `error` points to an
+   unavailable, unreachable or failing one.
+4. After the provider is ready, confirm the failure ratio for that provider returns below 5% and
+   a forwarded offer completes.
 
 #### Database readiness loss
 
@@ -358,8 +482,8 @@ and then sets `published_at`; a policy's later intent waits while an earlier one
 Separate the causes:
 
 - **Database loss.** `database` readiness is 0 and logs show `policy event publication deferred`,
-  without an increase in `insurance_hub_policy_event_publications_total` with
-  `insurance_hub_policy_event_outcome="error"`. Follow the database readiness case; publication
+  without an increase in `insurance_hub_policy_events_total` with
+  `insurance_hub_policy_outcome="error"`. Follow the database readiness case; publication
   resumes on its own after recovery.
 - **Broker loss.** `kafka` readiness is 0 (`PolicyKafkaNotReady`) or publications end `error`
   (`PolicyEventPublicationFailure`). Check broker availability, the bootstrap address
@@ -498,8 +622,8 @@ signals should be unchanged throughout.
 
 | Alert | First checks |
 | --- | --- |
-| `PolicyServiceErrorRate` | Split by operation and route, open a failed trace, then check upstream RPC and the three readiness gauges. |
-| `PolicyHighLatency` | Compare request p95 with upstream RPC p95 per method and open a slow trace. |
+| `PolicyServiceErrorRate` | Split by operation, open a failed trace, then check upstream RPC and the three readiness gauges. |
+| `PolicyHighLatency` | Compare request p95 with upstream RPC p95 per provider and open a slow trace. |
 | `PolicyUpstreamRPCFailure` | [Failed provider RPC](#failed-provider-rpc). |
 | `PolicyDatabaseNotReady` | [Database readiness loss](#database-readiness-loss); expect deferred publication until it recovers. |
 | `PolicyKafkaNotReady`, `PolicyEventPublicationFailure` | [Delayed outbox publication](#delayed-outbox-publication), broker loss branch. |

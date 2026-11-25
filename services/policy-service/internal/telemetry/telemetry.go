@@ -57,15 +57,20 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 }
 
 // metricViews gives seconds-scale buckets to Policy's duration histograms; the SDK default
-// boundaries start at 5 and cannot resolve subsecond requests or broker acknowledgements.
+// boundaries start at 5 and cannot resolve subsecond requests, provider calls or broker
+// acknowledgements.
 func metricViews() []sdkmetric.View {
 	return []sdkmetric.View{
 		kittelemetry.HistogramView(
-			"insurance_hub.service.request.duration",
+			"insurance_hub.policy.request.duration",
 			requestBuckets,
 		),
 		kittelemetry.HistogramView(
-			"insurance_hub.policy.event.publication.duration",
+			"insurance_hub.policy.dependency.duration",
+			requestBuckets,
+		),
+		kittelemetry.HistogramView(
+			"insurance_hub.policy.event.duration",
 			requestBuckets,
 		),
 	}

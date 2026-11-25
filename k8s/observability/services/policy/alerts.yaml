@@ -6,12 +6,12 @@ groups:
     annotations:
       description: More than 5% of at least 20 private Policy HTTP requests failed unexpectedly
         in five minutes.
-      runbook_action: Split failures by operation and route, inspect safe logs and traces,
+      runbook_action: Split failures by operation, inspect safe logs and traces,
         then check upstream RPC, database and Kafka readiness before rollback.
       summary: Policy error rate exceeds the pilot threshold
-    expr: sum(rate(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome=~"internal_error|deadline_exceeded"}[5m]))
-      / clamp_min(sum(rate(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m])),
-      0.000001) > 0.05 and sum(increase(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m]))
+    expr: sum(rate(insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome=~"internal_error|deadline_exceeded"}[5m]))
+      / clamp_min(sum(rate(insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http"}[5m])),
+      0.000001) > 0.05 and sum(increase(insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http"}[5m]))
       >= 20
     for: 2m
     labels:
@@ -21,28 +21,28 @@ groups:
     annotations:
       description: Aggregate private Policy HTTP request p95 exceeded 500ms with at least
         20 requests in five minutes.
-      runbook_action: Split latency by operation, compare upstream RPC latency per method,
+      runbook_action: Split latency by operation, compare upstream RPC latency per provider,
         and open a representative slow trace.
       summary: Policy request latency exceeds the pilot threshold
     expr: |-
       histogram_quantile(0.95,
-        sum by (le) (rate(insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http"}[5m]))) > 0.5
-      and sum(increase(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m])) >= 20
+        sum by (le) (rate(insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http"}[5m]))) > 0.5
+      and sum(increase(insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http"}[5m])) >= 20
     for: 5m
     labels:
       service: policy-service
       severity: warning
   - alert: PolicyUpstreamRPCFailure
     annotations:
-      description: More than 5% of at least 10 Policy calls to one provider method ended
-        UNAVAILABLE, DEADLINE_EXCEEDED, INTERNAL or UNKNOWN in five minutes.
-      runbook_action: Identify the failing provider from rpc_method, check that provider's
-        dashboard, readiness and rollout first, then verify Policy recovers on the offer
-        path.
+      description: More than 5% of at least 10 Policy calls to one provider ended with
+        an error or deadline in five minutes.
+      runbook_action: Identify the failing provider from insurance_hub_policy_dependency,
+        check that provider's dashboard, readiness and rollout first, then verify Policy
+        recovers on the offer path.
       summary: A Policy upstream provider RPC is failing
-    expr: sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice",rpc_response_status_code=~"UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|UNKNOWN"}[5m]))
-      / clamp_min(sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"}[5m])),
-      0.000001) > 0.05 and sum by (rpc_method) (increase(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"}[5m]))
+    expr: sum by (insurance_hub_policy_dependency) (rate(insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency=~"product|pricing",insurance_hub_policy_outcome=~"error|deadline_exceeded"}[5m]))
+      / clamp_min(sum by (insurance_hub_policy_dependency) (rate(insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency=~"product|pricing"}[5m])),
+      0.000001) > 0.05 and sum by (insurance_hub_policy_dependency) (increase(insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency=~"product|pricing"}[5m]))
       >= 10
     for: 2m
     labels:
@@ -81,7 +81,7 @@ groups:
       runbook_action: Split failures by event type, check Kafka readiness and broker health,
         and confirm the outbox retries publication without operator changes.
       summary: Policy event publication failed
-    expr: sum(increase(insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_outcome="error"}[5m]))
+    expr: sum(increase(insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_outcome="error"}[5m]))
       > 0
     labels:
       service: policy-service

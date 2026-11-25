@@ -7,9 +7,9 @@ tests:
   - name: service errors fire above five percent with minimum HTTP traffic and recover
     interval: 30s
     input_series:
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="success"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="success"}'
         values: '0+9x30'
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="internal_error"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="internal_error"}'
         values: '0+1x16 16+0x14'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyServiceErrorRate",alertstate="firing"}) or vector(0)'
@@ -26,13 +26,13 @@ tests:
   - name: wrong outcome, internal gRPC hop and another service do not fire Policy errors
     interval: 30s
     input_series:
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="success"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="success"}'
         values: '0+9x30'
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="invalid_request"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="invalid_request"}'
         values: '0+5x30'
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="grpc",insurance_hub_service_outcome="internal_error"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="grpc",insurance_hub_policy_outcome="internal_error"}'
         values: '0+5x30'
-      - series: 'insurance_hub_service_requests_total{service_name="policy-search-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="internal_error"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-search-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="internal_error"}'
         values: '0+5x30'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyServiceErrorRate",alertstate="firing"}) or vector(0)'
@@ -44,13 +44,13 @@ tests:
   - name: error and latency alerts stay inactive below twenty requests
     interval: 30s
     input_series:
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="success"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="success"}'
         values: '0+0.4x20'
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="internal_error"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="internal_error"}'
         values: '0+0.1x20'
-      - series: 'insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http",le="0.5"}'
+      - series: 'insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http",le="0.5"}'
         values: '0+0x20'
-      - series: 'insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http",le="+Inf"}'
+      - series: 'insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http",le="+Inf"}'
         values: '0+0.5x20'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname=~"PolicyServiceErrorRate|PolicyHighLatency",alertstate="firing"}) or vector(0)'
@@ -62,13 +62,13 @@ tests:
   - name: high request latency fires with traffic and recovers
     interval: 30s
     input_series:
-      - series: 'insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome="success"}'
+      - series: 'insurance_hub_policy_requests_total{service_name="policy-service",insurance_hub_policy_transport="http",insurance_hub_policy_outcome="success"}'
         values: '0+10x34'
-      - series: 'insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http",le="0.5"}'
+      - series: 'insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http",le="0.5"}'
         values: '0+1x16 16+10x18'
-      - series: 'insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http",le="1"}'
+      - series: 'insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http",le="1"}'
         values: '0+10x34'
-      - series: 'insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http",le="+Inf"}'
+      - series: 'insurance_hub_policy_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_policy_transport="http",le="+Inf"}'
         values: '0+10x34'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyHighLatency",alertstate="firing"}) or vector(0)'
@@ -82,24 +82,24 @@ tests:
           - labels: '{}'
             value: 0
 
-  - name: provider RPC failure fires for the failing method only and recovers
+  - name: provider RPC failure fires for the failing provider only and recovers
     interval: 30s
     input_series:
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="product.v1.ProductService/GetProduct",rpc_response_status_code="OK"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="product",insurance_hub_policy_operation="get_product",insurance_hub_policy_outcome="success"}'
         values: '0+9x30'
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="product.v1.ProductService/GetProduct",rpc_response_status_code="UNAVAILABLE"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="product",insurance_hub_policy_operation="get_product",insurance_hub_policy_outcome="error"}'
         values: '0+1x16 16+0x14'
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="pricing.v1.PricingService/CalculatePrice",rpc_response_status_code="OK"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="pricing",insurance_hub_policy_operation="calculate_price",insurance_hub_policy_outcome="success"}'
         values: '0+9x30'
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="pricing.v1.PricingService/CalculatePrice",rpc_response_status_code="NOT_FOUND"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="pricing",insurance_hub_policy_operation="calculate_price",insurance_hub_policy_outcome="invalid_request"}'
         values: '0+5x30'
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="policy.v1.PolicyService/CreateOffer",rpc_response_status_code="UNAVAILABLE"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="pricing",insurance_hub_policy_operation="calculate_price",insurance_hub_policy_outcome="cancelled"}'
         values: '0+5x30'
     promql_expr_test:
-      - expr: 'count by (rpc_method) (ALERTS{alertname="PolicyUpstreamRPCFailure",alertstate="firing"})'
+      - expr: 'count by (insurance_hub_policy_dependency) (ALERTS{alertname="PolicyUpstreamRPCFailure",alertstate="firing"})'
         eval_time: 7m
         exp_samples:
-          - labels: '{rpc_method="product.v1.ProductService/GetProduct"}'
+          - labels: '{insurance_hub_policy_dependency="product"}'
             value: 1
       - expr: 'count(ALERTS{alertname="PolicyUpstreamRPCFailure",alertstate="firing"}) or vector(0)'
         eval_time: 14m
@@ -110,7 +110,7 @@ tests:
   - name: provider RPC failure stays inactive below ten calls
     interval: 30s
     input_series:
-      - series: 'rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method="pricing.v1.PricingService/CalculatePrice",rpc_response_status_code="UNAVAILABLE"}'
+      - series: 'insurance_hub_policy_dependencies_total{service_name="policy-service",insurance_hub_policy_dependency="pricing",insurance_hub_policy_operation="calculate_price",insurance_hub_policy_outcome="error"}'
         values: '0+0.1x20'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyUpstreamRPCFailure",alertstate="firing"}) or vector(0)'
@@ -170,9 +170,9 @@ tests:
   - name: event publication error fires and ages out
     interval: 30s
     input_series:
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="success"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_outcome="success"}'
         values: '0+5x34'
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="error"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_outcome="error"}'
         values: '0+1x4 4+0x30'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'
@@ -189,9 +189,9 @@ tests:
   - name: first publication error on a healthy producer fires and clears
     interval: 30s
     input_series:
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="success"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_outcome="success"}'
         values: '0+5x40'
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="error"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_outcome="error"}'
         values: '0x10 1x30'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'
@@ -213,9 +213,9 @@ tests:
   - name: cancelled publication or another service does not fire publication failure
     interval: 30s
     input_series:
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_type="terminated",insurance_hub_policy_event_outcome="cancelled"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-service",insurance_hub_policy_event_type="terminated",insurance_hub_policy_outcome="cancelled"}'
         values: '0+1x20'
-      - series: 'insurance_hub_policy_event_publications_total{service_name="policy-search-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_event_outcome="error"}'
+      - series: 'insurance_hub_policy_events_total{service_name="policy-search-service",insurance_hub_policy_event_type="registered",insurance_hub_policy_outcome="error"}'
         values: '0+1x20'
     promql_expr_test:
       - expr: 'count(ALERTS{alertname="PolicyEventPublicationFailure",alertstate="firing"}) or vector(0)'

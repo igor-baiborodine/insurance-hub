@@ -751,8 +751,27 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if !strings.Contains(combined, "POST /offers") ||
 		!strings.Contains(combined, "GET /policies/{policyNumber}") ||
 		!strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.service.requests") {
+		!strings.Contains(combined, "insurance_hub.policy.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
+	}
+	// The collector keeps http.route on spans; matched spans carry only the path template.
+	routes := map[string]string{}
+	for _, span := range spanRecorder.Ended() {
+		for _, attr := range span.Attributes() {
+			if attr.Key == "http.route" {
+				routes[span.Name()] = attr.Value.AsString()
+			}
+		}
+	}
+	wantRoutes := map[string]string{
+		"POST /offers":                 "/offers",
+		"GET /policies/{policyNumber}": "/policies/{policyNumber}",
+	}
+	if fmt.Sprint(routes) != fmt.Sprint(wantRoutes) {
+		t.Errorf("span routes = %v, want %v", routes, wantRoutes)
+	}
+	if strings.Contains(combined, "insurance_hub.policy.route") {
+		t.Errorf("span carries a route key the collector drops: %s", combined)
 	}
 }
 
@@ -802,7 +821,7 @@ func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
 		combined += span.Name() + fmt.Sprint(span.Attributes())
 	}
 	if !strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.service.requests") {
+		!strings.Contains(combined, "insurance_hub.policy.requests") {
 		t.Errorf("missing drain-rejection telemetry: %s", combined)
 	}
 }

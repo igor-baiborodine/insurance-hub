@@ -13,14 +13,14 @@
         "< 1"
       ],
       "PolicyEventPublicationFailure": [
-        "insurance_hub_policy_event_publications_total",
-        "insurance_hub_policy_event_outcome=\"error\"",
+        "insurance_hub_policy_events_total",
+        "insurance_hub_policy_outcome=\"error\"",
         "[5m]",
         "> 0"
       ],
       "PolicyHighLatency": [
         "histogram_quantile(0.95",
-        "insurance_hub_service_transport=\"http\"",
+        "insurance_hub_policy_transport=\"http\"",
         "> 0.5",
         ">= 20"
       ],
@@ -34,7 +34,7 @@
         "pod!~\"qa-policy-api-legacy-.*\""
       ],
       "PolicyServiceErrorRate": [
-        "insurance_hub_service_transport=\"http\"",
+        "insurance_hub_policy_transport=\"http\"",
         "> 0.05",
         ">= 20",
         "[5m]"
@@ -65,9 +65,9 @@
         "[15m]"
       ],
       "PolicyUpstreamRPCFailure": [
-        "rpc_client_call_duration_seconds_count",
-        "sum by (rpc_method)",
-        "pricing.v1.PricingService/CalculatePrice",
+        "insurance_hub_policy_dependencies_total",
+        "sum by (insurance_hub_policy_dependency)",
+        "insurance_hub_policy_outcome=~\"error|deadline_exceeded\"",
         "> 0.05",
         ">= 10"
       ]
@@ -183,8 +183,8 @@
       "missing telemetry",
       "collection failure",
       "shared Alloy pipeline",
-      "insurance_hub_service_transport=\\\"http\\\"",
-      "rpc_method=~\\\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\\\"",
+      "insurance_hub_policy_transport=\\\"http\\\"",
+      "insurance_hub_policy_dependency=~\\\"product|pricing\\\"",
       "policy event publication deferred",
       "pod!~\\\"qa-policy-api-legacy-.*\\\""
     ],
@@ -214,9 +214,9 @@
         "trace_id"
       ],
       "metrics": [
-        "insurance_hub_service_requests_total",
+        "insurance_hub_policy_requests_total",
         "insurance_hub_policy_dependency_ready",
-        "insurance_hub_policy_event_publications_total"
+        "insurance_hub_policy_events_total"
       ],
       "traces": [
         "policy-service"

@@ -1218,6 +1218,70 @@ def validate_policy_search_metrics(prometheus_port: int) -> None:
     validate_runtime_metrics("policy-search", prometheus_port)
 
 
+def validate_policy_metrics(prometheus_port: int) -> None:
+    service_name = "policy-service"
+    prefix = "insurance_hub_policy_"
+    dependency_dimensions = [
+        {
+            f"{prefix}dependency": dependency,
+            f"{prefix}operation": operation,
+            f"{prefix}outcome": "success",
+        }
+        for dependency, operation in (("product", "get_product"), ("pricing", "calculate_price"))
+    ]
+    dependencies = metric_series(
+        prometheus_port,
+        f"{prefix}dependencies_total",
+        service_name,
+        dependency_dimensions,
+    )
+    if any(float(result["value"][1]) != 1 for result in dependencies):
+        raise HarnessError("Policy dependency counters are not exactly one each")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}dependency_duration_seconds",
+        service_name,
+        dependency_dimensions,
+    )
+
+    # The error series is a zero baseline so the first failed publication is detectable.
+    event_dimensions = [
+        {f"{prefix}event_type": event_type, f"{prefix}outcome": outcome}
+        for event_type in ("registered", "terminated")
+        for outcome in ("success", "error")
+    ]
+    events = metric_series(prometheus_port, f"{prefix}events_total", service_name, event_dimensions)
+    event_values = {
+        (result["metric"][f"{prefix}event_type"], result["metric"][f"{prefix}outcome"]): float(
+            result["value"][1]
+        )
+        for result in events
+    }
+    expected_events = {
+        (event_type, outcome): 1 if outcome == "success" else 0
+        for event_type in ("registered", "terminated")
+        for outcome in ("success", "error")
+    }
+    if event_values != expected_events:
+        raise HarnessError(f"Policy event counts are {event_values}")
+    validate_histogram_inventory(
+        prometheus_port,
+        f"{prefix}event_duration_seconds",
+        service_name,
+        event_dimensions[::2],
+    )
+
+    readiness = metric_series(
+        prometheus_port,
+        f"{prefix}dependency_ready",
+        service_name,
+        [{f"{prefix}dependency": dependency} for dependency in ("gateway", "database", "kafka")],
+    )
+    if any(float(result["value"][1]) != 1 for result in readiness):
+        raise HarnessError("Policy dependency readiness gauges are not one")
+    validate_runtime_metrics("policy", prometheus_port)
+
+
 def validate_dashboard_metrics(prometheus_port: int) -> None:
     service_name = "dashboard-service"
     prefix = "insurance_hub_dashboard_"
@@ -1390,6 +1454,18 @@ def span_attribute(span: Mapping[str, Any], key: str) -> Any:
         if attribute.get("key") == key:
             return next(iter(attribute.get("value", {}).values()), None)
     return None
+
+
+def validate_policy_trace(tempo_port: int) -> None:
+    """Prove the matched offer span keeps its route template through span filtering."""
+    wait_json(
+        f"http://127.0.0.1:{tempo_port}/api/traces/{SERVICE_TRACE_ID}",
+        lambda value: any(
+            span.get("name") == "POST /offers" and span_attribute(span, "http.route") == "/offers"
+            for span in trace_spans(value)
+        ),
+        "Policy offer span with its http.route in Tempo",
+    )
 
 
 def validate_pricing_diagnosis(
@@ -1709,6 +1785,7 @@ def validate_service_backends(
     operation = {
         "dashboard": "sales_trends",
         "document": "find_documents",
+        "policy": "create_offer",
         "policy-search": "search",
         "pricing": "calculate_price",
     }.get(service_domain, "list")
@@ -1806,6 +1883,8 @@ def validate_service_backends(
         validate_dashboard_metrics(prometheus_port)
     elif service_domain == "document":
         validate_document_metrics(prometheus_port)
+    elif service_domain == "policy":
+        validate_policy_metrics(prometheus_port)
     elif service_domain == "policy-search":
         validate_policy_search_metrics(prometheus_port)
     elif service_domain == "pricing":
@@ -1820,6 +1899,8 @@ def validate_service_backends(
         lambda value: len(value.get("batches", [])) >= 1,
         f"real {service_domain} trace in Tempo",
     )
+    if service_domain == "policy":
+        validate_policy_trace(tempo_port)
     wait_json(
         f"http://127.0.0.1:{zipkin_port}/api/v2/trace/{SERVICE_TRACE_ID}",
         lambda value: isinstance(value, list) and len(value) >= 1,

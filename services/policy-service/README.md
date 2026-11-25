@@ -248,10 +248,13 @@ flush and shutdown use bounded contexts. Safe export diagnostics are rate-limite
 seconds; queue saturation has a separate safe warning. The executable installs the shared
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
-`insurance_hub.service.requests` and `insurance_hub.service.request.duration` separately record
-bounded HTTP and gRPC transport outcomes. HTTP labels use only `POST /offers` or `unmatched`;
-gRPC records the fixed `create_offer`, `issue_policy`, `get_policy` and `terminate_policy`
-operations and final status. Request paths, queries,
+`insurance_hub.policy.requests` and `insurance_hub.policy.request.duration` separately record
+bounded HTTP and gRPC transport outcomes by the fixed `create_offer`, `issue_policy`, `get_policy`
+and `terminate_policy` operations (`unknown` for an unmatched HTTP route) and final status; the
+matched HTTP route stays on the span. `insurance_hub.policy.dependencies` and
+`insurance_hub.policy.dependency.duration` record Product and Pricing calls by dependency,
+operation and outcome, and `insurance_hub.policy.events` and `insurance_hub.policy.event.duration`
+record publications by event type and outcome. Request paths, queries,
 payloads, raw errors, headers and instance IDs are not metric labels. The same provider connects
 the HTTP server, gRPC client and gRPC server trace. Service identity stays on the resource.
 

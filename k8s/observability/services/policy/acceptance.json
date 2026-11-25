@@ -21,7 +21,7 @@
       "severity": "warning",
       "suppression": "Fewer than 20 HTTP requests, only success/invalid_request/cancelled outcomes, or failures on the internal gRPC hop.",
       "recovery": "The five-minute unexpected-error ratio returns to 5% or lower.",
-      "response": "Split failures by operation and route, inspect safe logs and traces, then check upstream RPC, database and Kafka readiness."
+      "response": "Split failures by operation, inspect safe logs and traces, then check upstream RPC, database and Kafka readiness."
     },
     "PolicyHighLatency": {
       "threshold_seconds": 0.5,
@@ -34,7 +34,7 @@
       "severity": "warning",
       "suppression": "Fewer than 20 HTTP requests.",
       "recovery": "The five-minute HTTP request p95 returns to 500ms or lower.",
-      "response": "Split latency by operation, compare upstream RPC latency per method and open a slow trace."
+      "response": "Split latency by operation, compare upstream RPC latency per provider and open a slow trace."
     },
     "PolicyUpstreamRPCFailure": {
       "threshold": 0.05,
@@ -42,20 +42,18 @@
       "window": "5m",
       "for": "2m",
       "minimum_calls": 10,
-      "methods": [
-        "product.v1.ProductService/GetProduct",
-        "pricing.v1.PricingService/CalculatePrice"
+      "dependencies": [
+        "product",
+        "pricing"
       ],
-      "failure_codes": [
-        "UNAVAILABLE",
-        "DEADLINE_EXCEEDED",
-        "INTERNAL",
-        "UNKNOWN"
+      "failure_outcomes": [
+        "error",
+        "deadline_exceeded"
       ],
       "severity": "warning",
-      "suppression": "Fewer than 10 calls per method, business status codes such as NOT_FOUND, or the internal Policy gateway channel.",
-      "recovery": "The per-method five-minute failure ratio returns to 5% or lower.",
-      "response": "Identify the provider from rpc_method and check that provider's dashboard, readiness and rollout first."
+      "suppression": "Fewer than 10 calls per provider, or only success, invalid_request and cancelled outcomes.",
+      "recovery": "The per-provider five-minute failure ratio returns to 5% or lower.",
+      "response": "Identify the provider from insurance_hub_policy_dependency and check that provider's dashboard, readiness and rollout first."
     },
     "PolicyDatabaseNotReady": {
       "threshold": 1,
