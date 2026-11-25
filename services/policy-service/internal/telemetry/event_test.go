@@ -95,6 +95,56 @@ func TestEventObserver_StartsErrorSeriesAtZero(t *testing.T) {
 	}
 }
 
+func TestEventObserver_RecordsFastPublicationInSubsecondBucket(t *testing.T) {
+	// given
+	reader := sdkmetric.NewManualReader()
+	clock := time.Unix(0, 0)
+	observer, err := newEventObserver(
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(reader),
+			sdkmetric.WithView(metricViews()...),
+		),
+		tracenoop.NewTracerProvider(),
+		func() time.Time {
+			clock = clock.Add(40 * time.Millisecond)
+			return clock
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// when
+	_, observation := observer.Start(ctx, "registered")
+	observation.Finish(ctx, "success", nil)
+
+	// then
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &metrics); err != nil {
+		t.Fatal(err)
+	}
+	var bound float64
+	for _, scope := range metrics.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			if recorded.Name != "insurance_hub.policy.event.publication.duration" {
+				continue
+			}
+			for _, point := range recorded.Data.(metricdata.Histogram[float64]).DataPoints {
+				for i, count := range point.BucketCounts {
+					if count == 1 && i < len(point.Bounds) {
+						bound = point.Bounds[i]
+					}
+				}
+			}
+		}
+	}
+	if bound != 0.05 {
+		t.Errorf("40ms publication bucket upper bound = %v, want 0.05", bound)
+	}
+}
+
 func TestNewEventObserver_RequiresDependencies(t *testing.T) {
 	if observer, err := NewEventObserver(nil, nil, nil); observer != nil || err == nil {
 		t.Fatalf("NewEventObserver() = (%v, %v)", observer, err)
