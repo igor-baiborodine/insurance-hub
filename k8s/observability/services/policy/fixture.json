@@ -30,18 +30,6 @@
     },
     {
       "labels": {
-        "http_response_status_code": "500",
-        "insurance_hub_service_operation": "create_offer",
-        "insurance_hub_service_outcome": "internal_error",
-        "insurance_hub_service_route": "POST /offers",
-        "insurance_hub_service_transport": "http"
-      },
-      "name": "insurance_hub_service_requests_total",
-      "use_common_labels": true,
-      "value": 0
-    },
-    {
-      "labels": {
         "insurance_hub_service_operation": "create_offer",
         "insurance_hub_service_outcome": "success",
         "insurance_hub_service_transport": "grpc",
@@ -126,15 +114,6 @@
     },
     {
       "labels": {
-        "rpc_method": "product.v1.ProductService/GetProduct",
-        "rpc_response_status_code": "UNAVAILABLE"
-      },
-      "name": "rpc_client_call_duration_seconds_count",
-      "use_common_labels": true,
-      "value": 0
-    },
-    {
-      "labels": {
         "le": "0.05",
         "rpc_method": "product.v1.ProductService/GetProduct",
         "rpc_response_status_code": "OK"
@@ -173,15 +152,6 @@
         "kind": "linear",
         "step": 10
       }
-    },
-    {
-      "labels": {
-        "rpc_method": "pricing.v1.PricingService/CalculatePrice",
-        "rpc_response_status_code": "UNAVAILABLE"
-      },
-      "name": "rpc_client_call_duration_seconds_count",
-      "use_common_labels": true,
-      "value": 0
     },
     {
       "labels": {

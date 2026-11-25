@@ -71,7 +71,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(insurance_hub_service_requests_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_service_transport=\"http\",insurance_hub_service_outcome=~\"internal_error|deadline_exceeded\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_service_requests_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_service_transport=\"http\"}[$__rate_interval])), 0.000001)",
+          "expr": "(sum(rate(insurance_hub_service_requests_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_service_transport=\"http\",insurance_hub_service_outcome=~\"internal_error|deadline_exceeded\"}[$__rate_interval])) or 0 * sum(rate(insurance_hub_service_requests_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_service_transport=\"http\"}[$__rate_interval]))) / clamp_min(sum(rate(insurance_hub_service_requests_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_service_transport=\"http\"}[$__rate_interval])), 0.000001)",
           "legendFormat": "unexpected HTTP errors",
           "refId": "A"
         }
@@ -156,7 +156,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",rpc_method=~\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\",rpc_response_status_code=~\"UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|UNKNOWN\"}[$__rate_interval])) / clamp_min(sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",rpc_method=~\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\"}[$__rate_interval])), 0.000001)",
+          "expr": "(sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",rpc_method=~\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\",rpc_response_status_code=~\"UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|UNKNOWN\"}[$__rate_interval])) or 0 * sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",rpc_method=~\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\"}[$__rate_interval]))) / clamp_min(sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",rpc_method=~\"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice\"}[$__rate_interval])), 0.000001)",
           "legendFormat": "{{rpc_method}} failure ratio",
           "refId": "B"
         }
@@ -276,7 +276,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(insurance_hub_policy_event_publications_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_policy_event_outcome=~\"error|cancelled\"}[$__rate_interval])) / clamp_min(sum(rate(insurance_hub_policy_event_publications_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
+          "expr": "(sum(rate(insurance_hub_policy_event_publications_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\",insurance_hub_policy_event_outcome=~\"error|cancelled\"}[$__rate_interval])) or 0 * sum(rate(insurance_hub_policy_event_publications_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval]))) / clamp_min(sum(rate(insurance_hub_policy_event_publications_total{service_name=\"policy-service\",deployment_environment_name=~\"$environment\",service_implementation=~\"$implementation\"}[$__rate_interval])), 0.000001)",
           "legendFormat": "failure ratio",
           "refId": "B"
         }
