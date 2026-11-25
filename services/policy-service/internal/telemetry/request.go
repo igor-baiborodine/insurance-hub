@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -148,7 +149,6 @@ func (request *Request) FinishHTTP(ctx context.Context, status int) {
 		outcome, level = "invalid_request", slog.LevelInfo
 	}
 	elapsed := time.Since(request.started)
-	// The route stays on the span; metric dimensions are limited to those the collector keeps.
 	attrs := []attribute.KeyValue{
 		attribute.String("insurance_hub.policy.operation", request.operation),
 		attribute.String("insurance_hub.policy.transport", request.transport),
@@ -156,7 +156,14 @@ func (request *Request) FinishHTTP(ctx context.Context, status int) {
 		attribute.Int("http.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
-	request.span.SetAttributes(attribute.String("insurance_hub.policy.route", request.route))
+	// Only matched spans carry the fixed path template; metrics omit it to stay bounded.
+	if _, path, found := strings.Cut(
+		request.route,
+		" ",
+	); found &&
+		request.operation != "unknown" {
+		request.span.SetAttributes(attribute.String("http.route", path))
+	}
 	if outcome != "success" {
 		request.span.SetAttributes(attribute.String("error.type", outcome))
 		request.span.SetStatus(codes.Error, "")

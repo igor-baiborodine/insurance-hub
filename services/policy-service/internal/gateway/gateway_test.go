@@ -754,6 +754,25 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 		!strings.Contains(combined, "insurance_hub.policy.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
 	}
+	// The collector keeps http.route on spans; matched spans carry only the path template.
+	routes := map[string]string{}
+	for _, span := range spanRecorder.Ended() {
+		for _, attr := range span.Attributes() {
+			if attr.Key == "http.route" {
+				routes[span.Name()] = attr.Value.AsString()
+			}
+		}
+	}
+	wantRoutes := map[string]string{
+		"POST /offers":                 "/offers",
+		"GET /policies/{policyNumber}": "/policies/{policyNumber}",
+	}
+	if fmt.Sprint(routes) != fmt.Sprint(wantRoutes) {
+		t.Errorf("span routes = %v, want %v", routes, wantRoutes)
+	}
+	if strings.Contains(combined, "insurance_hub.policy.route") {
+		t.Errorf("span carries a route key the collector drops: %s", combined)
+	}
 }
 
 func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {

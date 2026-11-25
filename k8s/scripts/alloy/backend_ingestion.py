@@ -1456,6 +1456,18 @@ def span_attribute(span: Mapping[str, Any], key: str) -> Any:
     return None
 
 
+def validate_policy_trace(tempo_port: int) -> None:
+    """Prove the matched offer span keeps its route template through span filtering."""
+    wait_json(
+        f"http://127.0.0.1:{tempo_port}/api/traces/{SERVICE_TRACE_ID}",
+        lambda value: any(
+            span.get("name") == "POST /offers" and span_attribute(span, "http.route") == "/offers"
+            for span in trace_spans(value)
+        ),
+        "Policy offer span with its http.route in Tempo",
+    )
+
+
 def validate_pricing_diagnosis(
     prometheus_port: int,
     loki_port: int,
@@ -1887,6 +1899,8 @@ def validate_service_backends(
         lambda value: len(value.get("batches", [])) >= 1,
         f"real {service_domain} trace in Tempo",
     )
+    if service_domain == "policy":
+        validate_policy_trace(tempo_port)
     wait_json(
         f"http://127.0.0.1:{zipkin_port}/api/v2/trace/{SERVICE_TRACE_ID}",
         lambda value: isinstance(value, list) and len(value) >= 1,

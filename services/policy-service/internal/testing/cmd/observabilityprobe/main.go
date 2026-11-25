@@ -76,22 +76,26 @@ func run(traceIDValue string) error {
 	for _, dependency := range []string{"gateway", "database", "kafka"} {
 		dependencyObserver.Record(ctx, dependency, nil)
 	}
-	request := requestObserver.StartHTTP(ctx, "POST /offers")
+	requestContext, span := provider.TracerProvider().
+		Tracer("insurance-hub/observabilityprobe").
+		Start(ctx, "POST /offers", trace.WithSpanKind(trace.SpanKindServer))
+	request := requestObserver.StartHTTP(requestContext, "POST /offers")
 	dependencyObserver.ObserveCall(
-		ctx,
+		requestContext,
 		"product",
 		"get_product",
 		20*time.Millisecond,
 		"success",
 	)
 	dependencyObserver.ObserveCall(
-		ctx,
+		requestContext,
 		"pricing",
 		"calculate_price",
 		30*time.Millisecond,
 		"success",
 	)
-	request.FinishHTTP(ctx, 200)
+	request.FinishHTTP(requestContext, 200)
+	span.End()
 
 	for _, eventType := range []string{"registered", "terminated"} {
 		eventContext, event := eventObserver.Start(ctx, eventType)
