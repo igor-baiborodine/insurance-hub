@@ -48,6 +48,13 @@ func newEventObserver(
 	if err != nil {
 		return nil, errors.New("create Policy event publication counter")
 	}
+	// A zero baseline lets an increase over a window detect the first failed publication.
+	for _, eventType := range []string{"registered", "terminated"} {
+		events.Add(context.Background(), 0, metric.WithAttributes(
+			attribute.String("insurance_hub.policy.event.type", eventType),
+			attribute.String("insurance_hub.policy.event.outcome", "error"),
+		))
+	}
 	duration, err := meter.Float64Histogram(
 		"insurance_hub.policy.event.publication.duration",
 		metric.WithUnit("s"),

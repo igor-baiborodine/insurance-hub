@@ -269,6 +269,10 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 	unmigrated := postgres.CheckReadiness(ctx, pool, time.Second)
 	fixture.Call(t, ctx, "migrate", "version=2")
 	migrated := postgres.CheckReadiness(ctx, pool, time.Second)
+	fixture.Exec(t, ctx, "ALTER TABLE public.policy_outbox RENAME TO policy_outbox_interrupted")
+	interrupted := postgres.CheckReadiness(ctx, pool, time.Second)
+	fixture.Exec(t, ctx, "ALTER TABLE public.policy_outbox_interrupted RENAME TO policy_outbox")
+	restored := postgres.CheckReadiness(ctx, pool, time.Second)
 
 	// then
 	if unmigrated == nil {
@@ -276,6 +280,12 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 	}
 	if migrated != nil {
 		t.Fatalf("readiness after migration: %v", migrated)
+	}
+	if interrupted == nil {
+		t.Fatal("readiness passed while a required Policy table was unavailable")
+	}
+	if restored != nil {
+		t.Fatalf("readiness after restoring the required table: %v", restored)
 	}
 	for _, test := range []struct{ name, url string }{
 		{"missing CA", strings.Replace(fixture.WriterURL("policy"),

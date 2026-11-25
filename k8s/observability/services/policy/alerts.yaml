@@ -1,0 +1,172 @@
+groups:
+- interval: 30s
+  name: insurance-hub-policy-service
+  rules:
+  - alert: PolicyServiceErrorRate
+    annotations:
+      description: More than 5% of at least 20 private Policy HTTP requests failed unexpectedly
+        in five minutes.
+      runbook_action: Split failures by operation and route, inspect safe logs and traces,
+        then check upstream RPC, database and Kafka readiness before rollback.
+      summary: Policy error rate exceeds the pilot threshold
+    expr: sum(rate(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http",insurance_hub_service_outcome=~"internal_error|deadline_exceeded"}[5m]))
+      / clamp_min(sum(rate(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m])),
+      0.000001) > 0.05 and sum(increase(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m]))
+      >= 20
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyHighLatency
+    annotations:
+      description: Aggregate private Policy HTTP request p95 exceeded 500ms with at least
+        20 requests in five minutes.
+      runbook_action: Split latency by operation, compare upstream RPC latency per method,
+        and open a representative slow trace.
+      summary: Policy request latency exceeds the pilot threshold
+    expr: |-
+      histogram_quantile(0.95,
+        sum by (le) (rate(insurance_hub_service_request_duration_seconds_bucket{service_name="policy-service",insurance_hub_service_transport="http"}[5m]))) > 0.5
+      and sum(increase(insurance_hub_service_requests_total{service_name="policy-service",insurance_hub_service_transport="http"}[5m])) >= 20
+    for: 5m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyUpstreamRPCFailure
+    annotations:
+      description: More than 5% of at least 10 Policy calls to one provider method ended
+        UNAVAILABLE, DEADLINE_EXCEEDED, INTERNAL or UNKNOWN in five minutes.
+      runbook_action: Identify the failing provider from rpc_method, check that provider's
+        dashboard, readiness and rollout first, then verify Policy recovers on the offer
+        path.
+      summary: A Policy upstream provider RPC is failing
+    expr: sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice",rpc_response_status_code=~"UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|UNKNOWN"}[5m]))
+      / clamp_min(sum by (rpc_method) (rate(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"}[5m])),
+      0.000001) > 0.05 and sum by (rpc_method) (increase(rpc_client_call_duration_seconds_count{service_name="policy-service",rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"}[5m]))
+      >= 10
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyDatabaseNotReady
+    annotations:
+      description: Policy readiness has reported the PostgreSQL dependency as unavailable
+        for two minutes.
+      runbook_action: Check PostgreSQL availability, writer credentials and TLS, then confirm
+        database readiness returns to 1; expect deferred outbox publication until it does.
+      summary: Policy cannot reach its PostgreSQL database
+    expr: min(insurance_hub_policy_dependency_ready{service_name="policy-service",insurance_hub_policy_dependency="database"})
+      < 1
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyKafkaNotReady
+    annotations:
+      description: Policy readiness has reported the Kafka publisher as unavailable for
+        two minutes.
+      runbook_action: Check broker availability, bootstrap address and CA trust, keep pending
+        outbox intents intact, and confirm Kafka readiness returns to 1.
+      summary: The Policy Kafka publisher is not ready
+    expr: min(insurance_hub_policy_dependency_ready{service_name="policy-service",insurance_hub_policy_dependency="kafka"})
+      < 1
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyEventPublicationFailure
+    annotations:
+      description: At least one Policy event publication ended with an error in five
+        minutes.
+      runbook_action: Split failures by event type, check Kafka readiness and broker health,
+        and confirm the outbox retries publication without operator changes.
+      summary: Policy event publication failed
+    expr: sum(increase(insurance_hub_policy_event_publications_total{service_name="policy-service",insurance_hub_policy_event_outcome="error"}[5m]))
+      > 0
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyResourcePressure
+    annotations:
+      description: Policy memory exceeded 80% of 128MiB or CPU exceeded 80% of 200m for
+        five minutes.
+      runbook_action: Inspect request and publication load, runtime memory, throttling,
+        pod events and rollout identity before restarting or rolling back.
+      summary: Policy resource use exceeds the pilot budget
+    expr: sum(container_memory_working_set_bytes{namespace="qa-svc",pod=~"qa-policy-api-.*",pod!~"qa-policy-api-legacy-.*",container="policy-api"})
+      > 107374182.4 or sum(rate(container_cpu_usage_seconds_total{namespace="qa-svc",pod=~"qa-policy-api-.*",pod!~"qa-policy-api-legacy-.*",container="policy-api"}[5m]))
+      > 0.16
+    for: 5m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyUnavailable
+    annotations:
+      description: The QA Policy Deployment has been unavailable or under-replicated for
+        two minutes.
+      runbook_action: Check rollout, readiness, configuration and the dependency readiness
+        panels to find the withdrawn boundary before rollback.
+      summary: Policy has fewer available replicas than desired
+    expr: sum(kube_deployment_spec_replicas{namespace="qa-svc",deployment="qa-policy-api"})
+      > sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-policy-api"})
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyTelemetryMissing
+    annotations:
+      description: A Policy replica is available, but no Go runtime sample has arrived
+        for two minutes.
+      runbook_action: Verify Policy OTLP configuration, Alloy receiver and remote-write
+        health, then inspect the active series identity before changing the rule.
+      summary: Policy is available but runtime telemetry is missing
+    expr: sum(kube_deployment_status_replicas_available{namespace="qa-svc",deployment="qa-policy-api"})
+      > 0 and on() absent_over_time(go_goroutine_count{service_name="policy-service",deployment_environment_name="qa",service_implementation="go"}[2m])
+    for: 1m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyTelemetryDeliveryFailure
+    annotations:
+      description: Alloy reported a Loki drop, Prometheus remote-write failure, or OTLP
+        span export failure in five minutes.
+      runbook_action: Identify the failed signal and backend in the shared Alloy pipeline,
+        inspect bounded retry and drop counters, and preserve Policy availability.
+      summary: The shared Policy telemetry path dropped or failed data
+    expr: sum(increase(loki_write_dropped_entries_total{job=~".*alloy.*"}[5m])) > 0
+      or sum(increase(prometheus_remote_storage_samples_failed_total{job=~".*alloy.*"}[5m]))
+      > 0 or sum(increase(prometheus_remote_storage_samples_dropped_total{job=~".*alloy.*"}[5m]))
+      > 0 or sum(increase(otelcol_exporter_send_failed_spans_total{job=~".*alloy.*"}[5m]))
+      > 0
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyTelemetryBacklog
+    annotations:
+      description: Remote-write lag exceeded 60 seconds while samples were pending, or
+        an OTLP exporter queue exceeded 80%.
+      runbook_action: Check backend reachability and Alloy queue or WAL health, then verify
+        recovery within two minutes.
+      summary: The shared Policy telemetry path has a sustained backlog
+    expr: |-
+      (sum(prometheus_remote_storage_samples_pending{job=~".*alloy.*"}) > 0
+        and
+        time() - (max(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job=~".*alloy.*"}) or vector(0)) > 60)
+      or sum(otelcol_exporter_queue_size{job=~".*alloy.*"})
+        /
+        clamp_min(sum(otelcol_exporter_queue_capacity{job=~".*alloy.*"}), 1) > 0.8
+    for: 2m
+    labels:
+      service: policy-service
+      severity: warning
+  - alert: PolicyUnexpectedRestart
+    annotations:
+      description: A Policy container restarted during the last 15 minutes.
+      runbook_action: Inspect prior container state, safe logs, pod events, resource pressure
+        and rollout identity before deciding whether to roll back.
+      summary: Policy restarted unexpectedly
+    expr: sum(increase(kube_pod_container_status_restarts_total{namespace="qa-svc",pod=~"qa-policy-api-.*",pod!~"qa-policy-api-legacy-.*",container="policy-api"}[15m]))
+      > 0
+    labels:
+      service: policy-service
+      severity: warning

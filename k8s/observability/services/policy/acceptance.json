@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "evidence": {
+    "source": "Disposable promtool rule tests and collected fixture queries for the Policy asset set",
+    "limitation": "These values are pilot alert settings for bounded Policy workloads, not production SLOs or capacity evidence. Live series, rule evaluation and dashboard data are qualified separately in QA. Dependency readiness is recorded only for dependencies the readiness check reached. Shared Alloy failure and backlog remain shared infrastructure health."
+  },
+  "resource_budget": {
+    "cpu_limit_cores": 0.2,
+    "memory_limit_bytes": 134217728,
+    "cpu_alert_cores": 0.16,
+    "memory_alert_bytes": 107374182.4
+  },
+  "rules": {
+    "PolicyServiceErrorRate": {
+      "threshold": 0.05,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_requests": 20,
+      "transport": "http",
+      "severity": "warning",
+      "suppression": "Fewer than 20 HTTP requests, only success/invalid_request/cancelled outcomes, or failures on the internal gRPC hop.",
+      "recovery": "The five-minute unexpected-error ratio returns to 5% or lower.",
+      "response": "Split failures by operation and route, inspect safe logs and traces, then check upstream RPC, database and Kafka readiness."
+    },
+    "PolicyHighLatency": {
+      "threshold_seconds": 0.5,
+      "quantile": 0.95,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "minimum_requests": 20,
+      "transport": "http",
+      "severity": "warning",
+      "suppression": "Fewer than 20 HTTP requests.",
+      "recovery": "The five-minute HTTP request p95 returns to 500ms or lower.",
+      "response": "Split latency by operation, compare upstream RPC latency per method and open a slow trace."
+    },
+    "PolicyUpstreamRPCFailure": {
+      "threshold": 0.05,
+      "comparison": ">",
+      "window": "5m",
+      "for": "2m",
+      "minimum_calls": 10,
+      "methods": [
+        "product.v1.ProductService/GetProduct",
+        "pricing.v1.PricingService/CalculatePrice"
+      ],
+      "failure_codes": [
+        "UNAVAILABLE",
+        "DEADLINE_EXCEEDED",
+        "INTERNAL",
+        "UNKNOWN"
+      ],
+      "severity": "warning",
+      "suppression": "Fewer than 10 calls per method, business status codes such as NOT_FOUND, or the internal Policy gateway channel.",
+      "recovery": "The per-method five-minute failure ratio returns to 5% or lower.",
+      "response": "Identify the provider from rpc_method and check that provider's dashboard, readiness and rollout first."
+    },
+    "PolicyDatabaseNotReady": {
+      "threshold": 1,
+      "comparison": "<",
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "Database readiness stays 1.",
+      "recovery": "Database readiness returns to 1.",
+      "response": "Check PostgreSQL availability, writer credentials and TLS; expect deferred outbox publication until recovery."
+    },
+    "PolicyKafkaNotReady": {
+      "threshold": 1,
+      "comparison": "<",
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "Kafka readiness stays 1 or the publisher is disabled and records no readiness.",
+      "recovery": "Kafka readiness returns to 1.",
+      "response": "Check broker availability, bootstrap address and CA trust while keeping pending outbox intents intact."
+    },
+    "PolicyEventPublicationFailure": {
+      "threshold": 0,
+      "comparison": ">",
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "suppression": "No publication ended with error in five minutes; cancelled publications are excluded.",
+      "recovery": "The last publication error ages out of the five-minute window.",
+      "response": "Split failures by event type, check Kafka readiness and confirm the outbox retries publication."
+    },
+    "PolicyResourcePressure": {
+      "cpu_threshold_cores": 0.16,
+      "memory_threshold_bytes": 107374182.4,
+      "comparison": ">",
+      "window": "5m",
+      "for": "5m",
+      "severity": "warning",
+      "suppression": "Both CPU and memory remain at or below 80% of their deployment limits; legacy Pods are excluded.",
+      "recovery": "Both resource signals remain below their thresholds.",
+      "response": "Inspect request and publication load, runtime memory, throttling, pod events and rollout identity."
+    },
+    "PolicyUnavailable": {
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "Available replicas equal desired replicas.",
+      "recovery": "The deployment returns to its desired available replica count.",
+      "response": "Check rollout, readiness, configuration and dependency readiness before rollback."
+    },
+    "PolicyTelemetryMissing": {
+      "absence_window": "2m",
+      "for": "1m",
+      "severity": "warning",
+      "suppression": "The deployment is unavailable or runtime samples are present.",
+      "recovery": "A Go runtime sample resumes.",
+      "response": "Verify OTLP configuration, Alloy receiver and remote-write health before changing the rule."
+    },
+    "PolicyTelemetryDeliveryFailure": {
+      "window": "5m",
+      "for": null,
+      "severity": "warning",
+      "suppression": "Delivery failure/drop counters do not increase; missing exporter series do not fabricate failure.",
+      "recovery": "All five-minute failure/drop increases return to zero.",
+      "response": "Identify the failed signal and backend in the shared Alloy pipeline while preserving Policy availability."
+    },
+    "PolicyTelemetryBacklog": {
+      "remote_write_lag_seconds": 60,
+      "queue_ratio": 0.8,
+      "for": "2m",
+      "severity": "warning",
+      "suppression": "No samples are pending and exporter queue use is 80% or lower; absent series do not fabricate backlog.",
+      "recovery": "Pending samples clear and exporter queues return to 80% or lower.",
+      "response": "Check backend reachability and Alloy queue/WAL health, then verify recovery within two minutes."
+    },
+    "PolicyUnexpectedRestart": {
+      "window": "15m",
+      "threshold": 0,
+      "comparison": ">",
+      "for": null,
+      "severity": "warning",
+      "suppression": "No container restart occurred in 15 minutes.",
+      "recovery": "The last restart ages out of the 15-minute window.",
+      "response": "Inspect prior container state, safe logs, pod events, resource pressure and rollout identity."
+    }
+  },
+  "delivery": {
+    "rule_evaluation_interval_seconds": 30,
+    "expected_signal_seconds": 30,
+    "expected_recovery_seconds": 120
+  }
+}

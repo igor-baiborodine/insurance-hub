@@ -33,6 +33,9 @@ over private gRPC (see [Provider access](#provider-access)).
 | local-dev | `kind-local-dev-insurance-hub` | `local-dev-all` | Guarded direct deployment into Kind cluster `local-dev-insurance-hub` |
 | QA | `qa-insurance-hub` | `qa-svc` | `flux-system/qa-svc` reconciles `./k8s/overlays/qa/svc` from `flux-system/insurance-hub` on `main` |
 
+Use the companion [observability runbook](observability-runbook.md) for Policy monitoring assets,
+alerts and incident investigation, including delayed publication and stalled consumers.
+
 ## Candidate checks
 
 Run from the repository root with the pinned Python, Go, Docker, Kind and kubectl tools.
@@ -159,8 +162,9 @@ Inspect the six identity fields in the Policy
 startup record and verify corresponding telemetry by `service.name=policy-service`, `service.version` and `service.instance.id` through
 Alloy's existing signal paths. Keep request payloads out of operational evidence.
 
-Use the [Dashboard runbook](../dashboard-service/deployment-runbook.md) first for source,
-image, Flux and transport troubleshooting. When QA Flux, DNS or registry state looks stale, apply
+For source, image, Flux and transport problems, start with `make go-svc-deploy-status
+SVC_NAME=policy` and compare the Flux source and applied revisions, the release digest and the
+running Pod image ID with the recorded candidate. When QA Flux, DNS or registry state looks stale, apply
 the [QA network recovery runbook](../../k8s/base-cluster-how-tos.md#qa-network-recovery) before
 treating the failure as a Policy defect. In local-dev, `make go-svc-stop SVC_NAME=policy`
 with the same coordinates and image selection scales only the Go Deployment to zero.

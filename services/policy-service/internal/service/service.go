@@ -355,15 +355,34 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
 	}
-	// Readiness includes the database; liveness stays independent of it.
+	dependencyObserver, err := telemetry.NewDependencyObserver(provider.MeterProvider())
+	if err != nil {
+		return fail(err)
+	}
+	// Readiness includes the database; liveness stays independent of it. Each evaluated
+	// dependency records its result so a withdrawal names the failing boundary.
 	state, err := health.NewState(settings.ProbeTimeout, func(ctx context.Context) error {
+		var gatewayErr error
 		if runtime.connection.GetState() != connectivity.Ready {
-			return errors.New("gateway connection is not ready")
+			gatewayErr = errors.New("gateway connection is not ready")
 		}
-		if err := checkDatabase(ctx); err != nil {
-			return err
+		dependencyObserver.Record(ctx, "gateway", gatewayErr)
+		if gatewayErr != nil {
+			return gatewayErr
 		}
-		return runtime.checkPublisher(ctx)
+		if runtime.pool != nil {
+			err := checkDatabase(ctx)
+			dependencyObserver.Record(ctx, "database", err)
+			if err != nil {
+				return err
+			}
+		}
+		if runtime.publisher == nil {
+			return nil
+		}
+		err := runtime.checkPublisher(ctx)
+		dependencyObserver.Record(ctx, "kafka", err)
+		return err
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
