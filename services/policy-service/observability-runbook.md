@@ -81,46 +81,55 @@ Policy signals with the bounded queries in [Investigation workflow](#investigati
 
 Keep these commands in one shell so the evidence directory and source revision stay available.
 Start from a clean checkout of the exact reviewed revision and capture the current state before
-any write:
+any write. The capture runs in a fail-fast subshell; keep it as a standalone command, because combining it
+with `||` or `&&` disables its fail-fast behavior. Any failed read, including an RBAC denial or
+an API timeout, aborts it before either object is classified. Only a successful, empty
+`--ignore-not-found` lookup of the named object records its absence, and a returned object must
+carry the expected name, namespace and a UID:
 
 ```sh
 export POLICY_SOURCE_REVISION="$(git rev-parse HEAD)"
 export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
-test -z "$(git status --porcelain)"
-test "$(kubectl config current-context)" = qa-insurance-hub
+(
+  set -eu
+  dir="$MONITORING_EVIDENCE_DIR"
+  test -z "$(git status --porcelain)"
+  test "$(kubectl config current-context)" = qa-insurance-hub
+  k() { kubectl --context qa-insurance-hub --request-timeout=30s "$@"; }
 
-kubectl --context qa-insurance-hub -n flux-system get \
-  gitrepository/insurance-hub -o json > "$MONITORING_EVIDENCE_DIR/flux-source.json"
-kubectl --context qa-insurance-hub -n flux-system get \
-  kustomization/qa-svc -o json > "$MONITORING_EVIDENCE_DIR/flux-qa-svc.json"
-kubectl --context qa-insurance-hub -n qa-svc get \
-  deployment/qa-policy-api -o json > "$MONITORING_EVIDENCE_DIR/policy-deployment.json"
-kubectl --context qa-insurance-hub -n qa-monitoring get \
-  prometheusrule/qa-policy-service -o json --ignore-not-found \
-  > "$MONITORING_EVIDENCE_DIR/prior-rule.json"
-kubectl --context qa-insurance-hub -n qa-monitoring get \
-  configmap/qa-policy-dashboard -o json --ignore-not-found \
-  > "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+  k -n flux-system get gitrepository/insurance-hub -o json > "$dir/flux-source.json"
+  k -n flux-system get kustomization/qa-svc -o json > "$dir/flux-qa-svc.json"
+  k -n qa-svc get deployment/qa-policy-api -o json > "$dir/policy-deployment.json"
 
-for kind in rule dashboard; do
-  prior="$MONITORING_EVIDENCE_DIR/prior-$kind.json"
-  if test -s "$prior"; then
-    jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace,
-      uid: .metadata.uid}, spec, data}' "$prior" > "$MONITORING_EVIDENCE_DIR/prior-$kind-source.json"
-    sha256sum "$MONITORING_EVIDENCE_DIR/prior-$kind-source.json"
+  for pair in rule:prometheusrule/qa-policy-service dashboard:configmap/qa-policy-dashboard; do
+    kind="${pair%%:*}" ref="${pair#*:}"
+    prior="$dir/prior-$kind.json"
+    k -n qa-monitoring get "$ref" -o json --ignore-not-found > "$prior"
+    if test -s "$prior"; then
+      jq -e --arg name "${ref#*/}" '.metadata.name == $name
+        and .metadata.namespace == "qa-monitoring"
+        and ((.metadata.uid // "") | length > 0)' "$prior" > /dev/null
+      jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace,
+        uid: .metadata.uid}, spec, data}' "$prior" > "$dir/prior-$kind-source.json"
+      sha256sum "$dir/prior-$kind-source.json"
+    else
+      : > "$dir/prior-$kind.absent"
+    fi
+  done
+
+  if test -s "$dir/prior-rule.json"; then
+    test -s "$dir/prior-dashboard.json"
   else
-    : > "$MONITORING_EVIDENCE_DIR/prior-$kind.absent"
+    test ! -s "$dir/prior-dashboard.json"
   fi
-done
-
-if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
-  test -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
-else
-  test ! -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
-fi
+  : > "$dir/preflight.ok"
+)
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok" || echo "STOP: preflight failed" >&2
 ```
 
-The final guard stops when only one of the two objects exists. Before a live operation, record:
+The final guard stops when only one of the two objects exists. Every later block in this runbook
+requires `preflight.ok`; when it is missing, discard the evidence directory, resolve the access or
+identity error and rerun the whole preflight. Before a live operation, record:
 
 - the full reviewed commit containing the monitoring assets;
 - the Flux `insurance-hub` source and `qa-svc` applied revisions;
@@ -138,6 +147,7 @@ Render the exact objects, keep their hashes and ask the API server to admit them
 persisting either:
 
 ```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
 make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy \
   > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
 make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy \
@@ -161,6 +171,7 @@ object and read back its existence. Run them only with authorization for these t
 objects:
 
 ```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=policy
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=policy
 ```
@@ -445,10 +456,11 @@ If a source, runtime or network mismatch appears, stop and use the
 [deployment recovery procedure](deployment-runbook.md#private-smoke-and-recovery) before
 classifying an application defect.
 
-To restore prior monitoring assets, first verify that the captured UIDs still identify the two
-objects:
+To restore prior monitoring assets, first verify that the preflight completed and that the
+captured UIDs still identify the two objects:
 
 ```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
 test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
   prometheusrule/qa-policy-service -o jsonpath='{.metadata.uid}')" \
   = "$(jq -r '.metadata.uid' "$MONITORING_EVIDENCE_DIR/prior-rule.json")"
@@ -463,9 +475,13 @@ source payloads with the `jq` filter from the preflight, and compare them with
 `prior-rule-source.json` and `prior-dashboard-source.json` using `cmp`. Follow the live restore
 with the reviewed repository revert.
 
-For a first installation that must be removed, separately authorize deletion of only:
+A first installation is established only when the preflight completed and recorded both absence
+markers. For a first installation that must be removed, separately authorize deletion of only:
 
 ```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+test -f "$MONITORING_EVIDENCE_DIR/prior-rule.absent"
+test -f "$MONITORING_EVIDENCE_DIR/prior-dashboard.absent"
 kubectl --context qa-insurance-hub -n qa-monitoring delete prometheusrule/qa-policy-service
 kubectl --context qa-insurance-hub -n qa-monitoring delete configmap/qa-policy-dashboard
 ```
