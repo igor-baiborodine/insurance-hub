@@ -4,11 +4,15 @@
 - [Policy observability runbook](#policy-observability-runbook)
   - [Signal and decision boundary](#signal-and-decision-boundary)
   - [Source and disposable validation](#source-and-disposable-validation)
-  - [QA preflight, apply and read back](#qa-preflight-apply-and-read-back)
+  - [QA preflight and stop conditions](#qa-preflight-and-stop-conditions)
+  - [Provision, apply and read back](#provision-apply-and-read-back)
   - [Investigation workflow](#investigation-workflow)
     - [Troubleshooting cases](#troubleshooting-cases)
-    - [Delayed outbox publication](#delayed-outbox-publication)
-    - [Consumer stalled on an acknowledged record](#consumer-stalled-on-an-acknowledged-record)
+      - [Release/Pod mismatch](#releasepod-mismatch)
+      - [Failed provider RPC](#failed-provider-rpc)
+      - [Database readiness loss](#database-readiness-loss)
+      - [Delayed outbox publication](#delayed-outbox-publication)
+      - [Consumer stalled on an acknowledged record](#consumer-stalled-on-an-acknowledged-record)
     - [Alert responses](#alert-responses)
   - [Recovery, rollback and cleanup](#recovery-rollback-and-cleanup)
   - [Evidence checklist](#evidence-checklist)
@@ -27,7 +31,7 @@ Grafana dashboard UID `insurance-hub-policy-service`.
 The dashboard and rules are repository-owned monitoring resources applied through the Make
 targets below. They are separate from the Flux-owned Policy workload described in the
 [deployment runbook](deployment-runbook.md). Do not edit the Grafana dashboard in the UI, patch the
-generated resources, suspend Flux, change Kafka offsets or mutate another service's assets while
+generated resources, suspend Flux, change Kafka offsets or mutate other monitoring assets while
 following this procedure.
 
 ## Signal and decision boundary
@@ -43,8 +47,8 @@ policy keys, payloads, customer values, topics, groups, credentials or trace IDs
 The thresholds and windows in `k8s/observability/services/policy/acceptance.json` are operating
 limits, not production SLOs. Provider availability is not part of readiness: an unreachable
 provider fails only the affected offer. The gauge has no outbox backlog age, so a pending-intent
-check is a read-only outbox query. There is no consumer-lag series; consumer progress is read from
-the broker.
+check is a read-only outbox query. Policy has no consumer-lag series; consumer progress is read
+from the broker.
 
 | Area | Panels | Alerts |
 | --- | --- | --- |
@@ -73,33 +77,120 @@ data and requires healthy alerts to stay inactive. Neither applies QA resources 
 signal delivery. The shared `verify-service-observability` target has no Policy probe; verify live
 Policy signals with the bounded queries in [Investigation workflow](#investigation-workflow).
 
-## QA preflight, apply and read back
+## QA preflight and stop conditions
 
-Follow the preflight, apply, read-back and restore sequence of the
-[Dashboard observability runbook](../dashboard-service/observability-runbook.md#qa-preflight-and-stop-conditions),
-substituting service key `policy`, PrometheusRule `qa-policy-service`, ConfigMap
-`qa-policy-dashboard`, Deployment `qa-policy-api` and source variable
-`POLICY_SOURCE_REVISION`. Skip the `verify-service-observability` steps. The Policy objects are
-rendered and applied with:
+Keep these commands in one shell so the evidence directory and source revision stay available.
+Start from a clean checkout of the exact reviewed revision and capture the current state before
+any write:
 
 ```sh
-make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy
-make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy
+export POLICY_SOURCE_REVISION="$(git rev-parse HEAD)"
+export MONITORING_EVIDENCE_DIR="$(mktemp -d)"
+test -z "$(git status --porcelain)"
+test "$(kubectl config current-context)" = qa-insurance-hub
+
+kubectl --context qa-insurance-hub -n flux-system get \
+  gitrepository/insurance-hub -o json > "$MONITORING_EVIDENCE_DIR/flux-source.json"
+kubectl --context qa-insurance-hub -n flux-system get \
+  kustomization/qa-svc -o json > "$MONITORING_EVIDENCE_DIR/flux-qa-svc.json"
+kubectl --context qa-insurance-hub -n qa-svc get \
+  deployment/qa-policy-api -o json > "$MONITORING_EVIDENCE_DIR/policy-deployment.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-policy-service -o json --ignore-not-found \
+  > "$MONITORING_EVIDENCE_DIR/prior-rule.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-policy-dashboard -o json --ignore-not-found \
+  > "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+
+for kind in rule dashboard; do
+  prior="$MONITORING_EVIDENCE_DIR/prior-$kind.json"
+  if test -s "$prior"; then
+    jq -S '{apiVersion, kind, metadata: {name: .metadata.name, namespace: .metadata.namespace,
+      uid: .metadata.uid}, spec, data}' "$prior" > "$MONITORING_EVIDENCE_DIR/prior-$kind-source.json"
+    sha256sum "$MONITORING_EVIDENCE_DIR/prior-$kind-source.json"
+  else
+    : > "$MONITORING_EVIDENCE_DIR/prior-$kind.absent"
+  fi
+done
+
+if test -s "$MONITORING_EVIDENCE_DIR/prior-rule.json"; then
+  test -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+else
+  test ! -s "$MONITORING_EVIDENCE_DIR/prior-dashboard.json"
+fi
+```
+
+The final guard stops when only one of the two objects exists. Before a live operation, record:
+
+- the full reviewed commit containing the monitoring assets;
+- the Flux `insurance-hub` source and `qa-svc` applied revisions;
+- the running Policy image reference, registry digest, Pod image ID and runtime `service.version`;
+- the UIDs and source hashes of `qa-policy-service` and `qa-policy-dashboard`, or their verified
+  absence for a first installation.
+
+Stop before mutation when the context, namespace, source revision, object name or UID, Policy
+image identity or current asset source differs from the reviewed record. Also stop for missing
+Policy signals, unexplained firing alerts, a mutable Grafana provider or any operation that would
+alter shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo, PostgreSQL, Kafka or other
+monitoring assets.
+
+Render the exact objects, keep their hashes and ask the API server to admit them without
+persisting either:
+
+```sh
+make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy \
+  > "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy \
+  > "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+sha256sum "$MONITORING_EVIDENCE_DIR"/candidate-*.yaml \
+  > "$MONITORING_EVIDENCE_DIR/candidate-render.sha256"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring apply --dry-run=server \
+  -f "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml"
+```
+
+Confirm the render names `qa-policy-service` and `qa-policy-dashboard`, namespace
+`qa-monitoring`, selector `service_name="policy-service"`, 30-second evaluation and refresh
+intervals, warning severity and `editable: false`. Rendering proves source shape only.
+
+## Provision, apply and read back
+
+The apply targets repeat source validation, run a server-side dry run, apply only the selected
+object and read back its existence. Run them only with authorization for these two exact QA
+objects:
+
+```sh
 make -C k8s prometheus-rules-apply ENV_NAME=qa SVC_NAME=policy
 make -C k8s grafana-dashboard-apply ENV_NAME=qa SVC_NAME=policy
 ```
 
-Run the apply targets only with authorization for these two exact QA objects. Confirm the render
-names `qa-policy-service` and `qa-policy-dashboard`, namespace `qa-monitoring`, selector
-`service_name="policy-service"`, 30-second evaluation and refresh intervals, warning severity and
-`editable: false`. After apply, read back the active group `insurance-hub-policy-service` with
-its 12 alerts and the provisioned dashboard UID through `make -C k8s grafana-ui`.
+Re-render the same source and require it to match the retained candidate byte for byte:
 
-Stop before mutation when the context, namespace, source revision, object name or UID, Policy
-image identity or current asset source differs from the reviewed record, or for missing Policy
-signals, unexplained firing alerts, a mutable Grafana provider or any operation that would alter
-shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo, PostgreSQL, Kafka or another
-service's assets.
+```sh
+make --no-print-directory -C k8s prometheus-rules-render ENV_NAME=qa SVC_NAME=policy \
+  > "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
+make --no-print-directory -C k8s grafana-dashboard-render ENV_NAME=qa SVC_NAME=policy \
+  > "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-rule.yaml" "$MONITORING_EVIDENCE_DIR/rerendered-rule.yaml"
+cmp "$MONITORING_EVIDENCE_DIR/candidate-dashboard.yaml" \
+  "$MONITORING_EVIDENCE_DIR/rerendered-dashboard.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring get prometheusrule/qa-policy-service -o yaml \
+  > "$MONITORING_EVIDENCE_DIR/applied-rule.yaml"
+kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-policy-dashboard -o yaml \
+  > "$MONITORING_EVIDENCE_DIR/applied-dashboard.yaml"
+```
+
+Open Grafana through the owned foreground path and confirm dashboard UID
+`insurance-hub-policy-service` is provisioned with `editable: false` and that the provider
+disables UI updates and deletion. Confirm the active Prometheus group
+`insurance-hub-policy-service` holds 12 alerts with the reviewed expressions and pending windows.
+Then run the [investigation queries](#investigation-workflow) to confirm live Policy samples.
+Keep render, admission, apply, read-back and live-signal evidence distinct.
+
+```sh
+make -C k8s grafana-ui
+```
 
 ## Investigation workflow
 
@@ -144,26 +235,79 @@ sum by (insurance_hub_policy_event_type, insurance_hub_policy_event_outcome) (
 
 Zero request rate with current Go runtime samples is healthy idle time. An available Deployment
 without runtime samples is telemetry loss. Rising shared exporter failures, drops or queue use are
-shared collection failures. Never stop shared Alloy, Prometheus, Loki, Tempo, PostgreSQL or Kafka
-to create an incident; exercise outages only in disposable harnesses.
+shared collection failures. A failing `/readyz` with a passing `/livez` points to a dependency;
+unexpected restarts point to liveness, memory or rollout causes. Never stop shared Alloy,
+Prometheus, Loki, Tempo, PostgreSQL or Kafka to create an incident; exercise outages only in
+disposable harnesses.
 
 ### Troubleshooting cases
 
-Each case starts with the guidance of a peer Go service that has the same boundary. Dashboard is
-the reference for runtime, releases and Kafka. Product has no runbook of its own, so Pricing's
-observability runbook is the PostgreSQL reference; for a failing `GetProduct` call, start from the
-[Product README](../product-service/README.md). When the peer has no comparable behavior, the case
-says so and continues with Policy.
+| Case | First check | Distinguishing observation | Recovery check |
+| --- | --- | --- | --- |
+| Release/Pod mismatch | [Release/Pod mismatch](#releasepod-mismatch) | The running image, version or Pod differs from the Flux-applied release | Status and verification pass with the recorded digest; `PolicyUnavailable` clears |
+| Failed provider RPC | **Upstream RPC outcomes** by `rpc_method` and status | One provider method fails with transport codes while Policy readiness stays 1 | The failure ratio for that method returns below 5% and an offer completes |
+| Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` and `kafka` stay 1 | `database` readiness is 1, `/readyz` returns `200 ready` and pending intents drain |
+| Delayed outbox publication | **Event publication outcomes** with both readiness gauges | Deferred warnings without `error` outcomes, or pending intents with both gauges at 1 | Pending intents return to zero and `success` publications resume |
+| Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The group's committed offset is stationary while the log-end offset grows | The committed offset moves past the record and lag falls |
 
-| Case | Peer consulted first | First Policy check | Distinguishing observation | Recovery check |
-| --- | --- | --- | --- | --- |
-| Release/Pod mismatch | [Dashboard deployment diagnostics](../dashboard-service/deployment-runbook.md#diagnostics-stop-conditions-and-recovery) | `make go-svc-deploy-status SVC_NAME=policy` with the QA coordinates from the [deployment runbook](deployment-runbook.md#flux-owned-qa) | The ready Pod image ID, `service.version` or Pod UID differs from the Flux-applied overlay and release digest, or **Readiness and restarts** shows a stuck rollout (`PolicyUnavailable`) while all three readiness gauges are 1 | Flux `qa-svc` is Ready at the reviewed revision, status and `go-svc-deploy-verify` pass with the recorded digest, and `PolicyUnavailable` clears |
-| Failed provider RPC | The failing provider's guidance: [Pricing observability runbook](../pricing-service/observability-runbook.md#missing-telemetry-or-service-failure) for `CalculatePrice`, [Product README](../product-service/README.md) for `GetProduct` | **Upstream RPC outcomes** by `rpc_method` and status (`PolicyUpstreamRPCFailure`) | One `rpc_method` ends `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL` or `UNKNOWN` while Policy readiness stays 1; business codes such as `NOT_FOUND` are not provider failures | The provider is ready, the failure ratio for that method returns below 5% and a forwarded offer completes |
-| Database readiness loss | [Pricing reader symptoms](../pricing-service/observability-runbook.md#reader-symptoms) | **Database readiness** and `/readyz` through the private port-forward in the [deployment runbook](deployment-runbook.md#private-smoke-and-recovery) | `database` readiness is 0 while `gateway` and `kafka` stay 1 (`PolicyDatabaseNotReady`); lifecycle gRPC calls end `UNAVAILABLE` | `database` readiness returns to 1, `/readyz` returns `200 ready` and pending outbox intents drain |
-| Delayed outbox publication | [Dashboard deployment runbook](../dashboard-service/deployment-runbook.md#diagnostics-stop-conditions-and-recovery) for Kafka coordinates; Dashboard only consumes, so it has no outbox to compare | **Event publication outcomes**, **Kafka publisher readiness** and **Database readiness** | See [Delayed outbox publication](#delayed-outbox-publication) | Pending intents return to zero and `success` publications resume, with no manual outbox edit |
-| Consumer stalled on an acknowledged record | [Dashboard observability investigation](../dashboard-service/observability-runbook.md#investigation-workflow) (`DashboardEventStalled`) | **Event publication outcomes** shows `success` and the outbox has no pending intent for the topic | Policy acknowledged the record, yet the consumer group's committed offset is stationary while the log-end offset grows | See [Consumer stalled on an acknowledged record](#consumer-stalled-on-an-acknowledged-record) |
+#### Release/Pod mismatch
 
-### Delayed outbox publication
+1. Run `make go-svc-deploy-status SVC_NAME=policy` with the QA coordinates from
+   [Flux-owned QA](deployment-runbook.md#flux-owned-qa).
+2. Compare the Flux `qa-svc` applied revision, the release digest, the ready Pod image ID, its
+   `service.version` and Pod UID with the recorded release. Read **Readiness and restarts**.
+3. A mismatch in identity, or a stuck rollout (`PolicyUnavailable`) while all three readiness
+   gauges are 1, is a release problem rather than a dependency failure. When Flux, DNS or
+   registry state looks stale, apply the
+   [QA network recovery runbook](../../k8s/base-cluster-how-tos.md#qa-network-recovery) first.
+4. Recover through the reviewed source revert or release procedure in the
+   [deployment runbook](deployment-runbook.md#private-smoke-and-recovery); never patch the
+   workload. Confirm Flux is Ready at the reviewed revision, `go-svc-deploy-status` and
+   `go-svc-deploy-verify` pass with the recorded digest, and `PolicyUnavailable` clears.
+
+#### Failed provider RPC
+
+1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by `rpc_method`
+   (`PolicyUpstreamRPCFailure`). The method names the provider: `GetProduct` is Product and
+   `CalculatePrice` is Pricing.
+2. Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL` and `UNKNOWN` count as provider failures.
+   Business codes such as `NOT_FOUND` reflect the request. Policy readiness stays 1 because
+   providers are not part of readiness.
+3. Check the provider Deployment and Policy's path to it:
+
+   ```sh
+   kubectl --context qa-insurance-hub -n qa-svc get deployment qa-product-api qa-pricing-api
+   kubectl --context qa-insurance-hub -n qa-svc get networkpolicy qa-policy-api -o yaml
+   ```
+
+   Egress must reach gRPC port 9090 of the provider Pods, as described in
+   [Provider access](deployment-runbook.md#provider-access). Rising latency up to
+   `PROVIDER_CALL_TIMEOUT` with `DEADLINE_EXCEEDED` points to a slow provider; `UNAVAILABLE` points
+   to an unavailable or unreachable one.
+4. After the provider is ready, confirm the failure ratio for that method returns below 5% and a
+   forwarded offer completes.
+
+#### Database readiness loss
+
+1. Read **Database readiness** (`PolicyDatabaseNotReady`) and probe `/readyz` through the private
+   port-forward in [Private smoke and recovery](deployment-runbook.md#private-smoke-and-recovery).
+2. `database` readiness 0 with `gateway` and `kafka` at 1 isolates PostgreSQL. Lifecycle gRPC
+   calls end `UNAVAILABLE`, and publication is deferred.
+3. Check the `qa-postgres-policy` cluster in `qa-data`, the NetworkPolicy path to its Pods on
+   port 5432, and the writer Secret `qa-postgres-policy-writer-creds` and its CA:
+
+   ```sh
+   kubectl --context qa-insurance-hub -n qa-data get cluster.postgresql.cnpg.io qa-postgres-policy \
+     -o jsonpath='{.status.phase} {.status.currentPrimary}{"\n"}'
+   ```
+
+   For credential, TLS or grant causes, run the read-only `resource-inspect` and migration
+   `status` with QA coordinates as described in
+   [PostgreSQL storage](deployment-runbook.md#postgresql-storage).
+4. Confirm `database` readiness returns to 1, `/readyz` returns `200 ready` and pending outbox
+   intents drain.
+
+#### Delayed outbox publication
 
 The producer sends committed intents in order. It holds a row lock through broker acknowledgement
 and then sets `published_at`; a policy's later intent waits while an earlier one is pending.
@@ -190,10 +334,10 @@ kubectl --context qa-insurance-hub -n qa-data exec "$primary" -c postgres -- \
 ```
 
 An empty result means nothing is pending: publication is not delayed. If consumers still miss
-events, continue with the next case. Never update, delete or reinsert outbox rows to force
-publication.
+events, continue with the next case. Recovery is complete when the query returns no rows and
+`success` publications resume. Never update, delete or reinsert outbox rows to force publication.
 
-### Consumer stalled on an acknowledged record
+#### Consumer stalled on an acknowledged record
 
 This walkthrough uses a documented example, not live values:
 
@@ -204,9 +348,8 @@ This walkthrough uses a documented example, not live values:
 | Partition | `0` |
 | Stalled offset | `42` |
 
-**Symptom.** `DashboardEventStalled` fires: the Dashboard worker is enabled and its in-flight age
-keeps rising. Policy shows `success` publications for `policy-registered` and the outbox query
-returns no pending row for that topic.
+**Symptom.** Consumers report missing registrations, while Policy shows `success` publications for
+`policy-registered` and the outbox query returns no pending row for that topic.
 
 **Read the group position.** Describe only the affected group. Use the broker-local plain
 listener from inside a broker Pod:
@@ -225,12 +368,11 @@ In the example, partition `0` reports `CURRENT-OFFSET 42` on repeated reads whil
 problem is in the consumer. A publisher retry would act on the wrong boundary: it could only
 append a duplicate after offset 42, and the group would stay at 42.
 
-**Identify the failure without reading the payload.** Find the Dashboard failure log for that
-period and follow its `trace_id` into Tempo. The persisted trace context links it to the Policy
-command that produced the event. Dashboard skips malformed envelopes. It stops the fetched batch
-without committing when a record decodes but cannot be processed, for example an envelope without
-a policy or a projection write failure. Rule out transient causes first: the Elasticsearch outcome
-panels in the Dashboard runbook show whether the write path is failing for every record.
+**Identify the record without reading the payload.** Find the consumer's failure log for that
+period and follow its `trace_id` into Tempo. Policy forwards its persisted trace context as Kafka
+headers, so the trace links back to the Policy command that produced the event. Rule out a
+consumer-wide outage first: a group that fails on every record has a dependency problem, not a
+single blocking record.
 
 **Check the batch encoding.** Policy sends record batches uncompressed, so every consumer can
 decode them without native compression libraries. Confirm the stalled batch reports
@@ -251,10 +393,10 @@ evidence. It reads only batch headers; do not add `--print-data-log`. A codec ot
 points to a different producer on the shared topic, not to this record's content.
 
 **Effect of skipping the record.** Offsets belong to each group. Advancing `dashboard-service`
-past offset 42 makes Dashboard permanently miss that one registration: its projection undercounts
-that policy until a separately authorized correction. Other groups on `policy-registered` keep
-their own offsets and still receive it. Policy will not send it again, because its intent is
-already marked published.
+past offset 42 makes that group permanently miss one registration: its projection undercounts that
+policy until a separately authorized correction. Other groups on `policy-registered` keep their own
+offsets and still receive it. Policy will not send it again, because its intent is already marked
+published.
 
 **Authorization.** The QA Kafka TLS listener on port 9093 and the broker-local plain listener
 have no client authentication or ACLs. A successful broker connection therefore shows neither
@@ -264,10 +406,9 @@ authorization from the owner of group `dashboard-service` for exactly that group
 and target offset. That authorization does not extend to any other group, partition or shared
 topic. During qualification and routine investigation, leave live offsets and topics unchanged.
 
-**Scoped advancement (owner-authorized only).** Disable the Dashboard worker through a reviewed
-`EVENT_WORKERS_ENABLED=false` change reconciled by Flux, and confirm the group has no active
-members. Preview, then apply only the named partition. The dry run must list exactly one row,
-`policy-registered 0 43`:
+**Scoped advancement (owner-authorized only).** The group owner stops its consumers through a
+reviewed change, and the group must report no active members. Preview, then apply only the named
+partition. The dry run must list exactly one row, `policy-registered 0 43`:
 
 ```sh
 kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- \
@@ -275,13 +416,12 @@ kubectl --context qa-insurance-hub -n qa-data exec "$kafka_pod" -c kafka -- \
   --group dashboard-service --topic policy-registered:0 --reset-offsets --to-offset 43 --dry-run
 ```
 
-Replace `--dry-run` with `--execute` once, then re-enable the worker through a reviewed change.
-Record the skipped group, topic, partition, offset and trace ID as evidence.
+Replace `--dry-run` with `--execute` once, then the owner restarts its consumers through a
+reviewed change. Record the skipped group, topic, partition, offset and trace ID as evidence.
 
 **Recovery check.** Describe the group again over several minutes. `CURRENT-OFFSET` for partition
-`0` must move past 43 and `LAG` must fall toward zero. Dashboard in-flight age must return to zero,
-`DashboardEventStalled` must clear and Dashboard registration outcomes must show completions
-again. Policy's publication signals should be unchanged throughout.
+`0` must move past 43 and `LAG` must fall toward zero as the group catches up. Policy's publication
+signals should be unchanged throughout.
 
 ### Alert responses
 
@@ -289,30 +429,51 @@ again. Policy's publication signals should be unchanged throughout.
 | --- | --- |
 | `PolicyServiceErrorRate` | Split by operation and route, open a failed trace, then check upstream RPC and the three readiness gauges. |
 | `PolicyHighLatency` | Compare request p95 with upstream RPC p95 per method and open a slow trace. |
-| `PolicyUpstreamRPCFailure` | The failed provider RPC case. |
-| `PolicyDatabaseNotReady` | The database readiness case; expect deferred publication until it recovers. |
-| `PolicyKafkaNotReady`, `PolicyEventPublicationFailure` | The delayed outbox publication case, broker loss branch. |
-| `PolicyUnavailable`, `PolicyUnexpectedRestart` | The release/Pod mismatch case, then prior container state, Pod events and safe logs. |
+| `PolicyUpstreamRPCFailure` | [Failed provider RPC](#failed-provider-rpc). |
+| `PolicyDatabaseNotReady` | [Database readiness loss](#database-readiness-loss); expect deferred publication until it recovers. |
+| `PolicyKafkaNotReady`, `PolicyEventPublicationFailure` | [Delayed outbox publication](#delayed-outbox-publication), broker loss branch. |
+| `PolicyUnavailable`, `PolicyUnexpectedRestart` | [Release/Pod mismatch](#releasepod-mismatch), then prior container state, Pod events and safe logs. |
 | `PolicyResourcePressure` | Request and publication load, Go runtime memory, CPU throttling and the 200m/128Mi limits. |
-| `PolicyTelemetryMissing` | Effective `OTEL_*` and `SERVICE_VERSION` in the Policy ConfigMap, the Pod identity, egress to Alloy and **Telemetry delivery health**. |
+| `PolicyTelemetryMissing` | Effective `OTEL_*` and `SERVICE_VERSION` in `qa-policy-config`, the Pod identity, egress to Alloy and **Telemetry delivery health**. |
 | `PolicyTelemetryDeliveryFailure`, `PolicyTelemetryBacklog` | Isolate Loki, remote write or OTLP export in the shared Alloy pipeline; Policy keeps serving. |
 
 Do not change thresholds or windows to hide missing or firing data.
 
 ## Recovery, rollback and cleanup
 
-If a source, runtime or network mismatch appears, stop and use the Policy
+If a source, runtime or network mismatch appears, stop and use the
 [deployment recovery procedure](deployment-runbook.md#private-smoke-and-recovery) before
-classifying an application defect. Restore prior monitoring assets, or remove a first installation,
-through the UID-guarded steps of the
-[Dashboard recovery procedure](../dashboard-service/observability-runbook.md#recovery-rollback-and-cleanup)
-with the Policy object names, followed by the reviewed repository revert. Delete only
-`prometheusrule/qa-policy-service` and `configmap/qa-policy-dashboard` in `qa-monitoring`, and
-only with separate authorization.
+classifying an application defect.
 
-Do not delete the Grafana or Prometheus releases, PVCs, the Policy workload, PostgreSQL or Kafka
-resources, outbox rows, consumer groups or topics from this runbook. Stop a foreground UI or
-port-forward with Ctrl+C and confirm the owning command removed its local process.
+To restore prior monitoring assets, first verify that the captured UIDs still identify the two
+objects:
+
+```sh
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  prometheusrule/qa-policy-service -o jsonpath='{.metadata.uid}')" \
+  = "$(jq -r '.metadata.uid' "$MONITORING_EVIDENCE_DIR/prior-rule.json")"
+test "$(kubectl --context qa-insurance-hub -n qa-monitoring get \
+  configmap/qa-policy-dashboard -o jsonpath='{.metadata.uid}')" \
+  = "$(jq -r '.metadata.uid' "$MONITORING_EVIDENCE_DIR/prior-dashboard.json")"
+```
+
+Check out the captured accepted revision in an isolated checkout, rerun its asset validation and
+apply only those two objects through the same guarded Make targets. Read them back, rebuild their
+source payloads with the `jq` filter from the preflight, and compare them with
+`prior-rule-source.json` and `prior-dashboard-source.json` using `cmp`. Follow the live restore
+with the reviewed repository revert.
+
+For a first installation that must be removed, separately authorize deletion of only:
+
+```sh
+kubectl --context qa-insurance-hub -n qa-monitoring delete prometheusrule/qa-policy-service
+kubectl --context qa-insurance-hub -n qa-monitoring delete configmap/qa-policy-dashboard
+```
+
+Verify exact absence and the continued health of shared monitoring. Do not delete the Grafana or
+Prometheus releases, PVCs, the Policy workload, PostgreSQL or Kafka resources, outbox rows,
+consumer groups or topics from this runbook. Stop a foreground UI or port-forward with Ctrl+C and
+confirm the owning command removed its local process.
 
 ## Evidence checklist
 
@@ -321,7 +482,6 @@ Retain the following without credentials, policy keys, payloads or business data
 - the reviewed monitoring source revision and the Policy image, digest and Pod image ID;
 - rendered object hashes, server dry-run, apply and read-back results and object UIDs;
 - bounded query results, alert firing and recovery times and the case followed;
-- the peer reference consulted first and the Policy check that followed it;
 - for a stalled consumer, the group, topic, partition, offsets before and after, owner
   authorization and the recovery observations;
 - owned cleanup and the final accepted state.
