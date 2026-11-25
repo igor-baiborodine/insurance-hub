@@ -222,8 +222,10 @@ func TestDecode_PreservesOptionalDatesAndRejectsInvalidDate(t *testing.T) {
 	if err != nil || got.From != nil || got.To == nil || got.To.String() != "2026-06-30" {
 		t.Fatalf("decoded event = %+v, error = %v", got, err)
 	}
-	if _, err := decode([]byte(`{"policy":{"from":"06/30/2026"}}`)); err == nil {
-		t.Fatal("invalid date accepted")
+	for _, value := range []string{`"06/30/2026"`, `[2026,1]`, `[0,1,1]`, `[2026,13,1]`, `{}`} {
+		if _, err := decode([]byte(`{"policy":{"from":` + value + `}}`)); err == nil {
+			t.Fatalf("invalid date %s accepted", value)
+		}
 	}
 }
 

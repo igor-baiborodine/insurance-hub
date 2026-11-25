@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -319,10 +320,10 @@ type envelope struct {
 }
 
 type policy struct {
-	Number       string  `json:"number"`
-	From         *string `json:"from"`
-	To           *string `json:"to"`
-	PolicyHolder string  `json:"policyHolder"`
+	Number       string          `json:"number"`
+	From         json.RawMessage `json:"from"`
+	To           json.RawMessage `json:"to"`
+	PolicyHolder string          `json:"policyHolder"`
 }
 
 func decode(value []byte) (application.PolicyEvent, error) {
@@ -349,11 +350,29 @@ func decode(value []byte) (application.PolicyEvent, error) {
 	}, nil
 }
 
-func parseDate(value *string) (*domain.Date, error) {
-	if value == nil {
+func parseDate(value json.RawMessage) (*domain.Date, error) {
+	trimmed := bytes.TrimSpace(value)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
 	}
-	date, err := domain.ParseDate(*value)
+	var text string
+	if trimmed[0] == '"' {
+		if err := json.Unmarshal(trimmed, &text); err != nil {
+			return nil, errors.New("decode policy event: invalid date")
+		}
+	} else {
+		var components []int
+		if err := json.Unmarshal(
+			trimmed,
+			&components,
+		); err != nil || len(components) != 3 ||
+			components[0] < 1 ||
+			components[0] > 9999 {
+			return nil, errors.New("decode policy event: invalid date")
+		}
+		text = fmt.Sprintf("%04d-%02d-%02d", components[0], components[1], components[2])
+	}
+	date, err := domain.ParseDate(text)
 	if err != nil {
 		return nil, errors.New("decode policy event: invalid date")
 	}
