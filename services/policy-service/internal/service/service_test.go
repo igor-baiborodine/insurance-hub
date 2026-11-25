@@ -1271,6 +1271,14 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	var available atomic.Bool
 	available.Store(true)
 	deps := testDependencies()
+	reader := sdkmetric.NewManualReader()
+	provider := &recordingProvider{
+		tracerProvider: sdktrace.NewTracerProvider(),
+		meterProvider:  sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+	}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
 	var opened postgres.PoolSettings
 	deps.openPool = func(_ context.Context, settings postgres.PoolSettings) (databasePool, error) {
 		opened = settings
@@ -1303,6 +1311,7 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	health := "http://" + receiveString(t, addresses)
 	client := &http.Client{Timeout: time.Second}
 	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
 
 	// when
 	available.Store(false)
@@ -1310,6 +1319,15 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	// then
 	waitForHTTPStatus(t, client, health+"/readyz", http.StatusServiceUnavailable)
 	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+	if got := dependencyReadiness(t, reader); got["gateway"] != 1 || got["database"] != 0 {
+		t.Errorf("dependency readiness during loss = %v", got)
+	}
+	available.Store(true)
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+	if got := dependencyReadiness(t, reader); got["database"] != 1 {
+		t.Errorf("dependency readiness after recovery = %v", got)
+	}
 	if opened.MaxConnections != settings.Database.MaxConnections ||
 		opened.URL != settings.Database.URL.Value() {
 		t.Fatalf("pool opened with unexpected settings")
@@ -1321,6 +1339,31 @@ func TestRun_DatabaseJoinsReadinessButNotLiveness(t *testing.T) {
 	if !pool.closed.Load() {
 		t.Fatal("database pool was not closed during shutdown")
 	}
+}
+
+// dependencyReadiness returns the latest readiness value of each recorded dependency.
+func dependencyReadiness(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
+	t.Helper()
+	var metrics metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &metrics); err != nil {
+		t.Fatal(err)
+	}
+	readiness := map[string]int64{}
+	for _, scope := range metrics.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			gauge, ok := recorded.Data.(metricdata.Gauge[int64])
+			if recorded.Name != "insurance_hub.policy.dependency.ready" || !ok {
+				continue
+			}
+			for _, point := range gauge.DataPoints {
+				dependency, _ := point.Attributes.Value(
+					"insurance_hub.policy.dependency",
+				)
+				readiness[dependency.AsString()] = point.Value
+			}
+		}
+	}
+	return readiness
 }
 
 func TestRun_EventPublisherJoinsReadinessAndBoundedShutdown(t *testing.T) {
@@ -1338,6 +1381,14 @@ func TestRun_EventPublisherJoinsReadinessAndBoundedShutdown(t *testing.T) {
 	pool := &fakePool{}
 	publisher := newFakeEventPublisher()
 	deps := testDependencies()
+	reader := sdkmetric.NewManualReader()
+	provider := &recordingProvider{
+		tracerProvider: sdktrace.NewTracerProvider(),
+		meterProvider:  sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+	}
+	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
+		return provider, nil
+	}
 	deps.openPool = func(context.Context, postgres.PoolSettings) (databasePool, error) {
 		return pool, nil
 	}
@@ -1386,8 +1437,14 @@ func TestRun_EventPublisherJoinsReadinessAndBoundedShutdown(t *testing.T) {
 	// then
 	waitForHTTPStatus(t, client, health+"/readyz", http.StatusServiceUnavailable)
 	waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+	if got := dependencyReadiness(t, reader); got["database"] != 1 || got["kafka"] != 0 {
+		t.Errorf("dependency readiness during Kafka loss = %v", got)
+	}
 	publisher.available.Store(true)
 	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	if got := dependencyReadiness(t, reader); got["kafka"] != 1 {
+		t.Errorf("dependency readiness after Kafka recovery = %v", got)
+	}
 	cancel()
 	if err := receiveError(t, result, "service did not stop"); err != nil {
 		t.Fatal(err)
