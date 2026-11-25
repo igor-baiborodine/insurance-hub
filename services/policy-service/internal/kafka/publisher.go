@@ -85,6 +85,8 @@ func NewPublisher(
 		kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}),
 		kgo.RecordPartitioner(kgo.StickyKeyPartitioner(nil)),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		// Uncompressed batches stay readable by consumers without native codec libraries.
+		kgo.ProducerBatchCompression(kgo.NoCompression()),
 	)
 	if err != nil {
 		return nil, errors.New("configure Policy event publisher: create Kafka client")
