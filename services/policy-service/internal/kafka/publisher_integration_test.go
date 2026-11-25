@@ -139,6 +139,9 @@ func TestRun_PolicyEventPublisherRecovery(t *testing.T) {
 	}
 	waitForReady(t, ctx, recoveryPublisher)
 	recovered := receiveThroughTermination(t, consumer, 30*time.Second)
+	// The broker acknowledges before the outbox transaction commits its marker; stopping the
+	// publisher earlier would correctly leave the intent pending for another attempt.
+	waitForNoPending(t, ctx, database, 10*time.Second)
 	recoveryRunCancel()
 	if err := <-recoveryResult; err != nil {
 		t.Fatal(err)
@@ -420,6 +423,22 @@ func pendingCount(t *testing.T, ctx context.Context, fixture *postgresfixture.Fi
 		t.Fatal(err)
 	}
 	return count
+}
+
+func waitForNoPending(
+	t *testing.T,
+	ctx context.Context,
+	fixture *postgresfixture.Fixture,
+	timeout time.Duration,
+) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for pendingCount(t, ctx, fixture) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("pending after recovery = %d", pendingCount(t, ctx, fixture))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func header(record *kgo.Record, name string) string {
