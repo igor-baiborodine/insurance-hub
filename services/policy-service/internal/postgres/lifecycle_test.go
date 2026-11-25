@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 )
@@ -53,6 +56,62 @@ func TestOutboxIntent_EncodesTheKeyedPolicyEnvelope(t *testing.T) {
 			err,
 			want,
 		)
+	}
+}
+
+func TestOutboxIntent_BoundsTraceState(t *testing.T) {
+	// given
+	member := func(key string) string { return key + "=" + strings.Repeat("v", 250) }
+	traceID := trace.TraceID{1}
+	spanID := trace.SpanID{2}
+	wantParent := "00-01000000000000000000000000000000-0200000000000000-01"
+	cases := []struct {
+		name      string
+		state     string
+		wantState string
+	}{
+		{name: "short state is kept", state: "vendor=value", wantState: "vendor=value"},
+		{
+			name:      "oversized state is dropped",
+			state:     member("a") + "," + member("b") + "," + member("c"),
+			wantState: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// given
+			state, err := trace.ParseTraceState(tc.state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := trace.ContextWithRemoteSpanContext(
+				context.Background(),
+				trace.NewSpanContext(trace.SpanContextConfig{
+					TraceID: traceID, SpanID: spanID,
+					TraceFlags: trace.FlagsSampled, TraceState: state,
+				}),
+			)
+
+			// when
+			intent, err := outboxIntent(ctx, domain.PolicyEvent{
+				Topic:        "policy-registered",
+				PolicyNumber: "policy-1",
+				TotalPremium: "1.00",
+			})
+
+			// then
+			if err != nil || intent.TraceParent != wantParent ||
+				intent.TraceState != tc.wantState {
+				t.Errorf(
+					"trace = %q / %d-byte state (%v), want %q / %q",
+					intent.TraceParent,
+					len(intent.TraceState),
+					err,
+					wantParent,
+					tc.wantState,
+				)
+			}
+		})
 	}
 }
 

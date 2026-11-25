@@ -160,15 +160,23 @@ func outboxIntent(ctx context.Context, event domain.PolicyEvent) (Intent, error)
 	}
 	carrier := propagation.MapCarrier{}
 	propagation.TraceContext{}.Inject(ctx, carrier)
+	traceState := carrier.Get("tracestate")
+	if len(traceState) > maxTraceStateLength {
+		traceState = ""
+	}
 	return Intent{
 		ID:          event.IntentID,
 		Topic:       event.Topic,
 		Key:         event.PolicyNumber,
 		Payload:     payload,
 		TraceParent: carrier.Get("traceparent"),
-		TraceState:  carrier.Get("tracestate"),
+		TraceState:  traceState,
 	}, nil
 }
+
+// maxTraceStateLength is the stored trace_state bound. W3C Trace Context allows dropping a longer
+// tracestate, so an oversized caller header never fails the policy mutation.
+const maxTraceStateLength = 512
 
 func dateArray(value time.Time) [3]int {
 	return [3]int{value.Year(), int(value.Month()), value.Day()}

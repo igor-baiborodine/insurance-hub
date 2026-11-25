@@ -388,8 +388,9 @@ The producer sends pending intents only after their aggregate transaction commit
 per-row database lock through broker acknowledgement, marks `published_at` afterward, and excludes
 a policy's later intent while any earlier one is pending. A lost acknowledgement can therefore
 repeat the same keyed payload, but cannot make termination overtake registration. Only persisted
-W3C `traceparent` and `tracestate` fields become Kafka headers; diagnostics and bounded telemetry
-never include the policy key or payload.
+W3C `traceparent` and `tracestate` fields become Kafka headers. A `tracestate` longer than 512
+characters is dropped rather than failing the command. Diagnostics and bounded telemetry never
+include the policy key or payload.
 
 | Failure | gRPC status | Writes |
 | --- | --- | --- |
