@@ -592,7 +592,7 @@ class Target:
                     policy_spec(actual["spec"]) == desired["spec"],
                     "live Policy NetworkPolicy differs",
                 )
-        check_requested_route(self, items["Service"], required=require_deployment)
+        check_requested_route(self, required=require_deployment)
         for network_policy in self.json("get", "networkpolicies").get("items", []):
             if network_policy["metadata"]["name"] == self.deployment:
                 continue
@@ -709,7 +709,7 @@ def secret_and_image(target: Target, image: str) -> None:
     image_id(target, image)
 
 
-def check_requested_route(target: Target, desired: dict, *, required: bool) -> None:
+def check_requested_route(target: Target, *, required: bool = True) -> None:
     selected = []
     for service in target.json("get", "services").get("items", []):
         selector = service.get("spec", {}).get("selector") or {}
@@ -717,7 +717,7 @@ def check_requested_route(target: Target, desired: dict, *, required: bool) -> N
             selected.append(service)
     require(
         len(selected) in ({1} if required else {0, 1})
-        and all(service["metadata"]["name"] == desired["metadata"]["name"] for service in selected),
+        and all(service["metadata"]["name"] == target.deployment for service in selected),
         "Go Policy must have exactly its intended private HTTP Service",
     )
 

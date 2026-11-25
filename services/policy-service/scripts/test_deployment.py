@@ -470,6 +470,30 @@ def test_policy_http_requires_gateway_identity_and_ordinary_denial(
     assert probes[1] == ("policy-http-denied", [address], None)
 
 
+def test_requested_route_supports_shared_runner_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = policy.Target()
+    monkeypatch.setattr(
+        target,
+        "json",
+        lambda *_args, **_kwargs: {
+            "items": [
+                {
+                    "metadata": {"name": target.deployment},
+                    "spec": {"selector": dict(policy.SELECTOR)},
+                }
+            ]
+        },
+    )
+    target.template_labels = dict(policy.SELECTOR)
+
+    # when / then
+    policy.check_requested_route(target)
+
+
 def test_denial_probe_waits_for_network_policy_convergence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
