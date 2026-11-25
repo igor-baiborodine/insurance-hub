@@ -33,6 +33,9 @@ over private gRPC (see [Provider access](#provider-access)).
 | local-dev | `kind-local-dev-insurance-hub` | `local-dev-all` | Guarded direct deployment into Kind cluster `local-dev-insurance-hub` |
 | QA | `qa-insurance-hub` | `qa-svc` | `flux-system/qa-svc` reconciles `./k8s/overlays/qa/svc` from `flux-system/insurance-hub` on `main` |
 
+Use the companion [observability runbook](observability-runbook.md) for Policy monitoring assets,
+alerts and incident investigation, including delayed publication and stalled consumers.
+
 ## Candidate checks
 
 Run from the repository root with the pinned Python, Go, Docker, Kind and kubectl tools.
