@@ -36,13 +36,22 @@ following this procedure.
 
 ## Signal and decision boundary
 
-Policy exports bounded HTTP request outcome/duration signals, Go runtime signals, outbound provider
-RPC client signals for `product.v1.ProductService/GetProduct` and
-`pricing.v1.PricingService/CalculatePrice`, event publication outcome/duration by event type, and
-one readiness gauge per dependency: `insurance_hub_policy_dependency_ready` with
-`insurance_hub_policy_dependency` set to `gateway`, `database` or `kafka`. The dashboard adds Pod
-availability, resource and restart views and shared Alloy delivery health. Labels never contain
-policy keys, payloads, customer values, topics, groups, credentials or trace IDs.
+Policy exports these application metrics, all named `insurance_hub_policy_*` so the shared QA
+collector keeps them with their bounded dimensions:
+
+- request outcome and duration by operation and transport: `insurance_hub_policy_requests_total`
+  and `insurance_hub_policy_request_duration_seconds`;
+- provider call outcome and duration: `insurance_hub_policy_dependencies_total` and
+  `insurance_hub_policy_dependency_duration_seconds`, with `insurance_hub_policy_dependency` set to
+  `product` (operation `get_product`) or `pricing` (operation `calculate_price`);
+- event publication outcome and duration by event type: `insurance_hub_policy_events_total` and
+  `insurance_hub_policy_event_duration_seconds`;
+- one readiness gauge per dependency: `insurance_hub_policy_dependency_ready` with
+  `insurance_hub_policy_dependency` set to `gateway`, `database` or `kafka`.
+
+Go runtime signals complete the set. The dashboard adds Pod availability, resource and restart
+views and shared Alloy delivery health. Labels never contain policy keys, routes, payloads,
+customer values, topics, groups, credentials or trace IDs.
 
 The thresholds and windows in `k8s/observability/services/policy/acceptance.json` are operating
 limits, not production SLOs. Provider availability is not part of readiness: an unreachable
@@ -69,12 +78,16 @@ From the repository root, validate the exact candidate before any QA operation:
 ```sh
 make monitoring-assets-check ENV_NAME=qa SVC_NAME=policy
 make test-monitoring ENV_NAME=qa SVC_NAME=policy
+make -C k8s alloy-config-check
+make -C k8s test-observability-backends OBSERVABILITY_SERVICE_DOMAIN=policy
 ```
 
 The first command validates the typed inventory, the pinned chart render, Prometheus rule syntax
 and the rule fixtures. The second queries every dashboard expression against collected disposable
-data and requires healthy alerts to stay inactive. Neither applies QA resources or proves live
-signal delivery. The shared `verify-service-observability` target has no Policy probe; verify live
+data and requires healthy alerts to stay inactive. The third validates the reviewed shared Alloy
+configuration. The fourth sends real Policy request, provider call, event and readiness signals
+through that configuration into disposable backends and requires each series to arrive with its
+bounded dimensions. None of them applies QA resources or proves live signal delivery. The shared `verify-service-observability` target has no Policy probe; verify live
 Policy signals with the bounded queries in [Investigation workflow](#investigation-workflow).
 
 ## QA preflight and stop conditions
@@ -141,7 +154,57 @@ Stop before mutation when the context, namespace, source revision, object name o
 image identity or current asset source differs from the reviewed record. Also stop for missing
 Policy signals, unexplained firing alerts, a mutable Grafana provider or any operation that would
 alter shared monitoring releases, PVCs, Alloy, Prometheus, Loki, Tempo, PostgreSQL, Kafka or other
-monitoring assets.
+monitoring assets, except the separately authorized Alloy release below.
+
+The shared Alloy release decides which Policy metrics reach Prometheus. Check that the reviewed
+shared configuration is effective before provisioning the dashboard or rules:
+
+```sh
+test -f "$MONITORING_EVIDENCE_DIR/preflight.ok"
+helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-helm-status.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get deployment/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-deployment.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json"
+jq -er '.data["config.alloy"]' \
+  "$MONITORING_EVIDENCE_DIR/prior-alloy-configmap.json" \
+  > "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
+cmp k8s/overlays/qa/infra/alloy/config.alloy \
+  "$MONITORING_EVIDENCE_DIR/effective-alloy-before.alloy"
+```
+
+If `cmp` succeeds, the reviewed shared configuration is already effective and no Alloy rollout is
+needed. If it differs, stop this workflow. Retain a sanitized diff, review the entire
+shared-collector delta and obtain separate authorization for the Alloy release. Only that separate
+release may run:
+
+```sh
+make -C k8s alloy-install
+kubectl --context qa-insurance-hub -n qa-monitoring rollout status \
+  deployment/qa-alloy --timeout=10m
+make -C k8s alloy-status
+helm --kube-context qa-insurance-hub -n qa-monitoring status qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/applied-alloy-helm-status.json"
+kubectl --context qa-insurance-hub -n qa-monitoring get configmap/qa-alloy -o json \
+  > "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json"
+jq -er '.data["config.alloy"]' \
+  "$MONITORING_EVIDENCE_DIR/applied-alloy-configmap.json" \
+  > "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
+cmp k8s/overlays/qa/infra/alloy/config.alloy \
+  "$MONITORING_EVIDENCE_DIR/effective-alloy-after.alloy"
+```
+
+After an authorized Alloy rollout, require the Deployment to be ready and recheck the shared
+collector's existing routes, delivery counters and backend signals before continuing. Stop if any
+regress. Then confirm that the Policy application series arrive:
+
+```promql
+count by (__name__) ({service_name="policy-service",__name__=~"insurance_hub_policy_.*"})
+```
+
+Expect the request, provider call, event and readiness series once Policy has served traffic.
+Authorization to apply the dashboard and rules does not authorize the Alloy release.
 
 Render the exact objects, keep their hashes and ask the API server to admit them without
 persisting either:
@@ -218,15 +281,17 @@ min by (insurance_hub_policy_dependency) (insurance_hub_policy_dependency_ready{
 ```
 
 ```promql
-sum by (rpc_method, rpc_response_status_code) (rate(rpc_client_call_duration_seconds_count{
-  service_name="policy-service",deployment_environment_name="qa",
-  rpc_method=~"product.v1.ProductService/GetProduct|pricing.v1.PricingService/CalculatePrice"
-}[5m]))
+sum by (insurance_hub_policy_dependency, insurance_hub_policy_outcome) (
+  rate(insurance_hub_policy_dependencies_total{
+    service_name="policy-service",deployment_environment_name="qa",
+    insurance_hub_policy_dependency=~"product|pricing"
+  }[5m])
+)
 ```
 
 ```promql
-sum by (insurance_hub_policy_event_type, insurance_hub_policy_event_outcome) (
-  increase(insurance_hub_policy_event_publications_total{
+sum by (insurance_hub_policy_event_type, insurance_hub_policy_outcome) (
+  increase(insurance_hub_policy_events_total{
     service_name="policy-service",deployment_environment_name="qa"
   }[15m])
 )
@@ -256,7 +321,7 @@ disposable harnesses.
 | Case | First check | Distinguishing observation | Recovery check |
 | --- | --- | --- | --- |
 | Release/Pod mismatch | [Release/Pod mismatch](#releasepod-mismatch) | The running image, version or Pod differs from the Flux-applied release | Status and verification pass with the recorded digest; `PolicyUnavailable` clears |
-| Failed provider RPC | **Upstream RPC outcomes** by `rpc_method` and status | One provider method fails with transport codes while Policy readiness stays 1 | The failure ratio for that method returns below 5% and an offer completes |
+| Failed provider RPC | **Upstream RPC outcomes** by dependency and outcome | One provider ends `error` or `deadline_exceeded` while Policy readiness stays 1 | The failure ratio for that provider returns below 5% and an offer completes |
 | Database readiness loss | **Database readiness** and `/readyz` | `database` readiness is 0 while `gateway` stays 1; `kafka` is unchecked by that probe | `database` and `kafka` readiness are 1, `/readyz` returns `200 ready` and pending intents drain |
 | Delayed outbox publication | **Event publication outcomes** with both readiness gauges | Deferred warnings without `error` outcomes, or pending intents with both gauges at 1 | Pending intents return to zero and `success` publications resume |
 | Consumer stalled on an acknowledged record | Policy `success` publications and no pending intent | The committed offset is stationary while the log-end offset grows, and an active assigned member repeatedly fails at that offset | The committed offset moves past the record and lag falls |
@@ -278,12 +343,13 @@ disposable harnesses.
 
 #### Failed provider RPC
 
-1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by `rpc_method`
-   (`PolicyUpstreamRPCFailure`). The method names the provider: `GetProduct` is Product and
-   `CalculatePrice` is Pricing.
-2. Only `UNAVAILABLE`, `DEADLINE_EXCEEDED`, `INTERNAL` and `UNKNOWN` count as provider failures.
-   Business codes such as `NOT_FOUND` reflect the request. Policy readiness stays 1 because
-   providers are not part of readiness.
+1. Read **Upstream RPC outcomes** and **Upstream RPC latency percentiles** by
+   `insurance_hub_policy_dependency` (`PolicyUpstreamRPCFailure`): `product` is the Product
+   `GetProduct` call and `pricing` is the Pricing `CalculatePrice` call.
+2. Only the `error` outcome (`UNAVAILABLE`, `INTERNAL`, `UNKNOWN` and `DATA_LOSS`) and
+   `deadline_exceeded` count as provider failures. `invalid_request` covers business codes such
+   as `NOT_FOUND`, which reflect the request, and `cancelled` reflects the caller. Policy readiness
+   stays 1 because providers are not part of readiness.
 3. Check the provider Deployment and Policy's path to it:
 
    ```sh
@@ -293,10 +359,10 @@ disposable harnesses.
 
    Egress must reach gRPC port 9090 of the provider Pods, as described in
    [Provider access](deployment-runbook.md#provider-access). Rising latency up to
-   `PROVIDER_CALL_TIMEOUT` with `DEADLINE_EXCEEDED` points to a slow provider; `UNAVAILABLE` points
-   to an unavailable or unreachable one.
-4. After the provider is ready, confirm the failure ratio for that method returns below 5% and a
-   forwarded offer completes.
+   `PROVIDER_CALL_TIMEOUT` with `deadline_exceeded` points to a slow provider; `error` points to an
+   unavailable, unreachable or failing one.
+4. After the provider is ready, confirm the failure ratio for that provider returns below 5% and
+   a forwarded offer completes.
 
 #### Database readiness loss
 
@@ -358,8 +424,8 @@ and then sets `published_at`; a policy's later intent waits while an earlier one
 Separate the causes:
 
 - **Database loss.** `database` readiness is 0 and logs show `policy event publication deferred`,
-  without an increase in `insurance_hub_policy_event_publications_total` with
-  `insurance_hub_policy_event_outcome="error"`. Follow the database readiness case; publication
+  without an increase in `insurance_hub_policy_events_total` with
+  `insurance_hub_policy_outcome="error"`. Follow the database readiness case; publication
   resumes on its own after recovery.
 - **Broker loss.** `kafka` readiness is 0 (`PolicyKafkaNotReady`) or publications end `error`
   (`PolicyEventPublicationFailure`). Check broker availability, the bootstrap address
@@ -498,8 +564,8 @@ signals should be unchanged throughout.
 
 | Alert | First checks |
 | --- | --- |
-| `PolicyServiceErrorRate` | Split by operation and route, open a failed trace, then check upstream RPC and the three readiness gauges. |
-| `PolicyHighLatency` | Compare request p95 with upstream RPC p95 per method and open a slow trace. |
+| `PolicyServiceErrorRate` | Split by operation, open a failed trace, then check upstream RPC and the three readiness gauges. |
+| `PolicyHighLatency` | Compare request p95 with upstream RPC p95 per provider and open a slow trace. |
 | `PolicyUpstreamRPCFailure` | [Failed provider RPC](#failed-provider-rpc). |
 | `PolicyDatabaseNotReady` | [Database readiness loss](#database-readiness-loss); expect deferred publication until it recovers. |
 | `PolicyKafkaNotReady`, `PolicyEventPublicationFailure` | [Delayed outbox publication](#delayed-outbox-publication), broker loss branch. |
