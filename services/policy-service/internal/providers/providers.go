@@ -18,25 +18,39 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/domain"
 )
 
+// CallObserver records the outcome and duration of one provider call.
+type CallObserver interface {
+	ObserveCall(
+		ctx context.Context,
+		dependency string,
+		operation string,
+		elapsed time.Duration,
+		err error,
+	)
+}
+
 // ProductCatalog checks product existence through product.v1.ProductService/GetProduct.
 type ProductCatalog struct {
-	client  productv1.ProductServiceClient
-	timeout time.Duration
+	client   productv1.ProductServiceClient
+	timeout  time.Duration
+	observer CallObserver
 }
 
 // NewProductCatalog uses a borrowed connection; the caller owns closing it.
 func NewProductCatalog(
 	connection grpc.ClientConnInterface,
 	timeout time.Duration,
+	observer CallObserver,
 ) (*ProductCatalog, error) {
-	if connection == nil || timeout <= 0 {
+	if connection == nil || timeout <= 0 || observer == nil {
 		return nil, errors.New(
-			"create Product catalog: connection and timeout are required",
+			"create Product catalog: connection, timeout and observer are required",
 		)
 	}
 	return &ProductCatalog{
-		client:  productv1.NewProductServiceClient(connection),
-		timeout: timeout,
+		client:   productv1.NewProductServiceClient(connection),
+		timeout:  timeout,
+		observer: observer,
 	}, nil
 }
 
@@ -45,29 +59,34 @@ func NewProductCatalog(
 func (catalog *ProductCatalog) CheckProduct(ctx context.Context, code string) error {
 	callCtx, cancel := context.WithTimeout(ctx, catalog.timeout)
 	defer cancel()
+	started := time.Now()
 	_, err := catalog.client.GetProduct(callCtx, &productv1.GetProductRequest{Code: code})
+	catalog.observer.ObserveCall(ctx, "product", "get_product", time.Since(started), err)
 	return providerError("get product", err, codes.NotFound, application.ErrProductNotFound)
 }
 
 // PricingCalculator obtains quotes through pricing.v1.PricingService/CalculatePrice.
 type PricingCalculator struct {
-	client  pricingv1.PricingServiceClient
-	timeout time.Duration
+	client   pricingv1.PricingServiceClient
+	timeout  time.Duration
+	observer CallObserver
 }
 
 // NewPricingCalculator uses a borrowed connection; the caller owns closing it.
 func NewPricingCalculator(
 	connection grpc.ClientConnInterface,
 	timeout time.Duration,
+	observer CallObserver,
 ) (*PricingCalculator, error) {
-	if connection == nil || timeout <= 0 {
+	if connection == nil || timeout <= 0 || observer == nil {
 		return nil, errors.New(
-			"create Pricing calculator: connection and timeout are required",
+			"create Pricing calculator: connection, timeout and observer are required",
 		)
 	}
 	return &PricingCalculator{
-		client:  pricingv1.NewPricingServiceClient(connection),
-		timeout: timeout,
+		client:   pricingv1.NewPricingServiceClient(connection),
+		timeout:  timeout,
+		observer: observer,
 	}, nil
 }
 
@@ -92,6 +111,7 @@ func (calculator *PricingCalculator) CalculatePrice(
 	}
 	callCtx, cancel := context.WithTimeout(ctx, calculator.timeout)
 	defer cancel()
+	started := time.Now()
 	response, err := calculator.client.CalculatePrice(callCtx, &pricingv1.CalculatePriceRequest{
 		ProductCode:    request.ProductCode,
 		PolicyFrom:     request.PolicyFrom.Format(time.DateOnly),
@@ -99,6 +119,7 @@ func (calculator *PricingCalculator) CalculatePrice(
 		SelectedCovers: append([]string(nil), request.SelectedCovers...),
 		Answers:        answers,
 	})
+	calculator.observer.ObserveCall(ctx, "pricing", "calculate_price", time.Since(started), err)
 	if err := providerError(
 		"calculate price", err, codes.InvalidArgument, application.ErrQuoteRejected,
 	); err != nil {

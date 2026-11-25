@@ -289,7 +289,11 @@ func run(
 			return fail(fmt.Errorf("run service: %w", err))
 		}
 	}
-	createOffer, err := runtime.composeOffers(settings, provider, deps)
+	dependencyObserver, err := telemetry.NewDependencyObserver(provider.MeterProvider())
+	if err != nil {
+		return fail(err)
+	}
+	createOffer, err := runtime.composeOffers(settings, provider, dependencyObserver, deps)
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
@@ -354,10 +358,6 @@ func run(
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
-	}
-	dependencyObserver, err := telemetry.NewDependencyObserver(provider.MeterProvider())
-	if err != nil {
-		return fail(err)
 	}
 	// Readiness includes the database; liveness stays independent of it. Each evaluated
 	// dependency records its result so a withdrawal names the failing boundary.
@@ -562,6 +562,7 @@ func requireDeployedDependencies(settings config.Config) error {
 func (runtime *runningService) composeOffers(
 	settings config.Config,
 	provider telemetryProvider,
+	observer providers.CallObserver,
 	deps dependencies,
 ) (transport.CreateOffer, error) {
 	if deps.createOffer != nil {
@@ -582,13 +583,18 @@ func (runtime *runningService) composeOffers(
 		runtime.providers = append(runtime.providers, connection)
 		connections = append(connections, connection)
 	}
-	catalog, err := providers.NewProductCatalog(connections[0], settings.Providers.CallTimeout)
+	catalog, err := providers.NewProductCatalog(
+		connections[0],
+		settings.Providers.CallTimeout,
+		observer,
+	)
 	if err != nil {
 		return nil, err
 	}
 	calculator, err := providers.NewPricingCalculator(
 		connections[1],
 		settings.Providers.CallTimeout,
+		observer,
 	)
 	if err != nil {
 		return nil, err

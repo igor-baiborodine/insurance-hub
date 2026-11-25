@@ -32,14 +32,14 @@ func NewRequestObserver(
 	}
 	meter := provider.Meter("insurance-hub/service")
 	requests, err := meter.Int64Counter(
-		"insurance_hub.service.requests",
+		"insurance_hub.policy.requests",
 		metric.WithUnit("{request}"),
 	)
 	if err != nil {
 		return nil, errors.New("create request counter")
 	}
 	duration, err := meter.Float64Histogram(
-		"insurance_hub.service.request.duration",
+		"insurance_hub.policy.request.duration",
 		metric.WithUnit("s"),
 	)
 	if err != nil {
@@ -107,9 +107,9 @@ func (request *Request) Finish(ctx context.Context, status string) {
 	}
 	elapsed := time.Since(request.started)
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.policy.operation", request.operation),
+		attribute.String("insurance_hub.policy.transport", request.transport),
+		attribute.String("insurance_hub.policy.outcome", outcome),
 		attribute.String("rpc.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
@@ -148,14 +148,15 @@ func (request *Request) FinishHTTP(ctx context.Context, status int) {
 		outcome, level = "invalid_request", slog.LevelInfo
 	}
 	elapsed := time.Since(request.started)
+	// The route stays on the span; metric dimensions are limited to those the collector keeps.
 	attrs := []attribute.KeyValue{
-		attribute.String("insurance_hub.service.operation", request.operation),
-		attribute.String("insurance_hub.service.transport", request.transport),
-		attribute.String("insurance_hub.service.route", request.route),
-		attribute.String("insurance_hub.service.outcome", outcome),
+		attribute.String("insurance_hub.policy.operation", request.operation),
+		attribute.String("insurance_hub.policy.transport", request.transport),
+		attribute.String("insurance_hub.policy.outcome", outcome),
 		attribute.Int("http.response.status_code", status),
 	}
 	request.span.SetAttributes(attrs...)
+	request.span.SetAttributes(attribute.String("insurance_hub.policy.route", request.route))
 	if outcome != "success" {
 		request.span.SetAttributes(attribute.String("error.type", outcome))
 		request.span.SetStatus(codes.Error, "")

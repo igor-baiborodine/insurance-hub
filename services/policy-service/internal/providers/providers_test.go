@@ -29,7 +29,7 @@ func TestPricingCalculator_CalculatePrice_MapsAnswersAndExactAmounts(t *testing.
 		CoversPrices: map[string]string{"C1": "100.10", "C2": "23.35"},
 	}}
 	connection := startProviders(t, &fakeProduct{}, pricing)
-	calculator, err := providers.NewPricingCalculator(connection, time.Second)
+	calculator, err := providers.NewPricingCalculator(connection, time.Second, &fakeObserver{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,9 +90,11 @@ func TestProductCatalog_CheckProduct_MapsStatuses(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			// given
 			product := &fakeProduct{err: test.err}
+			observer := &fakeObserver{}
 			catalog, err := providers.NewProductCatalog(
 				startProviders(t, product, &fakePricing{}),
 				time.Second,
+				observer,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -106,6 +108,10 @@ func TestProductCatalog_CheckProduct_MapsStatuses(t *testing.T) {
 			if product.lastCode() != "TRI" {
 				t.Errorf("GetProduct code = %q, want TRI", product.lastCode())
 			}
+			observer.requireCall(
+				t,
+				"product get_product "+status.Code(test.err).String(),
+			)
 		})
 	}
 }
@@ -124,9 +130,11 @@ func TestPricingCalculator_CalculatePrice_MapsStatuses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
+			observer := &fakeObserver{}
 			calculator, err := providers.NewPricingCalculator(
 				startProviders(t, &fakeProduct{}, &fakePricing{err: test.err}),
 				time.Second,
+				observer,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -137,6 +145,10 @@ func TestPricingCalculator_CalculatePrice_MapsStatuses(t *testing.T) {
 
 			// then
 			requireMappedError(t, err, test.err, test.want)
+			observer.requireCall(
+				t,
+				"pricing calculate_price "+status.Code(test.err).String(),
+			)
 		})
 	}
 }
@@ -147,6 +159,7 @@ func TestProductCatalog_CheckProduct_BoundsCallByTimeout(t *testing.T) {
 	catalog, err := providers.NewProductCatalog(
 		startProviders(t, product, &fakePricing{}),
 		50*time.Millisecond,
+		&fakeObserver{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -172,6 +185,7 @@ func TestPricingCalculator_CalculatePrice_PropagatesCallerCancellation(t *testin
 	calculator, err := providers.NewPricingCalculator(
 		startProviders(t, &fakeProduct{}, pricing),
 		time.Minute,
+		&fakeObserver{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -194,15 +208,17 @@ func TestPricingCalculator_CalculatePrice_PropagatesCallerCancellation(t *testin
 
 func TestNewProviders_RejectMissingDependencies(t *testing.T) {
 	// when
-	_, productErr := providers.NewProductCatalog(nil, time.Second)
-	_, pricingErr := providers.NewPricingCalculator(&grpcgo.ClientConn{}, 0)
+	_, productErr := providers.NewProductCatalog(nil, time.Second, &fakeObserver{})
+	_, pricingErr := providers.NewPricingCalculator(&grpcgo.ClientConn{}, 0, &fakeObserver{})
+	_, observerErr := providers.NewProductCatalog(&grpcgo.ClientConn{}, time.Second, nil)
 
 	// then
-	if productErr == nil || pricingErr == nil {
+	if productErr == nil || pricingErr == nil || observerErr == nil {
 		t.Errorf(
-			"constructors accepted missing dependencies: %v, %v",
+			"constructors accepted missing dependencies: %v, %v, %v",
 			productErr,
 			pricingErr,
+			observerErr,
 		)
 	}
 }
@@ -367,5 +383,35 @@ func requireClosed(t *testing.T, signal <-chan struct{}, failure string) {
 	case <-signal:
 	case <-time.After(time.Second):
 		t.Fatal(failure)
+	}
+}
+
+// fakeObserver records each provider call as "dependency operation status".
+type fakeObserver struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (observer *fakeObserver) ObserveCall(
+	_ context.Context,
+	dependency string,
+	operation string,
+	_ time.Duration,
+	err error,
+) {
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	observer.calls = append(
+		observer.calls,
+		dependency+" "+operation+" "+status.Code(err).String(),
+	)
+}
+
+func (observer *fakeObserver) requireCall(t *testing.T, want string) {
+	t.Helper()
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if len(observer.calls) != 1 || observer.calls[0] != want {
+		t.Errorf("observed calls = %v, want [%s]", observer.calls, want)
 	}
 }

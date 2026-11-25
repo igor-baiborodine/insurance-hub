@@ -42,7 +42,7 @@ func newEventObserver(
 	}
 	meter := meterProvider.Meter("insurance-hub/service")
 	events, err := meter.Int64Counter(
-		"insurance_hub.policy.event.publications",
+		"insurance_hub.policy.events",
 		metric.WithUnit("{event}"),
 	)
 	if err != nil {
@@ -52,11 +52,11 @@ func newEventObserver(
 	for _, eventType := range []string{"registered", "terminated"} {
 		events.Add(context.Background(), 0, metric.WithAttributes(
 			attribute.String("insurance_hub.policy.event.type", eventType),
-			attribute.String("insurance_hub.policy.event.outcome", "error"),
+			attribute.String("insurance_hub.policy.outcome", "error"),
 		))
 	}
 	duration, err := meter.Float64Histogram(
-		"insurance_hub.policy.event.publication.duration",
+		"insurance_hub.policy.event.duration",
 		metric.WithUnit("s"),
 	)
 	if err != nil {
@@ -102,7 +102,7 @@ func (observation *EventObservation) Finish(
 	outcome = boundedPolicyEventOutcome(outcome)
 	attrs := []attribute.KeyValue{
 		attribute.String("insurance_hub.policy.event.type", observation.eventType),
-		attribute.String("insurance_hub.policy.event.outcome", outcome),
+		attribute.String("insurance_hub.policy.outcome", outcome),
 	}
 	if err != nil {
 		observation.span.SetStatus(codes.Error, "")

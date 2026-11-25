@@ -61,12 +61,12 @@ func TestEventObserver_StartsErrorSeriesAtZero(t *testing.T) {
 		got := map[string]int64{}
 		for _, scope := range metrics.ScopeMetrics {
 			for _, recorded := range scope.Metrics {
-				if recorded.Name != "insurance_hub.policy.event.publications" {
+				if recorded.Name != "insurance_hub.policy.events" {
 					continue
 				}
 				for _, point := range recorded.Data.(metricdata.Sum[int64]).DataPoints {
 					outcome, _ := point.Attributes.Value(
-						"insurance_hub.policy.event.outcome",
+						"insurance_hub.policy.outcome",
 					)
 					eventType, _ := point.Attributes.Value(
 						"insurance_hub.policy.event.type",
@@ -128,7 +128,7 @@ func TestEventObserver_RecordsFastPublicationInSubsecondBucket(t *testing.T) {
 	var bound float64
 	for _, scope := range metrics.ScopeMetrics {
 		for _, recorded := range scope.Metrics {
-			if recorded.Name != "insurance_hub.policy.event.publication.duration" {
+			if recorded.Name != "insurance_hub.policy.event.duration" {
 				continue
 			}
 			for _, point := range recorded.Data.(metricdata.Histogram[float64]).DataPoints {
