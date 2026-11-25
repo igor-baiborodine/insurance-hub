@@ -222,13 +222,42 @@ test -f "$MONITORING_EVIDENCE_DIR/alloy.ok" || echo "STOP: Alloy release failed"
 
 After an authorized Alloy rollout, recheck the shared collector's existing routes, delivery
 counters and backend signals before continuing. Stop if any regress. Rendering and provisioning
-below require `alloy.ok` in addition to `preflight.ok`. Then confirm that the Policy application series arrive:
+below require `alloy.ok` in addition to `preflight.ok`.
+
+Then confirm that the Policy application series arrive from the candidate Pod itself. Take
+`<service-version>` and `<pod-uid>` from the recorded running Policy `service.version` and Pod
+UID; the collector sets `service_instance_id` to the Pod UID. A series from another replica or
+version, such as an older Pod still serving during a rolling update, does not count.
+
+At startup, before any traffic, the candidate exports its readiness gauge and the zero baseline of
+failed event publications:
 
 ```promql
-count by (__name__) ({service_name="policy-service",__name__=~"insurance_hub_policy_.*"})
+count by (__name__, insurance_hub_policy_dependency, insurance_hub_policy_event_type,
+  insurance_hub_policy_outcome) ({__name__=~"insurance_hub_policy_(dependency_ready|events_total)",
+  service_name="policy-service", deployment_environment_name="qa",
+  service_version="<service-version>", service_instance_id="<pod-uid>"})
 ```
 
-Expect the request, provider call, event and readiness series once Policy has served traffic.
+Expect `dependency_ready` for `gateway`, `database` and `kafka`, and `events_total` with outcome
+`error` for `registered` and `terminated`. The successful `events_total` series and
+`event_duration_seconds` appear only after a real publication; an offer does not publish, so do
+not require them here.
+
+Run this query immediately before and again after the single approved offer smoke:
+
+```promql
+sum by (__name__, insurance_hub_policy_operation, insurance_hub_policy_dependency,
+  insurance_hub_policy_outcome) ({__name__=~"insurance_hub_policy_(requests_total|request_duration_seconds_count|dependencies_total|dependency_duration_seconds_count)",
+  service_name="policy-service", deployment_environment_name="qa",
+  service_version="<service-version>", service_instance_id="<pod-uid>"})
+```
+
+A series absent before the offer counts as zero. Expect each `create_offer` request series with
+outcome `success`, and each `product`/`get_product` and `pricing`/`calculate_price` dependency
+series with outcome `success`, to increase across the offer window. Stop when a series is missing,
+does not increase or appears only for another Pod.
+
 Authorization to apply the dashboard and rules does not authorize the Alloy release.
 
 Render the exact objects, keep their hashes and ask the API server to admit them without
