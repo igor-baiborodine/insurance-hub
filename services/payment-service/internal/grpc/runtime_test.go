@@ -22,9 +22,9 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
@@ -109,7 +109,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			reader := sdkmetric.NewManualReader()
 			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
-			log := logger.New(&logs, "go-service", 0)
+			log := logger.New(&logs, "payment-service", 0)
 			observer, err := telemetry.NewRequestObserver(log, provider)
 			if err != nil {
 				t.Fatal(err)
@@ -129,7 +129,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			// when
-			_, err = client.Echo(ctx, &scaffoldv1.EchoRequest{Message: test.message})
+			_, err = client.Echo(ctx, &paymentv1.EchoRequest{Message: test.message})
 			stop()
 			// then
 			if status.Code(err) != test.code {
@@ -162,7 +162,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			count := int64(0)
 			for _, scope := range result.ScopeMetrics {
 				for _, measurement := range scope.Metrics {
-					if measurement.Name != "insurance_hub.scaffold.requests" {
+					if measurement.Name != "insurance_hub.payment.requests" {
 						continue
 					}
 					for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
@@ -172,8 +172,8 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 							attrs[string(attr.Key)] = attr.Value.AsString()
 						}
 						if len(attrs) != 4 ||
-							attrs["insurance_hub.scaffold.operation"] != "echo" ||
-							attrs["insurance_hub.scaffold.outcome"] != test.outcome ||
+							attrs["insurance_hub.payment.operation"] != "echo" ||
+							attrs["insurance_hub.payment.outcome"] != test.outcome ||
 							attrs["rpc.response.status_code"] != test.status {
 							t.Errorf(
 								"unsafe or incorrect labels: %v",
@@ -205,7 +205,7 @@ func TestServer_PreservesShorterCallerDeadline(t *testing.T) {
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 	// when
-	_, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: "hello"})
+	_, err := client.Echo(ctx, &paymentv1.EchoRequest{Message: "hello"})
 	// then
 	if status.Code(err) != codes.DeadlineExceeded {
 		t.Fatalf("status=%v", err)
@@ -227,14 +227,14 @@ func runtimeClient(
 	echo transport.Echo,
 	logs *bytes.Buffer,
 	options ...grpcgo.DialOption,
-) (scaffoldv1.ExampleServiceClient, func()) {
+) (paymentv1.ExampleServiceClient, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	server, err := transport.NewServer(
-		logger.New(logs, "go-service", 0),
+		logger.New(logs, "payment-service", 0),
 		noop.NewTracerProvider(),
 		propagation.TraceContext{},
 		settings,
@@ -277,7 +277,7 @@ func runtimeClient(
 		}
 	}
 	t.Cleanup(stop)
-	return scaffoldv1.NewExampleServiceClient(connection), stop
+	return paymentv1.NewExampleServiceClient(connection), stop
 }
 
 type unsupportedCompressor struct{}

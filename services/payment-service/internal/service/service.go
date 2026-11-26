@@ -21,11 +21,11 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/gateway"
-	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
+	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 const gatewayConnectionIdleTimeout time.Duration = 0
@@ -68,7 +68,7 @@ type dependencies struct {
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
 	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(scaffoldv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
+	newGateway     func(paymentv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
 	newUnavailable func(gateway.Settings) (http.Handler, error)
 	newBusiness    func(http.Handler, config.Config) httpServer
 	newManagement  func(*health.State) httpServer
@@ -238,7 +238,7 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		scaffoldv1.NewExampleServiceClient(runtime.connection),
+		paymentv1.NewExampleServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {

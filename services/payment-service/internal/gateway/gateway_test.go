@@ -26,8 +26,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
@@ -549,10 +549,10 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	}
 	if !strings.Contains(combined, "POST /v1/example/echo") ||
 		!strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.scaffold.requests") {
+		!strings.Contains(combined, "insurance_hub.payment.requests") {
 		t.Errorf("missing bounded HTTP failure signals: %s", combined)
 	}
-	if strings.Contains(fmt.Sprint(metrics), "insurance_hub.scaffold.route") {
+	if strings.Contains(fmt.Sprint(metrics), "insurance_hub.payment.route") {
 		t.Errorf("route escaped into request metric labels: %v", metrics)
 	}
 }
@@ -603,14 +603,14 @@ func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
 		combined += span.Name() + fmt.Sprint(span.Attributes())
 	}
 	if !strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.scaffold.requests") {
+		!strings.Contains(combined, "insurance_hub.payment.requests") {
 		t.Errorf("missing drain-rejection telemetry: %s", combined)
 	}
 }
 
 func newTestHandler(
 	t *testing.T,
-	client scaffoldv1.ExampleServiceClient,
+	client paymentv1.ExampleServiceClient,
 	maxBody int,
 ) http.Handler {
 	return newTestHandlerWithSettings(t, client, maxBody, time.Second)
@@ -618,7 +618,7 @@ func newTestHandler(
 
 func newTestHandlerWithTimeout(
 	t *testing.T,
-	client scaffoldv1.ExampleServiceClient,
+	client paymentv1.ExampleServiceClient,
 	timeout time.Duration,
 ) http.Handler {
 	return newTestHandlerWithSettings(t, client, 4096, timeout)
@@ -626,7 +626,7 @@ func newTestHandlerWithTimeout(
 
 func newTestHandlerWithSettings(
 	t *testing.T,
-	client scaffoldv1.ExampleServiceClient,
+	client paymentv1.ExampleServiceClient,
 	maxBody int,
 	timeout time.Duration,
 ) http.Handler {
@@ -661,9 +661,9 @@ type fakeClient struct {
 
 func (client *fakeClient) Echo(
 	ctx context.Context,
-	request *scaffoldv1.EchoRequest,
+	request *paymentv1.EchoRequest,
 	options ...grpc.CallOption,
-) (*scaffoldv1.EchoResponse, error) {
+) (*paymentv1.EchoResponse, error) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	client.calls++
@@ -689,7 +689,7 @@ func (client *fakeClient) Echo(
 	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
-	return &scaffoldv1.EchoResponse{Message: request.GetMessage()}, nil
+	return &paymentv1.EchoResponse{Message: request.GetMessage()}, nil
 }
 
 func (client *fakeClient) callCount() int {

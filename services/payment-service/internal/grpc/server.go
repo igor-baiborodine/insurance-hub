@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 const internalMessage = "internal error"
@@ -72,7 +72,7 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&scaffoldv1.EchoRequest{}),
+		protovalidate.WithMessages(&paymentv1.EchoRequest{}),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -94,14 +94,14 @@ func NewServer(
 					otelgrpc.WithPropagators(propagator),
 					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == scaffoldv1.ExampleService_Echo_FullMethodName
+						return info.FullMethodName == paymentv1.ExampleService_Echo_FullMethodName
 					}),
 				),
 			},
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	scaffoldv1.RegisterExampleServiceServer(server, &exampleServer{
+	paymentv1.RegisterExampleServiceServer(server, &exampleServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
 		echo:           echo,
@@ -110,7 +110,7 @@ func NewServer(
 }
 
 type exampleServer struct {
-	scaffoldv1.UnimplementedExampleServiceServer
+	paymentv1.UnimplementedExampleServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
 	echo           Echo
@@ -118,8 +118,8 @@ type exampleServer struct {
 
 func (server *exampleServer) Echo(
 	ctx context.Context,
-	request *scaffoldv1.EchoRequest,
-) (*scaffoldv1.EchoResponse, error) {
+	request *paymentv1.EchoRequest,
+) (*paymentv1.EchoResponse, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
 	defer cancel()
 	message, err := server.echo(requestCtx, request.GetMessage())
@@ -137,11 +137,11 @@ func (server *exampleServer) Echo(
 			)
 		}
 		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", scaffoldv1.ExampleService_Echo_FullMethodName),
+			slog.String("rpc", paymentv1.ExampleService_Echo_FullMethodName),
 		)
 		return nil, status.Error(codes.Internal, internalMessage)
 	}
-	return &scaffoldv1.EchoResponse{Message: message}, nil
+	return &paymentv1.EchoResponse{Message: message}, nil
 }
 
 func validationInterceptor(
@@ -187,7 +187,7 @@ func (handler *requestStatsHandler) TagRPC(
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
 	if handler.observer != nil &&
-		info.FullMethodName == scaffoldv1.ExampleService_Echo_FullMethodName {
+		info.FullMethodName == paymentv1.ExampleService_Echo_FullMethodName {
 		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
 	}
 	return ctx

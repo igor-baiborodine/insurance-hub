@@ -14,13 +14,13 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
 	kitlogger "github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/logger"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/logger"
 )
 
 func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 	// given
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "go-service", slog.LevelInfo)
+	log := kitlogger.New(&output, "payment-service", slog.LevelInfo)
 
 	// when
 	log.DebugContext(context.Background(), "filtered")
@@ -32,7 +32,7 @@ func TestNew_WritesJSONWithServiceIdentityAndLevelFiltering(t *testing.T) {
 		t.Fatalf("entry count = %d, want 1", len(entries))
 	}
 	entry := entries[0]
-	if entry["service"] != "go-service" || entry["level"] != "INFO" ||
+	if entry["service"] != "payment-service" || entry["level"] != "INFO" ||
 		entry["msg"] != "started" || entry["component"] != "test" {
 		t.Errorf("unexpected log entry: %#v", entry)
 	}
@@ -54,7 +54,7 @@ func TestNew_AddsTraceCorrelationFromContext(t *testing.T) {
 	var output bytes.Buffer
 
 	// when
-	kitlogger.New(&output, "go-service", slog.LevelInfo).InfoContext(ctx, "correlated")
+	kitlogger.New(&output, "payment-service", slog.LevelInfo).InfoContext(ctx, "correlated")
 
 	// then
 	entries := decodeEntries(t, output.String())
@@ -70,7 +70,7 @@ func TestNew_RedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "go-service", slog.LevelDebug).With(
+	log := kitlogger.New(&output, "payment-service", slog.LevelDebug).With(
 		slog.String("accessToken", privateMarker),
 	)
 	levels := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
@@ -93,7 +93,7 @@ func TestNew_RedactsSensitiveAttributesAtEveryLevel(t *testing.T) {
 		t.Fatalf("entry count = %d, want %d", len(entries), len(levels))
 	}
 	for _, entry := range entries {
-		if entry["service"] != "go-service" || entry["accessToken"] != "[REDACTED]" ||
+		if entry["service"] != "payment-service" || entry["accessToken"] != "[REDACTED]" ||
 			entry["request_payload"] != "[REDACTED]" ||
 			entry["customerID"] != "[REDACTED]" {
 			t.Errorf("unexpected redacted entry: %#v", entry)
@@ -114,7 +114,7 @@ func TestNew_RedactsSensitiveKeysInsideAnyValues(t *testing.T) {
 		Safe        string           `json:"safe"`
 	}
 	var output bytes.Buffer
-	log := kitlogger.New(&output, "go-service", slog.LevelInfo).With(
+	log := kitlogger.New(&output, "payment-service", slog.LevelInfo).With(
 		slog.Any("bound_details", map[string]any{
 			"credential": privateMarker,
 			"safe":       "bound-safe",
@@ -215,7 +215,7 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 	var output bytes.Buffer
 	serviceIdentity := identity.Identity{
 		ServiceNamespace: "insurance-hub",
-		ServiceName:      "go-service",
+		ServiceName:      "payment-service",
 		ServiceVersion:   "git-123456789abc",
 		ServiceInstance:  "instance-123",
 		Environment:      "staging",
@@ -238,7 +238,7 @@ func TestNewIdentity_RedactsErrorsAndUsesUTC(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{
-		"service_namespace": "insurance-hub", "service_name": "go-service", "service_version": "git-123456789abc",
+		"service_namespace": "insurance-hub", "service_name": "payment-service", "service_version": "git-123456789abc",
 		"service_instance_id": "instance-123", "deployment_environment_name": "staging", "service_implementation": "go",
 		"error": "[REDACTED]", "msg": "request completed", "level": "INFO",
 	} {

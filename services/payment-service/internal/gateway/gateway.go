@@ -24,8 +24,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 const echoRoute = "POST /v1/example/echo"
@@ -40,7 +40,7 @@ type Settings struct {
 }
 
 // NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client scaffoldv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
+func NewHandler(client paymentv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
@@ -57,7 +57,7 @@ func NewHandler(client scaffoldv1.ExampleServiceClient, settings Settings) (http
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := scaffoldv1.RegisterExampleServiceHandlerClient(
+	if err := paymentv1.RegisterExampleServiceHandlerClient(
 		context.Background(),
 		mux,
 		client,

@@ -71,17 +71,17 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/scaffold/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/payment/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.4; readonly modules; runtime settings below.                                           |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/scaffold/v1/example_service.pb.go
-gen/scaffold/v1/example_service.pb.gw.go
-gen/scaffold/v1/example_service_grpc.pb.go
-gen/openapiv2/scaffold/v1/example_service.swagger.json
+gen/payment/v1/example_service.pb.go
+gen/payment/v1/example_service.pb.gw.go
+gen/payment/v1/example_service_grpc.pb.go
+gen/openapiv2/payment/v1/example_service.swagger.json
 ```
 
 ### Non-mutating validation targets
@@ -171,7 +171,7 @@ do not repeat its supplied value.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
-| `SERVICE_NAME` | `go-service` | Must equal the service's fixed logical name. |
+| `SERVICE_NAME` | `payment-service` | Must equal the service's fixed logical name. |
 | `HTTP_ADDR` | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests. |
 | `GRPC_ADDR` | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests. |
 | `HEALTH_ADDR` | `127.0.0.1:8081` | Valid host and numeric port; port `0` is available for tests. Nonzero listener addresses must be pairwise distinct. |
@@ -225,11 +225,11 @@ flush and shutdown use bounded contexts. Safe export diagnostics are rate-limite
 seconds; queue saturation has a separate safe warning. The executable installs the shared
 diagnostic handler before enabled providers and restores the previous handler after service exit.
 
-`insurance_hub.scaffold.requests` and `insurance_hub.scaffold.request.duration` separately record
+`insurance_hub.payment.requests` and `insurance_hub.payment.request.duration` separately record
 bounded HTTP and gRPC transport outcomes. Request instruments and their attributes use the
 `insurance_hub.<domain>.*` form with this module's telemetry domain. Metric labels are limited
-to `insurance_hub.scaffold.operation`, `insurance_hub.scaffold.transport`,
-`insurance_hub.scaffold.outcome` and the final HTTP or RPC status code. The HTTP route
+to `insurance_hub.payment.operation`, `insurance_hub.payment.transport`,
+`insurance_hub.payment.outcome` and the final HTTP or RPC status code. The HTTP route
 (`POST /v1/example/echo` or `unmatched`) is recorded on the span only; gRPC records the fixed Echo
 operation and final status. Request paths, queries, payloads, raw errors, headers and instance IDs
 are not metric labels. The same provider connects the HTTP server, gRPC client and gRPC server
@@ -278,7 +278,7 @@ reserved interval within the one overall deadline.
 
 ## Example RPC and HTTP gateway
 
-The generated `scaffold.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
+The generated `payment.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
 message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
 the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
 `InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
@@ -295,7 +295,7 @@ curl --fail-with-body \
 The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
 query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
 The generated Swagger 2.0 document is
-`gen/openapiv2/scaffold/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
+`gen/openapiv2/payment/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,
@@ -335,7 +335,7 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `internal/config` | Compose shared setting groups, load the environment and apply service identity and cross-setting policy. |
 | `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
-| `api/scaffold/v1`, `gen/scaffold/v1`, `gen/openapiv2/scaffold/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
+| `api/payment/v1`, `gen/payment/v1`, `gen/openapiv2/payment/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
 This component diagram shows source dependencies; construction and runtime dispatch are described
 below it.
@@ -352,7 +352,7 @@ flowchart TD
     composition --> telemetry["internal/telemetry"]
     composition --> config
     grpc --> telemetry
-    grpc --> generated["gen/scaffold/v1"]
+    grpc --> generated["gen/payment/v1"]
     gateway --> generated
     telemetry --> config
     telemetry --> logger["internal/logger"]

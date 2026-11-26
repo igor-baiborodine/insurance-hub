@@ -12,7 +12,7 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/telemetry"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
@@ -48,7 +48,7 @@ func TestRPCStatus_PreservesCanonicalNamesInLogsAndMetrics(t *testing.T) {
 			provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 			t.Cleanup(func() { _ = provider.Shutdown(context.Background()) })
 			observer, err := telemetry.NewRequestObserver(
-				logger.New(&output, "go-service", 0),
+				logger.New(&output, "payment-service", 0),
 				provider,
 			)
 			if err != nil {

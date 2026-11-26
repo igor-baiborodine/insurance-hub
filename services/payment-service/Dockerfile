@@ -18,7 +18,7 @@ COPY internal ./internal
 
 RUN GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -mod=readonly -trimpath -buildvcs=false \
-    -ldflags='-s -w -buildid=' -o /out/go-service ./cmd/server
+    -ldflags='-s -w -buildid=' -o /out/payment-service ./cmd/server
 
 FROM ${RUNTIME_IMAGE}
 
@@ -30,11 +30,11 @@ ARG SOURCE_VERSION
 LABEL org.opencontainers.image.created="${SOURCE_CREATED}" \
       org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
-      org.opencontainers.image.title="Insurance Hub Go Service API" \
+      org.opencontainers.image.title="Insurance Hub Payment API" \
       org.opencontainers.image.version="${SOURCE_VERSION}"
 
-COPY --from=build --chmod=0555 /out/go-service /go-service
+COPY --from=build --chmod=0555 /out/payment-service /payment-service
 
 USER 65532:65532
 EXPOSE 8080 8081 9090
-ENTRYPOINT ["/go-service"]
+ENTRYPOINT ["/payment-service"]

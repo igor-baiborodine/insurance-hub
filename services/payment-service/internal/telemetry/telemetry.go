@@ -8,7 +8,7 @@ import (
 	kittelemetry "github.com/igor-baiborodine/insurance-hub/libs/servicekit/telemetry"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 )
 
 var requestBuckets = []float64{
@@ -50,7 +50,7 @@ func New(ctx context.Context, serviceName string, settings config.Telemetry) (*P
 		RuntimeScope: "insurance-hub/service/runtime",
 		MetricViews: []sdkmetric.View{
 			kittelemetry.HistogramView(
-				"insurance_hub.scaffold.request.duration",
+				"insurance_hub.payment.request.duration",
 				requestBuckets,
 			),
 		},

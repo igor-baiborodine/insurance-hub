@@ -12,15 +12,15 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 )
 
 func TestNew_DisabledProviderAndW3CPropagation(t *testing.T) {
 	settings := config.Telemetry{
-		Identity:        config.DevelopmentIdentity("go-service").Identity,
+		Identity:        config.DevelopmentIdentity("payment-service").Identity,
 		ExporterTimeout: time.Second,
 	}
-	provider, err := New(context.Background(), "go-service", settings)
+	provider, err := New(context.Background(), "payment-service", settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,32 +69,32 @@ func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 		{"foreign service", func(s *config.Telemetry) {
 			s.Identity.ServiceName = "foreign-service-marker"
 		}, "foreign-service-marker", "foreign-service-marker"},
-		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "go-service", ""},
+		{"missing endpoint", func(s *config.Telemetry) { s.ExporterEndpoint = nil }, "payment-service", ""},
 		{"development environment", func(s *config.Telemetry) {
 			s.Identity.Environment = "development"
-		}, "go-service", "development"},
+		}, "payment-service", "development"},
 		{"development version", func(s *config.Telemetry) {
 			s.Identity.ServiceVersion = "development"
-		}, "go-service", "development"},
+		}, "payment-service", "development"},
 		{"local instance", func(s *config.Telemetry) {
 			s.Identity.ServiceInstance = "local-private-marker"
-		}, "go-service", "local-private-marker"},
+		}, "payment-service", "local-private-marker"},
 		{"wrong namespace", func(s *config.Telemetry) {
 			s.Identity.ServiceNamespace = "private-namespace-marker"
-		}, "go-service", "private-namespace-marker"},
+		}, "payment-service", "private-namespace-marker"},
 		{"wrong implementation", func(s *config.Telemetry) {
 			s.Identity.Implementation = "private-implementation-marker"
-		}, "go-service", "private-implementation-marker"},
+		}, "payment-service", "private-implementation-marker"},
 		{"noncanonical version", func(s *config.Telemetry) {
 			s.Identity.ServiceVersion = "sha-private-marker"
-		}, "go-service", "sha-private-marker"},
+		}, "payment-service", "sha-private-marker"},
 		{"zero version", func(s *config.Telemetry) {
 			s.Identity.ServiceVersion = "git-000000000000"
-		}, "go-service", "git-000000000000"},
+		}, "payment-service", "git-000000000000"},
 		{"invalid instance", func(s *config.Telemetry) {
 			s.Identity.ServiceInstance = "private-marker\n"
-		}, "go-service", "private-marker"},
-		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "go-service", ""},
+		}, "payment-service", "private-marker"},
+		{"zero exporter timeout", func(s *config.Telemetry) { s.ExporterTimeout = 0 }, "payment-service", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// given
@@ -123,7 +123,7 @@ func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
 func enabledIdentity() identity.Identity {
 	return identity.Identity{
 		ServiceNamespace: "insurance-hub",
-		ServiceName:      "go-service",
+		ServiceName:      "payment-service",
 		ServiceVersion:   "git-000000000001",
 		ServiceInstance:  "test-instance",
 		Environment:      "test",

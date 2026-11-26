@@ -26,23 +26,23 @@ import (
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	transport "github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/grpc"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
 )
 
 func TestExampleService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
-		wantFile       = "scaffold/v1/example_service.proto"
-		wantPackage    = "scaffold.v1"
-		wantModule     = "github.com/igor-baiborodine/insurance-hub/templates/go-service"
-		wantService    = "scaffold.v1.ExampleService"
-		wantFullMethod = "/scaffold.v1.ExampleService/Echo"
+		wantFile       = "payment/v1/example_service.proto"
+		wantPackage    = "payment.v1"
+		wantModule     = "github.com/igor-baiborodine/insurance-hub/services/payment-service"
+		wantService    = "payment.v1.ExampleService"
+		wantFullMethod = "/payment.v1.ExampleService/Echo"
 	)
-	wantGoPackage := wantModule + "/gen/scaffold/v1;scaffoldv1"
+	wantGoPackage := wantModule + "/gen/payment/v1;paymentv1"
 
 	// when
-	descriptor := (&scaffoldv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+	descriptor := (&paymentv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
 
 	// then
 	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
@@ -68,10 +68,10 @@ func TestExampleService_GeneratedIdentity(t *testing.T) {
 	if service == nil || string(service.FullName()) != wantService {
 		t.Errorf("service descriptor = %v, want %q", service, wantService)
 	}
-	if scaffoldv1.ExampleService_Echo_FullMethodName != wantFullMethod {
+	if paymentv1.ExampleService_Echo_FullMethodName != wantFullMethod {
 		t.Errorf(
 			"full method = %q, want %q",
-			scaffoldv1.ExampleService_Echo_FullMethodName,
+			paymentv1.ExampleService_Echo_FullMethodName,
 			wantFullMethod,
 		)
 	}
@@ -134,7 +134,7 @@ func TestExampleService_Echo_Boundaries(t *testing.T) {
 			// when
 			response, err := client.Echo(
 				ctx,
-				&scaffoldv1.EchoRequest{Message: test.message},
+				&paymentv1.EchoRequest{Message: test.message},
 			)
 
 			// then
@@ -168,7 +168,7 @@ func TestExampleService_Echo_Boundaries(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Echo: %v", err)
 			}
-			want := &scaffoldv1.EchoResponse{Message: test.message}
+			want := &paymentv1.EchoResponse{Message: test.message}
 			if !proto.Equal(response, want) {
 				t.Errorf("response = %v, want byte-identical message", response)
 			}
@@ -196,7 +196,7 @@ func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
 
 	// when
 	go func() {
-		_, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: "cancel"})
+		_, err := client.Echo(ctx, &paymentv1.EchoRequest{Message: "cancel"})
 		result <- err
 	}()
 
@@ -242,7 +242,7 @@ func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
 
 	// when
 	go func() {
-		_, err := client.Echo(ctx, &scaffoldv1.EchoRequest{Message: "deadline"})
+		_, err := client.Echo(ctx, &paymentv1.EchoRequest{Message: "deadline"})
 		result <- err
 	}()
 
@@ -298,7 +298,7 @@ func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
 			// when
 			response, err := client.Echo(
 				ctx,
-				&scaffoldv1.EchoRequest{Message: "handler context error"},
+				&paymentv1.EchoRequest{Message: "handler context error"},
 			)
 
 			// then
@@ -356,7 +356,7 @@ func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T)
 	parentSpanContext := parentSpan.SpanContext()
 
 	// when
-	response, err := client.Echo(parentCtx, &scaffoldv1.EchoRequest{Message: payloadMarker})
+	response, err := client.Echo(parentCtx, &paymentv1.EchoRequest{Message: payloadMarker})
 	parentSpan.End()
 
 	// then
@@ -387,7 +387,7 @@ func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T)
 		strings.Contains(logs.String(), privateMarker) {
 		t.Fatalf("logs expose request or error marker: %s", logs.String())
 	}
-	if !strings.Contains(logs.String(), `"service":"go-service"`) ||
+	if !strings.Contains(logs.String(), `"service":"payment-service"`) ||
 		!strings.Contains(
 			logs.String(),
 			`"trace_id":"`+serverSpanContext.TraceID().String()+`"`,
@@ -417,7 +417,7 @@ func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T)
 
 func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 	// given
-	log := logger.New(new(bytes.Buffer), "go-service", 0)
+	log := logger.New(new(bytes.Buffer), "payment-service", 0)
 	tracerProvider := noop.NewTracerProvider()
 	propagator := propagation.TraceContext{}
 	tests := []struct {
@@ -475,14 +475,14 @@ func newExampleClient(
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	logs *bytes.Buffer,
-) scaffoldv1.ExampleServiceClient {
+) paymentv1.ExampleServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	server, err := transport.NewServer(
-		logger.New(logs, "go-service", 0),
+		logger.New(logs, "payment-service", 0),
 		tracerProvider,
 		propagator,
 		defaultSettings(),
@@ -527,7 +527,7 @@ func newExampleClient(
 			t.Error("server did not stop")
 		}
 	})
-	return scaffoldv1.NewExampleServiceClient(connection)
+	return paymentv1.NewExampleServiceClient(connection)
 }
 
 func defaultSettings() transport.Settings {

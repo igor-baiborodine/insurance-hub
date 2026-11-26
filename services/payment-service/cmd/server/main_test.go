@@ -14,7 +14,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 )
 
 func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
@@ -51,7 +51,7 @@ func TestRun_LogsServiceIdentityWithoutInvalidConfigurationValue(t *testing.T) {
 	if decodeErr := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); decodeErr != nil {
 		t.Fatalf("decode startup log: %v", decodeErr)
 	}
-	if entry["service_name"] != "go-service" || entry["level"] != "ERROR" ||
+	if entry["service_name"] != "payment-service" || entry["level"] != "ERROR" ||
 		entry["msg"] != "configuration failed" {
 		t.Errorf("unexpected startup log: %#v", entry)
 	}
@@ -112,10 +112,10 @@ func TestRun_RestoresTelemetryDiagnosticsAfterServiceFailure(t *testing.T) {
 	previous := otel.GetErrorHandler()
 	cause := errors.New("service failed")
 	settings := config.Config{
-		ServiceName: "go-service",
+		ServiceName: "payment-service",
 		Telemetry: config.Telemetry{
 			Enabled:  true,
-			Identity: config.DevelopmentIdentity("go-service").Identity,
+			Identity: config.DevelopmentIdentity("payment-service").Identity,
 		},
 	}
 	load := func() (config.Config, error) { return settings, nil }

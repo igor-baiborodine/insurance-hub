@@ -12,8 +12,8 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 	kittelemetry "github.com/igor-baiborodine/insurance-hub/libs/servicekit/telemetry"
 
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/service"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/service"
 )
 
 func main() {

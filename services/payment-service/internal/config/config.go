@@ -10,7 +10,7 @@ import (
 )
 
 // DefaultServiceName identifies startup diagnostics until configuration has been validated.
-const DefaultServiceName = "go-service"
+const DefaultServiceName = "payment-service"
 
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"

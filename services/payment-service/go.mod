@@ -1,4 +1,4 @@
-module github.com/igor-baiborodine/insurance-hub/templates/go-service
+module github.com/igor-baiborodine/insurance-hub/services/payment-service
 
 go 1.27.4
 

@@ -22,10 +22,10 @@ formatters:
     - golines
   settings:
     gofumpt:
-      module-path: github.com/igor-baiborodine/insurance-hub/templates/go-service
+      module-path: github.com/igor-baiborodine/insurance-hub/services/payment-service
     goimports:
       local-prefixes:
-        - github.com/igor-baiborodine/insurance-hub/templates/go-service
+        - github.com/igor-baiborodine/insurance-hub/services/payment-service
     golines:
       max-len: 100
       tab-len: 8

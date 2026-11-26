@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: scaffold/v1/example_service.proto
+// source: payment/v1/example_service.proto
 
-package scaffoldv1
+package paymentv1
 
 import (
 	context "context"
@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ExampleService_Echo_FullMethodName = "/scaffold.v1.ExampleService/Echo"
+	ExampleService_Echo_FullMethodName = "/payment.v1.ExampleService/Echo"
 )
 
 // ExampleServiceClient is the client API for ExampleService service.
@@ -108,7 +108,7 @@ func _ExampleService_Echo_Handler(srv interface{}, ctx context.Context, dec func
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var ExampleService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "scaffold.v1.ExampleService",
+	ServiceName: "payment.v1.ExampleService",
 	HandlerType: (*ExampleServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -117,5 +117,5 @@ var ExampleService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "scaffold/v1/example_service.proto",
+	Metadata: "payment/v1/example_service.proto",
 }

@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-package scaffold.v1;
+package payment.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
-option go_package = "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1;scaffoldv1";
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1;paymentv1";
 
 service ExampleService {
   rpc Echo(EchoRequest) returns (EchoResponse) {
@@ -22,7 +22,7 @@ service ExampleService {
         value: {
           description: "The unchanged Echo message."
           schema: {
-            json_schema: {ref: ".scaffold.v1.EchoResponse"}
+            json_schema: {ref: ".payment.v1.EchoResponse"}
           }
           examples: {
             key: "application/json"

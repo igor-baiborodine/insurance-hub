@@ -33,9 +33,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	scaffoldv1 "github.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/config"
-	"github.com/igor-baiborodine/insurance-hub/templates/go-service/internal/gateway"
+	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
 )
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
@@ -132,24 +132,24 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close() }()
-	direct, err := scaffoldv1.NewExampleServiceClient(connection).Echo(
+	direct, err := paymentv1.NewExampleServiceClient(connection).Echo(
 		context.Background(),
-		&scaffoldv1.EchoRequest{Message: "direct"},
+		&paymentv1.EchoRequest{Message: "direct"},
 	)
 	// then
 	if err != nil || direct.GetMessage() != "direct" {
 		t.Fatalf("direct Echo = (%v, %v)", direct, err)
 	}
-	directMaximum, err := scaffoldv1.NewExampleServiceClient(connection).Echo(
+	directMaximum, err := paymentv1.NewExampleServiceClient(connection).Echo(
 		context.Background(),
-		&scaffoldv1.EchoRequest{Message: maximum},
+		&paymentv1.EchoRequest{Message: maximum},
 	)
 	if err != nil || directMaximum.GetMessage() != maximum {
 		t.Fatalf("direct maximum Echo = (%v, %v)", directMaximum, err)
 	}
-	_, err = scaffoldv1.NewExampleServiceClient(connection).Echo(
+	_, err = paymentv1.NewExampleServiceClient(connection).Echo(
 		context.Background(),
-		&scaffoldv1.EchoRequest{Message: maximum + "a"},
+		&paymentv1.EchoRequest{Message: maximum + "a"},
 	)
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("direct oversized status = %v, want invalid argument", status.Code(err))
@@ -235,7 +235,7 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close() }()
-	directClient := scaffoldv1.NewExampleServiceClient(connection)
+	directClient := paymentv1.NewExampleServiceClient(connection)
 	validMessages := make([]string, 0, 130)
 	for size := 1; size <= 128; size++ {
 		validMessages = append(validMessages, strings.Repeat("a", size))
@@ -246,7 +246,7 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 	for _, message := range validMessages {
 		response, callErr := directClient.Echo(
 			context.Background(),
-			&scaffoldv1.EchoRequest{Message: message},
+			&paymentv1.EchoRequest{Message: message},
 		)
 		// then
 		if callErr != nil || response.GetMessage() != message {
@@ -267,7 +267,7 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 	for _, message := range []string{strings.Repeat("a", 129), strings.Repeat("é", 64) + "a"} {
 		_, callErr := directClient.Echo(
 			context.Background(),
-			&scaffoldv1.EchoRequest{Message: message},
+			&paymentv1.EchoRequest{Message: message},
 		)
 		if status.Code(callErr) != codes.InvalidArgument {
 			t.Fatalf(
@@ -290,7 +290,7 @@ func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) 
 			`{"code":3,"message":"invalid request","details":[]}`,
 		)
 	}
-	_, err = directClient.Echo(context.Background(), &scaffoldv1.EchoRequest{})
+	_, err = directClient.Echo(context.Background(), &paymentv1.EchoRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("direct empty status = %v, want invalid argument", status.Code(err))
 	}
@@ -340,7 +340,7 @@ func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return connection, nil
 	}
-	deps.newGateway = func(scaffoldv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(paymentv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusNoContent)
 		}), nil
@@ -809,7 +809,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
 	if !strings.Contains(combined, "POST /v1/example/echo") ||
-		!strings.Contains(combined, "insurance_hub.scaffold.requests") {
+		!strings.Contains(combined, "insurance_hub.payment.requests") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
 }
@@ -951,7 +951,7 @@ func testConfig(t *testing.T) config.Config {
 			WriteTimeout: time.Second, IdleTimeout: time.Second,
 		},
 		Telemetry:          config.Telemetry{ExporterTimeout: 200 * time.Millisecond},
-		ServiceName:        "go-service",
+		ServiceName:        "payment-service",
 		HTTPAddress:        parse(kitconfig.EnvHTTPAddress),
 		GRPCAddress:        parse(kitconfig.EnvGRPCAddress),
 		HealthAddress:      parse(kitconfig.EnvHealthAddress),

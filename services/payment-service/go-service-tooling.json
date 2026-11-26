@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
-  "service": "go-service",
-  "modulePath": "templates/go-service",
+  "service": "payment-service",
+  "modulePath": "services/payment-service",
   "image": {
-    "name": "insurance-hub-go-service-api",
-    "title": "Insurance Hub Go Service API",
+    "name": "insurance-hub-payment-api",
+    "title": "Insurance Hub Payment API",
     "entrypoint": [
-      "/go-service"
+      "/payment-service"
     ],
     "user": "65532:65532",
     "platform": "linux/amd64",
@@ -60,8 +60,8 @@
     "buildOutputs": [
       {
         "package": "./cmd/server",
-        "output": "/out/go-service",
-        "destination": "/go-service",
+        "output": "/out/payment-service",
+        "destination": "/payment-service",
         "mode": "0555"
       }
     ],
@@ -79,7 +79,7 @@
       "timeoutSeconds": 3600
     },
     "gateway": {
-      "generatedPath": "gen/openapiv2/scaffold/v1/example_service.swagger.json",
+      "generatedPath": "gen/openapiv2/payment/v1/example_service.swagger.json",
       "contractPath": "testdata/http-contract.json"
     },
     "dependencies": [],

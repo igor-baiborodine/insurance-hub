@@ -23,8 +23,8 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Fatalf("load defaults: %v", err)
 	}
 
-	if got.ServiceName != "go-service" {
-		t.Errorf("ServiceName = %q, want go-service", got.ServiceName)
+	if got.ServiceName != "payment-service" {
+		t.Errorf("ServiceName = %q, want payment-service", got.ServiceName)
 	}
 	if got.GRPCAddress.String() != "127.0.0.1:9090" {
 		t.Errorf("GRPCAddress = %q, want 127.0.0.1:9090", got.GRPCAddress)

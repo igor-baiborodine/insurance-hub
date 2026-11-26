@@ -23,13 +23,13 @@ GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/scaffold/v1/example_service.proto
+PROTO_SCHEMA := api/payment/v1/example_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/scaffold/v1/example_service.pb.go \
-	gen/scaffold/v1/example_service.pb.gw.go \
-	gen/scaffold/v1/example_service_grpc.pb.go \
-	gen/openapiv2/scaffold/v1/example_service.swagger.json
+	gen/payment/v1/example_service.pb.go \
+	gen/payment/v1/example_service.pb.gw.go \
+	gen/payment/v1/example_service_grpc.pb.go \
+	gen/openapiv2/payment/v1/example_service.swagger.json
 
 GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
@@ -54,7 +54,7 @@ HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(INSURANCE_HUB_ROOT) show -s --format=%cI HEAD 2>/dev/null)
 HEAD_VERSION := git-$(HEAD_SHORT)
-IMAGE_NAME ?= insurance-hub-go-service-api
+IMAGE_NAME ?= insurance-hub-payment-api
 SOURCE_REVISION ?= $(HEAD_REVISION)
 SOURCE_CREATED ?= $(HEAD_CREATED)
 SOURCE_REPOSITORY ?= https://github.com/igor-baiborodine/insurance-hub
@@ -157,7 +157,7 @@ check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/scaffold/v1/example_service.swagger.json
+		--swagger gen/openapiv2/payment/v1/example_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac

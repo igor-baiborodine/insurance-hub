@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: scaffold/v1/example_service.proto
+// source: payment/v1/example_service.proto
 
-package scaffoldv1
+package paymentv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
@@ -33,7 +33,7 @@ type EchoRequest struct {
 
 func (x *EchoRequest) Reset() {
 	*x = EchoRequest{}
-	mi := &file_scaffold_v1_example_service_proto_msgTypes[0]
+	mi := &file_payment_v1_example_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +45,7 @@ func (x *EchoRequest) String() string {
 func (*EchoRequest) ProtoMessage() {}
 
 func (x *EchoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_scaffold_v1_example_service_proto_msgTypes[0]
+	mi := &file_payment_v1_example_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +58,7 @@ func (x *EchoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EchoRequest.ProtoReflect.Descriptor instead.
 func (*EchoRequest) Descriptor() ([]byte, []int) {
-	return file_scaffold_v1_example_service_proto_rawDescGZIP(), []int{0}
+	return file_payment_v1_example_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *EchoRequest) GetMessage() string {
@@ -77,7 +77,7 @@ type EchoResponse struct {
 
 func (x *EchoResponse) Reset() {
 	*x = EchoResponse{}
-	mi := &file_scaffold_v1_example_service_proto_msgTypes[1]
+	mi := &file_payment_v1_example_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -89,7 +89,7 @@ func (x *EchoResponse) String() string {
 func (*EchoResponse) ProtoMessage() {}
 
 func (x *EchoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_scaffold_v1_example_service_proto_msgTypes[1]
+	mi := &file_payment_v1_example_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -102,7 +102,7 @@ func (x *EchoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EchoResponse.ProtoReflect.Descriptor instead.
 func (*EchoResponse) Descriptor() ([]byte, []int) {
-	return file_scaffold_v1_example_service_proto_rawDescGZIP(), []int{1}
+	return file_payment_v1_example_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *EchoResponse) GetMessage() string {
@@ -112,24 +112,25 @@ func (x *EchoResponse) GetMessage() string {
 	return ""
 }
 
-var File_scaffold_v1_example_service_proto protoreflect.FileDescriptor
+var File_payment_v1_example_service_proto protoreflect.FileDescriptor
 
-const file_scaffold_v1_example_service_proto_rawDesc = "" +
+const file_payment_v1_example_service_proto_rawDesc = "" +
 	"\n" +
-	"!scaffold/v1/example_service.proto\x12\vscaffold.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"3\n" +
+	" payment/v1/example_service.proto\x12\n" +
+	"payment.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"3\n" +
 	"\vEchoRequest\x12$\n" +
 	"\amessage\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05 \x01(\x80\x01R\amessage\"(\n" +
 	"\fEchoResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage2\x8b\v\n" +
-	"\x0eExampleService\x12\xf8\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage2\x88\v\n" +
+	"\x0eExampleService\x12\xf5\n" +
 	"\n" +
-	"\x04Echo\x12\x18.scaffold.v1.EchoRequest\x1a\x19.scaffold.v1.EchoResponse\"\xba\n" +
-	"\x92A\x9b\n" +
-	"2\x10application/json:\x10application/jsonJl\n" +
-	"\x03200\x12e\n" +
-	"\x1bThe unchanged Echo message.\x12\x1d\n" +
-	"\x1b\x1a\x19.scaffold.v1.EchoResponse\"'\n" +
+	"\x04Echo\x12\x17.payment.v1.EchoRequest\x1a\x18.payment.v1.EchoResponse\"\xb9\n" +
+	"\x92A\x9a\n" +
+	"2\x10application/json:\x10application/jsonJk\n" +
+	"\x03200\x12d\n" +
+	"\x1bThe unchanged Echo message.\x12\x1c\n" +
+	"\x1a\x1a\x18.payment.v1.EchoResponse\"'\n" +
 	"\x10application/json\x12\x13{\"message\":\"hello\"}J\x81\x01\n" +
 	"\x03400\x12z\n" +
 	"\x17The request is invalid.\x12\x16\n" +
@@ -162,28 +163,28 @@ const file_scaffold_v1_example_service_proto_rawDesc = "" +
 	"\x03504\x12\x83\x01\n" +
 	"\x1eThe RPC deadline was exceeded.\x12\x16\n" +
 	"\x14\x1a\x12.google.rpc.Status\"I\n" +
-	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/example/echoB[ZYgithub.com/igor-baiborodine/insurance-hub/templates/go-service/gen/scaffold/v1;scaffoldv1b\x06proto3"
+	"\x10application/json\x125{\"code\":4,\"message\":\"deadline exceeded\",\"details\":[]}\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/example/echoB]Z[github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1;paymentv1b\x06proto3"
 
 var (
-	file_scaffold_v1_example_service_proto_rawDescOnce sync.Once
-	file_scaffold_v1_example_service_proto_rawDescData []byte
+	file_payment_v1_example_service_proto_rawDescOnce sync.Once
+	file_payment_v1_example_service_proto_rawDescData []byte
 )
 
-func file_scaffold_v1_example_service_proto_rawDescGZIP() []byte {
-	file_scaffold_v1_example_service_proto_rawDescOnce.Do(func() {
-		file_scaffold_v1_example_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_scaffold_v1_example_service_proto_rawDesc), len(file_scaffold_v1_example_service_proto_rawDesc)))
+func file_payment_v1_example_service_proto_rawDescGZIP() []byte {
+	file_payment_v1_example_service_proto_rawDescOnce.Do(func() {
+		file_payment_v1_example_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_payment_v1_example_service_proto_rawDesc), len(file_payment_v1_example_service_proto_rawDesc)))
 	})
-	return file_scaffold_v1_example_service_proto_rawDescData
+	return file_payment_v1_example_service_proto_rawDescData
 }
 
-var file_scaffold_v1_example_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_scaffold_v1_example_service_proto_goTypes = []any{
-	(*EchoRequest)(nil),  // 0: scaffold.v1.EchoRequest
-	(*EchoResponse)(nil), // 1: scaffold.v1.EchoResponse
+var file_payment_v1_example_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_payment_v1_example_service_proto_goTypes = []any{
+	(*EchoRequest)(nil),  // 0: payment.v1.EchoRequest
+	(*EchoResponse)(nil), // 1: payment.v1.EchoResponse
 }
-var file_scaffold_v1_example_service_proto_depIdxs = []int32{
-	0, // 0: scaffold.v1.ExampleService.Echo:input_type -> scaffold.v1.EchoRequest
-	1, // 1: scaffold.v1.ExampleService.Echo:output_type -> scaffold.v1.EchoResponse
+var file_payment_v1_example_service_proto_depIdxs = []int32{
+	0, // 0: payment.v1.ExampleService.Echo:input_type -> payment.v1.EchoRequest
+	1, // 1: payment.v1.ExampleService.Echo:output_type -> payment.v1.EchoResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -191,26 +192,26 @@ var file_scaffold_v1_example_service_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_scaffold_v1_example_service_proto_init() }
-func file_scaffold_v1_example_service_proto_init() {
-	if File_scaffold_v1_example_service_proto != nil {
+func init() { file_payment_v1_example_service_proto_init() }
+func file_payment_v1_example_service_proto_init() {
+	if File_payment_v1_example_service_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_scaffold_v1_example_service_proto_rawDesc), len(file_scaffold_v1_example_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_payment_v1_example_service_proto_rawDesc), len(file_payment_v1_example_service_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_scaffold_v1_example_service_proto_goTypes,
-		DependencyIndexes: file_scaffold_v1_example_service_proto_depIdxs,
-		MessageInfos:      file_scaffold_v1_example_service_proto_msgTypes,
+		GoTypes:           file_payment_v1_example_service_proto_goTypes,
+		DependencyIndexes: file_payment_v1_example_service_proto_depIdxs,
+		MessageInfos:      file_payment_v1_example_service_proto_msgTypes,
 	}.Build()
-	File_scaffold_v1_example_service_proto = out.File
-	file_scaffold_v1_example_service_proto_goTypes = nil
-	file_scaffold_v1_example_service_proto_depIdxs = nil
+	File_payment_v1_example_service_proto = out.File
+	file_payment_v1_example_service_proto_goTypes = nil
+	file_payment_v1_example_service_proto_depIdxs = nil
 }
