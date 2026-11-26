@@ -45,15 +45,11 @@ Run from the repository root with the pinned Python, Go, Docker, Kind and kubect
 make go-svc-deploy-check go-svc-deploy-test-tooling SVC_NAME=policy
 make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=local-dev
 make go-svc-deploy-render SVC_NAME=policy DEPLOY_ENV=qa
-kubectl kustomize k8s/overlays/local-dev/svc/agent-portal-gateway/legacy
-kubectl kustomize k8s/overlays/qa/svc/agent-portal-gateway/legacy
 ```
 
-The last two renders are the Agent Portal Gateway overlays; confirm that each routes its Policy
-requests to the `<environment>-policy-api` Service. The QA overlay uses an inactive release
-placeholder until release preparation activates the Policy resources. An activated placeholder fails the check. Local-dev requires an explicit,
-source-matched image to perform operations. For disposable qualification, build a local image as
-below, then run
+The active QA overlay must retain a digest-pinned Policy release; a placeholder or unpinned image
+fails the check. Local-dev requires an explicit, source-matched image to perform operations. For
+disposable qualification, build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.
 The smoke scopes its writes to one labeled Kind namespace and removes that namespace afterward.
 It copies the exact local-dev writer Secret into that namespace so the workload meets the deployed
@@ -61,7 +57,6 @@ startup contract. The workload runs only its read-only readiness query; its inva
 are rejected before any provider call and write nothing.
 It runs only the private workload checks (offer rejection, probes, identity, Pod denial and
 scale-to-zero).
-Shared routing checks run only through `go-svc-deploy-verify` against local-dev and QA.
 
 ## Direct local-dev
 
@@ -134,9 +129,8 @@ to match the ready Pod image ID.
 three listeners. It checks that HTTP and generated-client gRPC reject an empty offer with
 `InvalidArgument` (HTTP 400) before any provider call or write, management
 `200 live\n` and `200 ready\n`, and the six safe startup identity fields, including the Pod
-UID. It also reads every serving gateway Pod's effective Policy route and its ready Service
-endpoints without mutation. For manual troubleshooting, forward
-the exact Pod selected by status.
+UID. It verifies that the Policy Service has a single ready endpoint pointing to that Pod.
+For manual troubleshooting, forward the exact Pod selected by status.
 
 ```bash
 : "${POLICY_POD:?set the ready Go Policy Pod name from status}"
