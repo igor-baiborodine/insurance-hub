@@ -49,6 +49,10 @@ OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.1.0
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260928230214-8a89bd6388cc
+PGX_VERSION := v5.11.0
+MINIO_GO_VERSION := v7.4.1
+FRANZ_GO_VERSION := v1.22.2
+KMSG_VERSION := v1.15.0
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
@@ -139,6 +143,10 @@ bootstrap-go-tools bootstrap-tools: python-toolchain-setup
 
 update-deps:
 	GOWORK=off $(GO) get \
+		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/minio/minio-go/v7@$(MINIO_GO_VERSION) \
+		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
+		github.com/twmb/franz-go/pkg/kmsg@$(KMSG_VERSION) \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \

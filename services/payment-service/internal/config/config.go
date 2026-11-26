@@ -1,9 +1,11 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	kitidentity "github.com/igor-baiborodine/insurance-hub/libs/servicekit/identity"
@@ -15,8 +17,74 @@ const DefaultServiceName = "payment-service"
 const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecimal " +
 	"characters with at least one nonzero character outside development"
 
+const (
+	databaseURLSetting      = "PAYMENT_DATABASE_URL"
+	databaseMaxConnsSetting = "DB_MAX_CONNS"
+	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
+	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
+	startupTimeoutSetting   = "STARTUP_TIMEOUT"
+	objectEndpointSetting   = "MINIO_ENDPOINT"
+	objectAccessKeySetting  = "MINIO_ACCESS_KEY"
+	objectSecretKeySetting  = "MINIO_SECRET_KEY"
+	objectCAFileSetting     = "MINIO_CA_FILE"
+	objectBucketSetting     = "MINIO_BUCKET"
+	objectFetchTimeout      = "MINIO_FETCH_TIMEOUT"
+	kafkaBrokersSetting     = "KAFKA_BROKERS"
+	kafkaRegisteredSetting  = "KAFKA_REGISTERED_TOPIC"
+	kafkaCAFileSetting      = "KAFKA_CA_FILE"
+	defaultBucket           = "payments-import"
+	defaultRegisteredTopic  = "policy-registered"
+)
+
+// Database holds the Payment runtime connection and pool limits.
+type Database struct {
+	URL            DatabaseURL
+	MaxConnections int32
+	ConnectTimeout time.Duration
+	QueryTimeout   time.Duration
+}
+
+// DatabaseURL redacts the runtime credential from ordinary formatting.
+type DatabaseURL struct{ value string }
+
+// Value returns the runtime connection URL to the PostgreSQL adapter.
+func (databaseURL DatabaseURL) Value() string { return databaseURL.value }
+
+func (DatabaseURL) String() string   { return "[REDACTED]" }
+func (DatabaseURL) GoString() string { return "[REDACTED]" }
+
+// Secret retains a credential without exposing it through ordinary formatting.
+type Secret struct{ value string }
+
+// Value returns the credential only to the adapter that needs it.
+func (secret Secret) Value() string { return secret.value }
+
+func (Secret) String() string   { return "[REDACTED]" }
+func (Secret) GoString() string { return "[REDACTED]" }
+
+// ObjectStore contains the statement-import bucket connection and fetch bound.
+type ObjectStore struct {
+	Endpoint     *url.URL
+	AccessKey    Secret
+	SecretKey    Secret
+	CAFile       string
+	Bucket       string
+	FetchTimeout time.Duration
+}
+
+// Kafka holds the broker discovery and trust for the registration topic.
+type Kafka struct {
+	Brokers         []string
+	RegisteredTopic string
+	CAFile          string
+}
+
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
+	Database       Database
+	ObjectStore    ObjectStore
+	Kafka          Kafka
+	StartupTimeout time.Duration
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -247,7 +315,28 @@ func load(lookup lookupEnv) (Config, error) {
 		}
 	}
 
+	startupTimeout, err := kitconfig.LoadPositiveDuration(lookup, startupTimeoutSetting, "10s")
+	if err != nil {
+		return Config{}, err
+	}
+	database, err := loadDatabase(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	objectStore, err := loadObjectStore(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+	kafka, err := loadKafka(lookup)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
+		Database:           database,
+		ObjectStore:        objectStore,
+		Kafka:              kafka,
+		StartupTimeout:     startupTimeout,
 		Runtime:            runtime,
 		GRPC:               grpc,
 		HTTPServer:         httpServer,
@@ -259,6 +348,173 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxBodyBytes:   maxBodyBytes,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadDatabase(lookup lookupEnv) (Database, error) {
+	databaseURL, err := loadDatabaseURL(lookup)
+	if err != nil {
+		return Database{}, err
+	}
+	maxConnections, err := kitconfig.LoadBoundedInt(lookup, databaseMaxConnsSetting, "4", 1, 16)
+	if err != nil {
+		return Database{}, err
+	}
+	connectTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseConnectSetting, "3s")
+	if err != nil {
+		return Database{}, err
+	}
+	queryTimeout, err := kitconfig.LoadPositiveDuration(lookup, databaseQuerySetting, "1s")
+	if err != nil {
+		return Database{}, err
+	}
+	return Database{
+		URL:            databaseURL,
+		MaxConnections: int32(maxConnections),
+		ConnectTimeout: connectTimeout,
+		QueryTimeout:   queryTimeout,
+	}, nil
+}
+
+func loadDatabaseURL(lookup lookupEnv) (DatabaseURL, error) {
+	value, err := required(lookup, databaseURLSetting)
+	if err != nil {
+		return DatabaseURL{}, err
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") ||
+		parsed.User == nil || parsed.Path != "/payment" ||
+		!kitconfig.ValidHost(parsed.Hostname()) || parsed.Fragment != "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must identify the Payment database",
+		)
+	}
+	if port := parsed.Port(); port != "" {
+		if number, err := strconv.ParseUint(port, 10, 16); err != nil || number == 0 {
+			return DatabaseURL{}, kitconfig.Invalid(
+				databaseURLSetting,
+				"must use a valid port",
+			)
+		}
+	}
+	password, ok := parsed.User.Password()
+	params, err := url.ParseQuery(parsed.RawQuery)
+	if !ok || password == "" || err != nil || len(params) != 2 ||
+		len(params["sslmode"]) != 1 || params.Get("sslmode") != "verify-full" ||
+		len(params["sslrootcert"]) != 1 || params.Get("sslrootcert") == "" {
+		return DatabaseURL{}, kitconfig.Invalid(
+			databaseURLSetting,
+			"must require TLS hostname and CA verification",
+		)
+	}
+	return DatabaseURL{value: value}, nil
+}
+
+func loadObjectStore(lookup lookupEnv) (ObjectStore, error) {
+	endpointValue, err := required(lookup, objectEndpointSetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	endpoint, parseErr := url.Parse(endpointValue)
+	if parseErr != nil || endpoint.Opaque != "" || endpoint.User != nil ||
+		endpoint.RawQuery != "" ||
+		endpoint.Fragment != "" ||
+		endpoint.Hostname() == "" ||
+		(endpoint.Scheme != "http" && endpoint.Scheme != "https") ||
+		(endpoint.Path != "" && endpoint.Path != "/") {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectEndpointSetting,
+			"must be an HTTP or HTTPS origin URL",
+		)
+	}
+	endpoint.Path = ""
+	accessKey, err := required(lookup, objectAccessKeySetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	secretKey, err := required(lookup, objectSecretKeySetting)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	caFile, _ := lookup(objectCAFileSetting)
+	if endpoint.Scheme == "https" && strings.TrimSpace(caFile) == "" {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectCAFileSetting,
+			"is required for HTTPS object storage",
+		)
+	}
+	bucket, err := kitconfig.ValueOrDefault(lookup, objectBucketSetting, defaultBucket)
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	if bucket != defaultBucket {
+		return ObjectStore{}, kitconfig.Invalid(
+			objectBucketSetting,
+			"must match the fixed payments-import bucket",
+		)
+	}
+	fetchTimeout, err := kitconfig.LoadPositiveDuration(lookup, objectFetchTimeout, "3s")
+	if err != nil {
+		return ObjectStore{}, err
+	}
+	return ObjectStore{
+		Endpoint:     endpoint,
+		AccessKey:    Secret{value: accessKey},
+		SecretKey:    Secret{value: secretKey},
+		CAFile:       caFile,
+		Bucket:       bucket,
+		FetchTimeout: fetchTimeout,
+	}, nil
+}
+
+func loadKafka(lookup lookupEnv) (Kafka, error) {
+	brokersValue, err := required(lookup, kafkaBrokersSetting)
+	if err != nil {
+		return Kafka{}, err
+	}
+	brokers := strings.Split(brokersValue, ",")
+	for index := range brokers {
+		brokers[index] = strings.TrimSpace(brokers[index])
+		if brokers[index] == "" || !validBroker(brokers[index]) {
+			return Kafka{}, kitconfig.Invalid(
+				kafkaBrokersSetting,
+				"must contain comma-separated host:port brokers",
+			)
+		}
+	}
+	registered, err := kitconfig.ValueOrDefault(
+		lookup,
+		kafkaRegisteredSetting,
+		defaultRegisteredTopic,
+	)
+	if err != nil {
+		return Kafka{}, err
+	}
+	if registered != defaultRegisteredTopic {
+		return Kafka{}, kitconfig.Invalid(
+			kafkaRegisteredSetting,
+			"must select the Policy registration topic",
+		)
+	}
+	caFile, err := required(lookup, kafkaCAFileSetting)
+	if err != nil {
+		return Kafka{}, err
+	}
+	return Kafka{Brokers: brokers, RegisteredTopic: registered, CAFile: caFile}, nil
+}
+
+func required(lookup lookupEnv, name string) (string, error) {
+	value, exists := lookup(name)
+	if !exists || value == "" {
+		return "", kitconfig.Invalid(name, "is required")
+	}
+	return value, nil
+}
+
+func validBroker(value string) bool {
+	parsed, err := url.Parse("tcp://" + value)
+	return err == nil && parsed.Host == value && kitconfig.ValidHost(parsed.Hostname()) &&
+		parsed.Port() != ""
 }
 
 func loadIdentity(lookup lookupEnv, serviceName string, enabled bool) (Identity, error) {
