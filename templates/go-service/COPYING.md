@@ -28,6 +28,7 @@ creating a real service, then use the same replacement categories consistently.
 | Protobuf package               | `scaffold.v1`                                                    | `examplecopy.v1`                                                  |
 | Schema/generated path          | `scaffold/v1`                                                    | `examplecopy/v1`                                                  |
 | Generated Go package           | `scaffoldv1`                                                     | `examplecopyv1`                                                   |
+| Telemetry domain               | `scaffold`                                                       | `examplecopy`                                                     |
 
 Retain the exact published `libs/servicekit` version and its checksums in the renamed copy; never
 replace it with a sibling checkout. Business HTTP, management HTTP and gRPC retain the private
@@ -37,6 +38,12 @@ channel idleness disabled. Do not generalize that lifetime choice to remote clie
 
 Use a valid Protobuf identifier without a hyphen. The generic `ExampleService`, `EchoRequest`,
 `EchoResponse`, `Echo`, and `cmd/server` names may remain until the service defines a real contract.
+
+Use the service's domain, also without a hyphen, as the telemetry domain. Request instruments and
+their operation, transport and outcome attributes are named `insurance_hub.<domain>.*`, and the
+service's deployment container is named `<domain>-api`. A collector that keeps only domain-scoped
+request metrics drops any other prefix, so a copy that keeps `insurance_hub.scaffold.*` exports no
+request metrics.
 
 ## 1. Copy only committed template files
 
@@ -83,8 +90,9 @@ Keep that backup outside the module until regeneration and validation succeed, t
 normal temporary-file cleanup. The copy procedure never needs to overwrite generated files in place.
 
 Apply the concrete example replacements below. They cover the Go module and imports, runtime and
-test identities, schema and generated paths, the checked-in golangci-lint configuration, tooling
-scripts that remain applicable, Make-owned output paths, and the isolated compatibility baseline.
+test identities, the telemetry domain in request instrument and attribute names, schema and
+generated paths, the checked-in golangci-lint configuration, tooling scripts that remain
+applicable, Make-owned output paths, and the isolated compatibility baseline.
 `COPYING.md` is excluded because it must retain the source values needed to create another
 independent copy.
 
@@ -109,6 +117,10 @@ rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
 rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
   'scaffoldv1' . |
   xargs -0 -r sed -i 's|scaffoldv1|examplecopyv1|g'
+
+rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
+  'insurance_hub\.scaffold\.' . |
+  xargs -0 -r sed -i 's|insurance_hub\.scaffold\.|insurance_hub.examplecopy.|g'
 
 rg -l -0 --hidden --glob '!COPYING.md' --glob '!.tools/**' --glob '!gen/**' \
   'go-service' . |
@@ -208,7 +220,7 @@ before validation.
 
 ```sh
 if rg -n --hidden --glob '!COPYING.md' --glob '!.tools/**' \
-  'github\.com/igor-baiborodine/insurance-hub/templates/go-service|templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1' .
+  'github\.com/igor-baiborodine/insurance-hub/templates/go-service|templates/go-service|go-service|scaffold\.v1|scaffold_v1|scaffoldv1|scaffold/v1|insurance_hub\.scaffold\.' .
 then
   exit 1
 fi
@@ -269,7 +281,8 @@ complete repository onboarding before claiming root aggregate or hosted coverage
 ## 6. Run the automated copy proof for scaffold changes
 
 When changing the source scaffold or this procedure, run the owning proof from the original module.
-It creates a temporary `services/example-copy`, applies every identity replacement above, verifies
+It creates a temporary `services/example-copy`, applies every identity replacement above except
+the telemetry domain (the stale-identity scan above covers that rename in a real copy), verifies
 that the copy uses the repository Python environment and shared Go tooling, bootstraps its pinned Go
 tools, regenerates all Go/gateway/Swagger output, and runs explicit copied HTTP→RPC, direct-RPC and
 health acceptance before `test` and the complete non-mutating `check`. It rejects stale generated
