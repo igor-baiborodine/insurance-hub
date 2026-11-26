@@ -25,7 +25,7 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 	if !accessMatches(t, ctx, fixture) {
 		t.Fatal("provisioned access before migration differs from the contract")
 	}
-	fixture.Call(t, ctx, "migrate", "version=2")
+	fixture.Call(t, ctx, "migrate", "version=1")
 
 	// when
 	writer := writerConnection(t, ctx, fixture.WriterURL("policy"))

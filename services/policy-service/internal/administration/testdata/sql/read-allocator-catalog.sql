@@ -1,4 +1,4 @@
--- Identity generation for the four entity IDs and remaining sequences.
+-- Identity generation for every ID column and all sequences.
 SELECT format('%s;sequences=%s',
     (SELECT string_agg(table_name || '.' || column_name || '=' || identity_generation, ','
         ORDER BY table_name)

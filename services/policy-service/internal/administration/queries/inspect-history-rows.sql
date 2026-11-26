@@ -1,4 +1,4 @@
--- $1 indicates that the managed Policy schema is installed.
+-- $1 indicates that the Policy schema is installed.
 SELECT CASE
     WHEN count(*) = 1
          AND count(*) FILTER (WHERE version_id = 0 AND is_applied) = 1
@@ -9,12 +9,6 @@ SELECT CASE
          AND count(*) FILTER (WHERE version_id = 1 AND is_applied) = 1
          AND $1
         THEN 'version=1'
-    WHEN count(*) = 3
-         AND count(*) FILTER (WHERE version_id = 0 AND is_applied) = 1
-         AND count(*) FILTER (WHERE version_id = 1 AND is_applied) = 1
-         AND count(*) FILTER (WHERE version_id = 2 AND is_applied) = 1
-         AND $1
-        THEN 'version=2'
     ELSE 'invalid'
 END
 FROM public.goose_db_version

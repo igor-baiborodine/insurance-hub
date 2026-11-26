@@ -40,7 +40,7 @@ func TestRun_PolicyEventPublisherRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 	database := postgresfixture.New(t, ctx)
-	database.Call(t, ctx, "migrate", "version=2")
+	database.Call(t, ctx, "migrate", "version=1")
 	pool, err := pgxpool.New(ctx, database.WriterURL("policy"))
 	if err != nil {
 		t.Fatal(err)

@@ -1,3 +1,3 @@
-ALTER TABLE public.cover DROP CONSTRAINT FKl3ynyrtbuyfqxg7krx3esdq5f;
-ALTER TABLE public.cover ADD CONSTRAINT FKl3ynyrtbuyfqxg7krx3esdq5f
+ALTER TABLE public.cover DROP CONSTRAINT cover_policy_version_id_fkey;
+ALTER TABLE public.cover ADD CONSTRAINT cover_policy_version_id_fkey
     FOREIGN KEY (policy_version_id) REFERENCES public.policy_version (id) ON DELETE CASCADE;

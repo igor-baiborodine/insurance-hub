@@ -12,7 +12,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
 )
 
-const managedAllocators = "cover.id=ALWAYS,goose_db_version.id=BY DEFAULT,offer.id=ALWAYS," +
+const identityAllocators = "cover.id=ALWAYS,goose_db_version.id=BY DEFAULT,offer.id=ALWAYS," +
 	"policy.id=ALWAYS,policy_outbox.id=ALWAYS,policy_version.id=ALWAYS;" +
 	"sequences=cover_id_seq,goose_db_version_id_seq,offer_id_seq,policy_id_seq," +
 	"policy_outbox_id_seq,policy_version_id_seq"
@@ -61,7 +61,7 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 
 	// then
 	for index := range results {
-		if failures[index] != nil || results[index] != "version=2" {
+		if failures[index] != nil || results[index] != "version=1" {
 			t.Fatalf(
 				"concurrent migrate %d: got %q (%v)",
 				index,
@@ -70,14 +70,14 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 			)
 		}
 	}
-	fixture.Call(t, ctx, "status", "version=2")
-	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != managedAllocators {
+	fixture.Call(t, ctx, "status", "version=1")
+	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != identityAllocators {
 		t.Fatalf("fresh allocators: got %q", got)
 	}
 	history := fixture.Query(t, ctx, readMigrationHistoryQuery)
 	if !strings.HasPrefix(history, "0:true:") || !strings.Contains(history, ",1:true:") ||
-		!strings.Contains(history, ",2:true:") || strings.Count(history, ",") != 2 {
-		t.Fatalf("expected one base and two applied history rows, got %q", history)
+		strings.Count(history, ",") != 1 {
+		t.Fatalf("expected one base and one applied history row, got %q", history)
 	}
 	if got := generatedAggregate(t, ctx, fixture, true); got != "1,1,1,1:t" {
 		t.Fatalf("fresh writer insert: got %q", got)
@@ -86,7 +86,7 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 
 	t.Run("retry keeps one history", func(t *testing.T) {
 		// when
-		fixture.Call(t, ctx, "migrate", "version=2")
+		fixture.Call(t, ctx, "migrate", "version=1")
 
 		// then
 		if snapshot(t, ctx, fixture) != migrated {
@@ -102,59 +102,14 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 		refuse(t, ctx, fixture, "status", "inconsistent migration history")
 		refuse(t, ctx, fixture, "migrate", "inconsistent migration history")
 	})
-}
 
-func TestRun_PolicyMigrationAdoptsUnmanagedData(t *testing.T) {
-	// given
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
-	defer cancel()
-	t.Run("foreign key action drift", func(t *testing.T) {
-		fixture := postgresfixture.New(t, ctx)
-		fixture.LoadUnmanagedData(t, ctx)
+	t.Run("schema drift", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { fixture.Exec(t, ctx, restoreCoverForeignKeyActionQuery) })
 		fixture.Exec(t, ctx, changeCoverForeignKeyActionQuery)
 
 		refuse(t, ctx, fixture, "status", "incompatible Policy schema or owner")
 		refuse(t, ctx, fixture, "migrate", "incompatible Policy schema or owner")
-	})
-	fixture := postgresfixture.New(t, ctx)
-	fixture.LoadUnmanagedData(t, ctx)
-	baseline := fixture.Query(t, ctx, postgresfixture.ReadRowFingerprints)
-	fixture.Call(t, ctx, "status", "unmanaged")
-
-	// when
-	fixture.Call(t, ctx, "migrate", "version=2")
-
-	// then
-	fixture.Call(t, ctx, "status", "version=2")
-	requireBusinessData(t, ctx, fixture, baseline)
-	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != managedAllocators {
-		t.Fatalf(
-			"adopted allocators retain the shared sequence or lack identities: %q",
-			got,
-		)
-	}
-
-	// The rolled-back insert observes the first allocation and leaves gaps behind.
-	if got := generatedAggregate(t, ctx, fixture, false); got != "2,3,7,9:t" {
-		t.Fatalf("first adopted allocation: got %q", got)
-	}
-	requireBusinessData(t, ctx, fixture, baseline)
-
-	t.Run("replay preserves allocator progress", func(t *testing.T) {
-		// given
-		migrated := snapshot(t, ctx, fixture)
-
-		// when
-		fixture.Call(t, ctx, "migrate", "version=2")
-
-		// then
-		if snapshot(t, ctx, fixture) != migrated {
-			t.Fatal("replay changed the schema or migration history")
-		}
-		requireBusinessData(t, ctx, fixture, baseline)
-		if got := generatedAggregate(t, ctx, fixture, true); got != "3,4,8,10:t" {
-			t.Fatalf("replay rewound an allocator: got %q", got)
-		}
 	})
 
 	t.Run("allocator behind its table", func(t *testing.T) {
@@ -203,25 +158,6 @@ func snapshot(t *testing.T, ctx context.Context, fixture *postgresfixture.Fixtur
 		rows = fixture.Query(t, ctx, postgresfixture.ReadRowFingerprints)
 	}
 	return state + "|rows=" + rows + "|history=" + history
-}
-
-func requireBusinessData(
-	t *testing.T,
-	ctx context.Context,
-	fixture *postgresfixture.Fixture,
-	rows string,
-) {
-	t.Helper()
-	if got := fixture.Query(t, ctx, postgresfixture.ReadRowFingerprints); got != rows {
-		t.Fatalf("business rows changed: got %q, want %q", got, rows)
-	}
-	if got := fixture.Query(
-		t,
-		ctx,
-		postgresfixture.ReadBusinessFacts,
-	); got != postgresfixture.UnmanagedFacts {
-		t.Fatalf("business facts changed: %q", got)
-	}
 }
 
 // generatedAggregate inserts one aggregate as the writer role and returns its generated IDs.

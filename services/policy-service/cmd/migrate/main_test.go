@@ -56,7 +56,7 @@ func TestRun_PrintsOnlySafeOperationResult(t *testing.T) {
 		_ context.Context, operation, environment, contextName, target, url, ca string,
 	) (string, error) {
 		received = []string{operation, environment, contextName, target, url, ca}
-		return "unmanaged", nil
+		return "uninitialized", nil
 	})
 	failure := run(t.Context(), args, &output, func(
 		context.Context, string, string, string, string, string, string,
@@ -65,7 +65,7 @@ func TestRun_PrintsOnlySafeOperationResult(t *testing.T) {
 	})
 
 	// then
-	if err != nil || output.String() != "unmanaged\n" || len(received) != 6 ||
+	if err != nil || output.String() != "uninitialized\n" || len(received) != 6 ||
 		received[0] != "status" || received[5] != "ca.crt" || failure == nil {
 		t.Fatalf(
 			"unexpected result %q, %v, %v, %v",

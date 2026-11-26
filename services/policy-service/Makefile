@@ -228,7 +228,7 @@ test-integration: ## Run the service composition and disposable PostgreSQL/TLS K
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	POLICY_TEST_KAFKA_IMAGE="$(KAFKA_IMAGE)" GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration -v \
-		-run '^TestRun_(ProductionComposition.*|PolicyEventPublisherRecovery|PolicyOutboxOrdering|PolicyMigrationFreshTarget|PolicyMigrationAdoptsUnmanagedData|PolicyWriterAccess|PolicyStorageOnAdoptedData|PolicyTerminationAppendsHistory|PolicyWriterReadiness)$$' \
+		-run '^TestRun_(ProductionComposition.*|PolicyEventPublisherRecovery|PolicyOutboxOrdering|PolicyMigrationFreshTarget|PolicyWriterAccess|PolicyStorageOnExistingData|PolicyTerminationAppendsHistory|PolicyWriterReadiness)$$' \
 		./internal/service ./internal/administration ./internal/postgres ./internal/kafka \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 

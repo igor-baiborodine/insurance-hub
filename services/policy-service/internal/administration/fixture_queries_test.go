@@ -63,3 +63,6 @@ var restoreOfferAllocatorQuery string
 
 //go:embed testdata/sql/change-cover-foreign-key-action.sql
 var changeCoverForeignKeyActionQuery string
+
+//go:embed testdata/sql/restore-cover-foreign-key-action.sql
+var restoreCoverForeignKeyActionQuery string

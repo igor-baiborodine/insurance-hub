@@ -1,5 +1,5 @@
--- Managed Policy schema read by sqlc. It must equal the shape that migration version 1 produces
--- for fresh and adopted databases; the storage suite checks it with the migration inspection.
+-- Policy schema read by sqlc. It must equal the schema that migration version 1 creates; the
+-- storage suite checks it with the migration inspection.
 CREATE TABLE public.offer (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     creation_date date,
