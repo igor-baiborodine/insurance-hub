@@ -1,5 +1,5 @@
--- Independently constructed from the C02 storage matrix: Hibernate DDL with one shared sequence,
--- a still-valid offer, a Java-issued version 1 and the SQL-derived version 2.
+-- Independently constructed unmanaged storage: Hibernate DDL with one shared sequence,
+-- a still-valid offer, an originally issued version 1 and the SQL-derived version 2.
 SET ROLE policy;
 create sequence hibernate_sequence start 1 increment 1;
 create table cover (id int8 not null, code varchar(255), price numeric(19, 2),

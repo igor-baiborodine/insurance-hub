@@ -1,4 +1,4 @@
--- Business table count, outbox, Java allocator and Goose history presence.
+-- Business table count, outbox, shared hibernate_sequence allocator and Goose history presence.
 SELECT
     (SELECT count(*) FROM unnest(ARRAY[
         'public.offer', 'public.offer_answers', 'public.offer_cover',

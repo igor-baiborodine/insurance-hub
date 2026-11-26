@@ -45,7 +45,7 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.LoadJavaData(t, ctx)
+	fixture.LoadUnmanagedData(t, ctx)
 	fixture.Call(t, ctx, "migrate", "version=2")
 	product, pricing := &fakeProduct{}, &fakePricing{}
 	providerAddress := serveProviders(t, product, pricing)
@@ -76,7 +76,7 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 		}
 	}
 	ageOffer(goOffer, 30)
-	ageOffer(postgresfixture.JavaOfferNumber, 30)
+	ageOffer(postgresfixture.UnmanagedOfferNumber, 30)
 	// Issuance must not consult Product or Pricing, even when both are unavailable.
 	unavailable := status.Error(codes.Unavailable, "down")
 	product.reset(unavailable)
@@ -102,7 +102,7 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 				"premium=123.45;covers=C1=100.10,C2=23.35",
 			},
 			{
-				postgresfixture.JavaOfferNumber,
+				postgresfixture.UnmanagedOfferNumber,
 				"cover=2026-11-13..2027-11-13;valid=2026-11-13..2027-11-13",
 				"premium=123.45;covers=C1=100.00,C2=23.45",
 			},
@@ -117,7 +117,7 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 			number := response.GetPolicyNumber()
 			issued = append(issued, number)
 			productCodes := map[string]string{
-				goOffer: "TRI", postgresfixture.JavaOfferNumber: "HSI",
+				goOffer: "TRI", postgresfixture.UnmanagedOfferNumber: "HSI",
 			}
 			want := "agent=synthetic.agent;versions=1;version=1;" +
 				"holder=Synthetic Holder/00000000000;product=" + productCodes[test.offer] + ";" +
@@ -212,9 +212,9 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 			want         *policyv1.PolicyDetails
 		}{
 			{
-				"adopted multi-version policy", postgresfixture.JavaPolicyNumber,
+				"adopted multi-version policy", postgresfixture.UnmanagedPolicyNumber,
 				&policyv1.PolicyDetails{
-					Number: postgresfixture.JavaPolicyNumber, DateFrom: "2026-11-24",
+					Number: postgresfixture.UnmanagedPolicyNumber, DateFrom: "2026-11-24",
 					DateTo: "2027-11-13", PolicyHolder: "Synthetic Holder",
 					TotalPremium: "3.71", ProductCode: "HSI",
 					AccountNumber: "31f5d9a2-8b7c-4e61-a0d4-6c2b9e7f1a33",
@@ -287,9 +287,9 @@ func TestRun_ProductionCompositionIssuesPolicies(t *testing.T) {
 			"productCode": "TRI", "covers": []string{"C1 - 100.10", "C2 - 23.35"},
 		})
 		code, body = callPolicyHTTP(t, ctx, http.MethodGet,
-			httpPolicies+"/"+postgresfixture.JavaPolicyNumber, "")
+			httpPolicies+"/"+postgresfixture.UnmanagedPolicyNumber, "")
 		requirePolicyDetailsBody(t, code, body, map[string]any{
-			"number": postgresfixture.JavaPolicyNumber, "dateFrom": "2026-11-24",
+			"number": postgresfixture.UnmanagedPolicyNumber, "dateFrom": "2026-11-24",
 			"dateTo": "2027-11-13", "policyHolder": "Synthetic Holder",
 			"totalPremium": json.Number("3.71"), "productCode": "HSI",
 			"accountNumber": "31f5d9a2-8b7c-4e61-a0d4-6c2b9e7f1a33",

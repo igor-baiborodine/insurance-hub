@@ -37,20 +37,20 @@ const (
 	ClusterUID = "11111111-1111-4111-8111-111111111111"
 	InstanceID = "22222222-2222-4222-8222-222222222222"
 
-	// JavaFacts are the independently stated C02 expectations before new writes.
-	JavaFacts = "counts=1/2/2/1/2/4;quote=123.45;offerCovers=123.45;" +
+	// UnmanagedFacts are the independently stated expectations before new writes.
+	UnmanagedFacts = "counts=1/2/2/1/2/4;quote=123.45;offerCovers=123.45;" +
 		"versions=1:123.45:123.45:2027-11-13:2026-11-13,2:3.71:3.71:2026-11-23:2026-11-24;" +
 		"orphans=0;answers=NUM_OF_CLAIM=0,TYPE=APARTMENT"
-	// JavaOfferNumber and JavaPolicyNumber identify the pre-existing Java aggregate.
-	JavaOfferNumber  = "7e0a1c84-6f43-4c1e-9b7a-2f5d0c3e8a11"
-	JavaPolicyNumber = "a9c43c58-0f9e-4f68-8c1d-5b6c1e2f7d22"
+	// UnmanagedOfferNumber and UnmanagedPolicyNumber identify the pre-existing aggregate.
+	UnmanagedOfferNumber  = "7e0a1c84-6f43-4c1e-9b7a-2f5d0c3e8a11"
+	UnmanagedPolicyNumber = "a9c43c58-0f9e-4f68-8c1d-5b6c1e2f7d22"
 )
 
 //go:embed sql/setup-target-identity.sql
 var setupTargetIdentityQuery string
 
-//go:embed sql/setup-java-fixture.sql
-var setupJavaFixtureQuery string
+//go:embed sql/setup-unmanaged-fixture.sql
+var setupUnmanagedFixtureQuery string
 
 // ReadBusinessFacts aggregates counts, amounts, versions and orphans of the six business tables.
 //
@@ -130,12 +130,12 @@ func (f *Fixture) Call(t *testing.T, ctx context.Context, operation, want string
 	}
 }
 
-// LoadJavaData loads the C02 Java-shaped schema and rows, then checks the stated baseline.
-func (f *Fixture) LoadJavaData(t *testing.T, ctx context.Context) {
+// LoadUnmanagedData loads the unmanaged Hibernate-shaped schema and rows, then checks the baseline.
+func (f *Fixture) LoadUnmanagedData(t *testing.T, ctx context.Context) {
 	t.Helper()
-	f.Exec(t, ctx, setupJavaFixtureQuery)
-	if got := f.Query(t, ctx, ReadBusinessFacts); got != JavaFacts {
-		t.Fatalf("Java fixture differs from the C02 baseline: %q", got)
+	f.Exec(t, ctx, setupUnmanagedFixtureQuery)
+	if got := f.Query(t, ctx, ReadBusinessFacts); got != UnmanagedFacts {
+		t.Fatalf("unmanaged fixture differs from the baseline: %q", got)
 	}
 }
 

@@ -254,7 +254,7 @@ func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
 	}
 }
 
-func TestHandler_CreateOffer_MapsLegacyRequestToRPC(t *testing.T) {
+func TestHandler_CreateOffer_MapsRequestToRPC(t *testing.T) {
 	// given
 	body := `{"productCode":"TRI","policyFrom":"2017-04-16","policyTo":[2018,4,15],` +
 		`"selectedCovers":["C1","C2"],"answers":[` +
@@ -405,7 +405,7 @@ func TestHandler_CreateOffer_RejectsInvalidAmountWithoutLeakingIt(t *testing.T) 
 	}
 }
 
-func TestHandler_CreateOffer_RejectsMalformedLegacyRequests(t *testing.T) {
+func TestHandler_CreateOffer_RejectsMalformedRequests(t *testing.T) {
 	// given
 	valid := `"productCode":"TRI","policyFrom":"2017-04-16","policyTo":"2018-04-15",` +
 		`"selectedCovers":["C1"]`
