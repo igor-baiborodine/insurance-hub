@@ -39,7 +39,7 @@ def test_render_rejects_access_or_selector_defects(defect: str) -> None:
     # given
     items = policy.validate_render("qa", policy.render("qa"))
     if defect == "wrong selector":
-        items["Service"]["spec"]["selector"] = dict(policy.JAVA_SELECTOR)
+        items["Service"]["spec"]["selector"] = {"app.kubernetes.io/name": "other-api"}
     elif defect == "extra service port":
         items["Service"]["spec"]["ports"].append(
             {"name": "grpc", "port": 9090, "targetPort": "grpc", "protocol": "TCP"}
@@ -197,7 +197,7 @@ def test_qa_refuses_placeholder_activation_and_runtime(
 
     # when / then
     with pytest.raises(DeploymentError, match="activation"):
-        policy.qa_activation(["./policy/legacy", "./policy"], items)
+        policy.qa_activation(["./policy"], items)
     with pytest.raises(DeploymentError, match="inactive or differs"):
         policy.Target().rendered()
 
@@ -531,46 +531,9 @@ def test_denial_probe_waits_for_network_policy_convergence(
     assert deleted == ["policy-access-denied"]
 
 
-@pytest.mark.parametrize("environment", ["local-dev", "qa"])
-def test_gateway_route_accepts_only_reviewed_java_or_go_service(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: str
-) -> None:
-    # given
-    catalog = Path("scripts/go/service/catalog.json")
-    (tmp_path / catalog).parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(policy.ROOT / catalog, tmp_path / catalog)
-    for template in (policy.GATEWAY_PROFILE, policy.GATEWAY_OVERRIDE):
-        relative = template.format(environment=environment)
-        target = tmp_path / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(policy.ROOT / relative, target)
-    monkeypatch.setattr(policy, "ROOT", tmp_path)
-    expected_java = f"http://{environment}-policy-api-legacy:80"
-    namespace = {"local-dev": "local-dev-all", "qa": "qa-svc"}[environment]
-    expected_go = f"http://{environment}-policy-api.{namespace}.svc.cluster.local:80"
-    expected_current = expected_go
-    assert policy.configured_gateway_route(environment) == expected_current
-    override = tmp_path / policy.GATEWAY_OVERRIDE.format(environment=environment)
-    document = yaml.safe_load(override.read_text())
-    document["micronaut"]["http"]["services"].pop("policy-service", None)
-    override.write_text(yaml.safe_dump(document))
-    assert policy.configured_gateway_route(environment) == expected_java
-    document["micronaut"]["http"]["services"]["policy-service"] = {"urls": [expected_go]}
-    override.write_text(yaml.safe_dump(document))
-    assert policy.configured_gateway_route(environment) == expected_go
-    document["micronaut"]["http"]["services"]["policy-service"] = {
-        "urls": [f"http://{environment}-foreign-policy-api:80"]
-    }
-    override.write_text(yaml.safe_dump(document))
-
-    # when / then
-    with pytest.raises(DeploymentError, match="gateway Policy upstream"):
-        policy.configured_gateway_route(environment)
-
-
-@pytest.mark.parametrize("java_endpoint", [False, True])
+@pytest.mark.parametrize("extra_endpoint", [False, True])
 def test_go_service_selects_only_the_ready_go_pod(
-    monkeypatch: pytest.MonkeyPatch, java_endpoint: bool
+    monkeypatch: pytest.MonkeyPatch, extra_endpoint: bool
 ) -> None:
     # given
     monkeypatch.setenv("DEPLOY_ENV", "qa")
@@ -578,23 +541,23 @@ def test_go_service_selects_only_the_ready_go_pod(
     monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
     target = policy.Target()
     endpoints = [{"conditions": {"ready": True}, "targetRef": {"kind": "Pod", "name": "go-0"}}]
-    if java_endpoint:
+    if extra_endpoint:
         endpoints.append(
-            {"conditions": {"ready": True}, "targetRef": {"kind": "Pod", "name": "java-0"}}
+            {"conditions": {"ready": True}, "targetRef": {"kind": "Pod", "name": "other-0"}}
         )
-    labels = {"java-0": policy.JAVA_SELECTOR, "go-0": policy.SELECTOR}
 
     def read(*args: str, **_kwargs: object) -> dict:
         if args[:2] == ("get", "endpointslices"):
             assert args[2:] == ("-l", "kubernetes.io/service-name=qa-policy-api")
             return {"items": [{"endpoints": endpoints}]}
-        return {"metadata": {"labels": labels[args[2]]}}
+        assert args == ("get", "pod", "go-0")
+        return {"metadata": {"labels": policy.SELECTOR}}
 
     monkeypatch.setattr(target, "json", read)
     go_pod = {"metadata": {"name": "go-0"}}
 
     # when / then
-    if java_endpoint:
+    if extra_endpoint:
         with pytest.raises(DeploymentError, match="ready endpoints differ"):
             policy.verify_go_service(target, go_pod)
     else:
@@ -606,7 +569,7 @@ def test_go_service_selects_only_the_ready_go_pod(
     [(False, False, True), (True, True, True), (True, False, False)],
     ids=["no-database", "database-ready", "database-unverified"],
 )
-def test_workload_verification_does_not_depend_on_java_policy(
+def test_workload_verification_checks_database_readiness(
     monkeypatch: pytest.MonkeyPatch, database: bool, logged: bool, accepted: bool
 ) -> None:
     # given
@@ -650,15 +613,15 @@ def test_workload_verification_does_not_depend_on_java_policy(
     ready = {"msg": "policy database ready", "database_role": "go_policy_writer"}
     logs = "\n".join(json.dumps(record) for record in [started, *([ready] if logged else [])])
     monkeypatch.setattr(target, "kubectl", lambda *_args, **_kwargs: logs)
-    monkeypatch.setattr(target, "json", lambda *_args, **_kwargs: pytest.fail("Java lookup"))
+    monkeypatch.setattr(
+        target, "json", lambda *_args, **_kwargs: pytest.fail("unexpected Kubernetes lookup")
+    )
     monkeypatch.setattr(policy, "OwnedPortForward", Forward)
     monkeypatch.setattr(policy, "response", answer)
     monkeypatch.setattr(policy, "verify_direct_rpc", lambda *_args: None)
-    services: list[dict] = []
-    gateway: list[str] = []
-    monkeypatch.setattr(policy, "verify_go_service", lambda _target, value: services.append(value))
+    verified_pods = []
     monkeypatch.setattr(
-        policy, "verify_gateway_route", lambda value, _pod: gateway.append(value.environment)
+        policy, "verify_go_service", lambda _target, value: verified_pods.append(value)
     )
 
     if not accepted:
@@ -673,158 +636,7 @@ def test_workload_verification_does_not_depend_on_java_policy(
 
     # then
     assert workload == pod
-    assert services == [pod]
-    assert gateway == ["local-dev"]
-
-
-@pytest.mark.parametrize("routing", ["java", "config-file", "environment", "profile"])
-def test_gateway_route_observes_effective_destination_beside_healthy_java(
-    monkeypatch: pytest.MonkeyPatch, routing: str
-) -> None:
-    # given
-    monkeypatch.setenv("DEPLOY_ENV", "qa")
-    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
-    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
-    target = policy.Target()
-    services = {"product-service": {"urls": ["http://qa-product-api.qa-svc.svc.cluster.local:80"]}}
-    if routing == "config-file":
-        services["policy-service"] = {"urls": ["http://qa-elsewhere:80"]}
-    env = [
-        {"name": "MICRONAUT_ENVIRONMENTS", "value": "local-dev" if routing == "profile" else "qa"},
-        {"name": "MICRONAUT_CONFIG_FILES", "value": "/etc/product-route/application.yml"},
-    ]
-    if routing == "environment":
-        env.append({"name": "MICRONAUT_HTTP_SERVICES_POLICY_SERVICE_URLS", "value": "http://x"})
-    gateway_pod = {
-        "metadata": {"labels": policy.gateway_selector("qa")},
-        "spec": {
-            "containers": [
-                {
-                    "env": env,
-                    "volumeMounts": [
-                        {"name": "route", "mountPath": "/etc/product-route", "readOnly": True}
-                    ],
-                }
-            ],
-            "volumes": [{"name": "route", "configMap": {"name": "qa-gateway-route"}}],
-        },
-    }
-    override = {"micronaut": {"http": {"services": services}}}
-
-    def endpoints(service: str, name: str) -> dict:
-        return {
-            "items": [
-                {
-                    "endpoints": [
-                        {"conditions": {"ready": True}, "targetRef": {"kind": "Pod", "name": name}}
-                    ]
-                }
-            ]
-        }
-
-    def read(*args: str, **_kwargs: object) -> dict:
-        if args[:2] == ("get", "endpointslices"):
-            service = args[3].split("=", 1)[1]
-            name = "gateway-0" if "gateway" in service else "java-0"
-            return endpoints(service, name)
-        if args[:2] == ("get", "configmap"):
-            assert args[2] == "qa-gateway-route"
-            return {"data": {"application.yml": yaml.safe_dump(override)}}
-        if args[:2] == ("get", "service"):
-            return {"spec": {"type": "ClusterIP", "selector": dict(policy.JAVA_SELECTOR)}}
-        if args[2] == "gateway-0":
-            return gateway_pod
-        return {"metadata": {"labels": dict(policy.JAVA_SELECTOR)}}
-
-    monkeypatch.setattr(target, "json", read)
-
-    go_pod = {"metadata": {"name": "go-0"}}
-
-    # when / then
-    with pytest.raises(DeploymentError, match="Policy upstream"):
-        policy.verify_gateway_route(target, go_pod)
-
-
-def test_gateway_route_rejects_one_stale_java_target_after_switch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # given
-    monkeypatch.setenv("DEPLOY_ENV", "qa")
-    monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
-    monkeypatch.setenv("DEPLOY_SVC_NS", "qa-svc")
-    target = policy.Target()
-    go_route = "http://qa-policy-api.qa-svc.svc.cluster.local:80"
-    java_route = "http://qa-policy-api-legacy:80"
-    monkeypatch.setattr(policy, "configured_gateway_route", lambda _environment: go_route)
-    monkeypatch.setattr(
-        policy,
-        "gateway_services",
-        lambda _relative: {"policy-service": {"urls": [java_route]}},
-    )
-
-    def gateway_pod(name: str) -> dict:
-        return {
-            "metadata": {"labels": policy.gateway_selector("qa")},
-            "spec": {
-                "containers": [
-                    {
-                        "env": [
-                            {"name": "MICRONAUT_ENVIRONMENTS", "value": "qa"},
-                            {
-                                "name": "MICRONAUT_CONFIG_FILES",
-                                "value": "/etc/policy-route/application.yml",
-                            },
-                        ],
-                        "volumeMounts": [
-                            {"name": "route", "mountPath": "/etc/policy-route", "readOnly": True}
-                        ],
-                    }
-                ],
-                "volumes": [{"name": "route", "configMap": {"name": f"{name}-route"}}],
-            },
-        }
-
-    routes = {
-        "gateway-0-route": go_route,
-        "gateway-1-route": java_route,
-    }
-
-    def endpoints(*names: str) -> dict:
-        return {
-            "items": [
-                {
-                    "endpoints": [
-                        {
-                            "conditions": {"ready": True},
-                            "targetRef": {"kind": "Pod", "name": name},
-                        }
-                        for name in names
-                    ]
-                }
-            ]
-        }
-
-    def read(*args: str, **_kwargs: object) -> dict:
-        if args[:2] == ("get", "endpointslices"):
-            service = args[3].split("=", 1)[1]
-            return (
-                endpoints("gateway-0", "gateway-1") if "gateway" in service else endpoints("go-0")
-            )
-        if args[:2] == ("get", "configmap"):
-            route = routes[args[2]]
-            config = {"micronaut": {"http": {"services": {"policy-service": {"urls": [route]}}}}}
-            return {"data": {"application.yml": yaml.safe_dump(config)}}
-        if args[:2] == ("get", "service"):
-            return {"spec": {"type": "ClusterIP", "selector": dict(policy.SELECTOR)}}
-        if args[2].startswith("gateway-"):
-            return gateway_pod(args[2])
-        return {"metadata": {"labels": dict(policy.SELECTOR)}}
-
-    monkeypatch.setattr(target, "json", read)
-
-    # when / then
-    with pytest.raises(DeploymentError, match="gateway Pod gateway-1 Policy upstream"):
-        policy.verify_gateway_route(target, {"metadata": {"name": "go-0"}})
+    assert verified_pods == [pod]
 
 
 @pytest.mark.parametrize(
@@ -978,7 +790,7 @@ def test_policy_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPat
         # then
         # Provider ingress policy intentionally trusts only the real environment namespace.
         # This disposable namespace qualifies Policy's own HTTP allow/deny boundary; the direct
-        # environment verification still owns provider and actual gateway observations.
+        # environment verification still owns provider access checks.
         monkeypatch.setenv("DEPLOY_DENIAL_PROBE", "0")
         pod = policy.verify_workload(target, items)
         policy.verify_go_service(target, pod)
