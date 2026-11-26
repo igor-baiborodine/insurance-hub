@@ -162,7 +162,7 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 			count := int64(0)
 			for _, scope := range result.ScopeMetrics {
 				for _, measurement := range scope.Metrics {
-					if measurement.Name != "insurance_hub.service.requests" {
+					if measurement.Name != "insurance_hub.scaffold.requests" {
 						continue
 					}
 					for _, point := range measurement.Data.(metricdata.Sum[int64]).DataPoints {
@@ -172,8 +172,8 @@ func TestServer_FinalStatusMetricsAndSafeCompletion(t *testing.T) {
 							attrs[string(attr.Key)] = attr.Value.AsString()
 						}
 						if len(attrs) != 4 ||
-							attrs["insurance_hub.service.operation"] != "echo" ||
-							attrs["insurance_hub.service.outcome"] != test.outcome ||
+							attrs["insurance_hub.scaffold.operation"] != "echo" ||
+							attrs["insurance_hub.scaffold.outcome"] != test.outcome ||
 							attrs["rpc.response.status_code"] != test.status {
 							t.Errorf(
 								"unsafe or incorrect labels: %v",
