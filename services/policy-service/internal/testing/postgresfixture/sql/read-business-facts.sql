@@ -1,4 +1,4 @@
--- Aggregate facts compared with the independently stated C02 expectations.
+-- Aggregate facts compared with the independently stated fixture expectations.
 SELECT format('counts=%s/%s/%s/%s/%s/%s;quote=%s;offerCovers=%s;versions=%s;orphans=%s;answers=%s',
     (SELECT count(*) FROM public.offer), (SELECT count(*) FROM public.offer_answers),
     (SELECT count(*) FROM public.offer_cover), (SELECT count(*) FROM public.policy),

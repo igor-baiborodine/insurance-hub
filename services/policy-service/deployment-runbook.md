@@ -49,8 +49,9 @@ kubectl kustomize k8s/overlays/local-dev/svc/agent-portal-gateway/legacy
 kubectl kustomize k8s/overlays/qa/svc/agent-portal-gateway/legacy
 ```
 
-The QA overlay uses an inactive release placeholder until release preparation activates the Policy
-resources. An activated placeholder fails the check. Local-dev requires an explicit,
+The last two renders are the Agent Portal Gateway overlays; confirm that each routes its Policy
+requests to the `<environment>-policy-api` Service. The QA overlay uses an inactive release
+placeholder until release preparation activates the Policy resources. An activated placeholder fails the check. Local-dev requires an explicit,
 source-matched image to perform operations. For disposable qualification, build a local image as
 below, then run
 `make go-svc-deploy-smoke SVC_NAME=policy` with the selected image and source revision exported.

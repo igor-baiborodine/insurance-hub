@@ -50,7 +50,7 @@ func TestNew_DisabledProviderAndW3CPropagation(t *testing.T) {
 	}
 }
 
-func TestNew_RejectsScaffoldIdentityAndExporterSettings(t *testing.T) {
+func TestNew_RejectsForeignIdentityAndExporterSettings(t *testing.T) {
 	// given
 	valid := config.Telemetry{
 		Enabled:          true,

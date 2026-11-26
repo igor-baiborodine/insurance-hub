@@ -47,7 +47,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.LoadJavaData(t, ctx)
+	fixture.LoadUnmanagedData(t, ctx)
 	fixture.Call(t, ctx, "migrate", "version=2")
 	pool, err := postgres.OpenPool(ctx, postgres.PoolSettings{
 		URL: fixture.WriterURL(
@@ -67,8 +67,8 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	businessDate := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
 
 	// when
-	offer, offerErr := store.Offer(ctx, postgresfixture.JavaOfferNumber)
-	existing, policyErr := store.Policy(ctx, postgresfixture.JavaPolicyNumber)
+	offer, offerErr := store.Offer(ctx, postgresfixture.UnmanagedOfferNumber)
+	existing, policyErr := store.Policy(ctx, postgresfixture.UnmanagedPolicyNumber)
 
 	// then
 	if offerErr != nil || optionalString(offer.TotalPrice) != "123.45" ||
@@ -83,11 +83,11 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		) {
 		t.Fatalf("stored offer: %+v (%v)", offer, offerErr)
 	}
-	// Java expires an offer 30 days after creation.
+	// An offer expires 30 days after creation.
 	if offer.CreationDate == nil || offer.CreationDate.AddDate(0, 0, 30).Before(businessDate) {
 		t.Fatal("the controlled business date does not keep the stored offer valid")
 	}
-	requireJavaPolicy(t, existing, policyErr)
+	requireUnmanagedPolicy(t, existing, policyErr)
 	if _, err := store.Policy(ctx, "missing"); !errors.Is(err, postgres.ErrNotFound) {
 		t.Fatalf("missing policy: %v", err)
 	}
@@ -157,7 +157,10 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		}
 		result := make(chan readResult, 1)
 		go func() {
-			policy, err := concurrentStore.Policy(ctx, postgresfixture.JavaPolicyNumber)
+			policy, err := concurrentStore.Policy(
+				ctx,
+				postgresfixture.UnmanagedPolicyNumber,
+			)
 			result <- readResult{policy: policy, err: err}
 		}()
 		select {
@@ -173,8 +176,8 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("policy read did not complete after the concurrent append")
 		}
-		requireJavaPolicy(t, read.policy, read.err)
-		current, err := store.Policy(ctx, postgresfixture.JavaPolicyNumber)
+		requireUnmanagedPolicy(t, read.policy, read.err)
+		current, err := store.Policy(ctx, postgresfixture.UnmanagedPolicyNumber)
 		if err != nil || len(current.Versions) != 3 ||
 			optionalInt64(current.Versions[2].Number) != 3 ||
 			len(current.Versions[2].Covers) != 1 ||
@@ -307,10 +310,10 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 	}
 }
 
-func requireJavaPolicy(t *testing.T, policy postgres.Policy, err error) {
+func requireUnmanagedPolicy(t *testing.T, policy postgres.Policy, err error) {
 	t.Helper()
 	if err != nil || len(policy.Versions) != 2 {
-		t.Fatalf("existing Java policy: %+v (%v)", policy, err)
+		t.Fatalf("existing unmanaged policy: %+v (%v)", policy, err)
 	}
 	first, second := policy.Versions[0], policy.Versions[1]
 	if optionalInt64(first.Number) != 1 || optionalString(first.TotalPremium) != "123.45" ||
@@ -334,7 +337,7 @@ func requireJavaPolicy(t *testing.T, policy postgres.Policy, err error) {
 		optionalString(first.AccountNumber) != optionalString(second.AccountNumber) ||
 		optionalDate(second.CoverTo) != "2026-11-23" ||
 		optionalDate(second.VersionFrom) != "2026-11-24" {
-		t.Fatalf("existing Java policy history differs from the C02 fixture: %+v", policy)
+		t.Fatalf("existing unmanaged policy history differs from the fixture: %+v", policy)
 	}
 }
 
@@ -533,7 +536,7 @@ func requireSQLCSchemaMatchesMigration(
 	}
 }
 
-// newTestOffer prices the parent TRI request with the independent C02 fractional quote.
+// newTestOffer prices the parent TRI request with the independent fractional quote.
 func newTestOffer(t *testing.T, number string) domain.Offer {
 	t.Helper()
 	offer, err := domain.NewOffer(number, domain.OfferRequest{

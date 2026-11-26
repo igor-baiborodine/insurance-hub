@@ -349,7 +349,7 @@ func postOfferRequest(ctx context.Context, address, body string) (*http.Response
 	return (&http.Client{Timeout: 10 * time.Second}).Do(request)
 }
 
-// requireOfferResponse checks the exact legacy response shape and numeric amounts.
+// requireOfferResponse checks the exact response shape and numeric amounts.
 func requireOfferResponse(t *testing.T, body string) string {
 	t.Helper()
 	decoder := json.NewDecoder(strings.NewReader(body))

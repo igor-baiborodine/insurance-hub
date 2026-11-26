@@ -104,20 +104,20 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 	})
 }
 
-func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
+func TestRun_PolicyMigrationAdoptsUnmanagedData(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	t.Run("foreign key action drift", func(t *testing.T) {
 		fixture := postgresfixture.New(t, ctx)
-		fixture.LoadJavaData(t, ctx)
+		fixture.LoadUnmanagedData(t, ctx)
 		fixture.Exec(t, ctx, changeCoverForeignKeyActionQuery)
 
 		refuse(t, ctx, fixture, "status", "incompatible Policy schema or owner")
 		refuse(t, ctx, fixture, "migrate", "incompatible Policy schema or owner")
 	})
 	fixture := postgresfixture.New(t, ctx)
-	fixture.LoadJavaData(t, ctx)
+	fixture.LoadUnmanagedData(t, ctx)
 	baseline := fixture.Query(t, ctx, postgresfixture.ReadRowFingerprints)
 	fixture.Call(t, ctx, "status", "unmanaged")
 
@@ -128,7 +128,10 @@ func TestRun_PolicyMigrationAdoptsJavaData(t *testing.T) {
 	fixture.Call(t, ctx, "status", "version=2")
 	requireBusinessData(t, ctx, fixture, baseline)
 	if got := fixture.Query(t, ctx, readAllocatorCatalogQuery); got != managedAllocators {
-		t.Fatalf("adopted allocators retain the Java sequence or lack identities: %q", got)
+		t.Fatalf(
+			"adopted allocators retain the shared sequence or lack identities: %q",
+			got,
+		)
 	}
 
 	// The rolled-back insert observes the first allocation and leaves gaps behind.
@@ -216,7 +219,7 @@ func requireBusinessData(
 		t,
 		ctx,
 		postgresfixture.ReadBusinessFacts,
-	); got != postgresfixture.JavaFacts {
+	); got != postgresfixture.UnmanagedFacts {
 		t.Fatalf("business facts changed: %q", got)
 	}
 }

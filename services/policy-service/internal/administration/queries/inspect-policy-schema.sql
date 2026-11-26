@@ -1,4 +1,4 @@
--- $1 selects the managed shape: identity IDs and the outbox. Otherwise the Java shape applies.
+-- $1 selects the managed shape: identity IDs and the outbox. Otherwise the unmanaged shape applies.
 -- Compare business columns and constraints exactly, not a fingerprint of PostgreSQL metadata.
 WITH expected_column (tbl, col, typ, not_null, identity_id, has_default, managed_only) AS (
     VALUES

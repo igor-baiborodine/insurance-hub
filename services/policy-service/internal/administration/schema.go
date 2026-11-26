@@ -20,15 +20,15 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 		return "", err
 	}
 	var tables int
-	var outbox, javaAllocator, history bool
+	var outbox, sharedAllocator, history bool
 	if err := db.QueryRowContext(ctx, inspectSchemaObjectsQuery).
-		Scan(&tables, &outbox, &javaAllocator, &history); err != nil {
+		Scan(&tables, &outbox, &sharedAllocator, &history); err != nil {
 		return "", fmt.Errorf("inspect schema objects: %w", err)
 	}
 	managed := false
 	switch {
-	case tables == 0 && !outbox && !javaAllocator:
-	case tables == businessTables && outbox && !javaAllocator:
+	case tables == 0 && !outbox && !sharedAllocator:
+	case tables == businessTables && outbox && !sharedAllocator:
 		managed = true
 	case tables == businessTables && !outbox:
 		if err := inspectPolicy(ctx, db, false, false); err != nil {

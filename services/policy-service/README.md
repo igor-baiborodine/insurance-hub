@@ -13,7 +13,7 @@
   - [Offer creation](#offer-creation)
   - [Policy issuance, lookup and termination](#policy-issuance-lookup-and-termination)
     - [Transactional outbox and consumers](#transactional-outbox-and-consumers)
-    - [Package map and request walkthrough](#package-map-and-request-walkthrough)
+  - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -169,10 +169,9 @@ make test-tooling
 
 ### Repository onboarding
 
-The [Go module topology guide](../../docs/go-module-topology.md) describes
-inventory and CI ownership. Policy is registered as a standalone module and Servicekit consumer.
-The [copy procedure](COPYING.md) records how the foundation was derived from the committed template.
-Use [Dashboard](../dashboard-service/README.md) as the reference for common runtime behavior.
+Policy is registered as a standalone module and consumer of the published `libs/servicekit`
+library. The [Go module topology guide](../../docs/go-module-topology.md) describes the repository
+inventory and CI ownership.
 
 ## Runtime configuration
 
@@ -182,7 +181,7 @@ do not repeat its supplied value.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
-| `SERVICE_NAME` | `policy-service` | Must equal the service's fixed logical name; the copy flow replaces that name. |
+| `SERVICE_NAME` | `policy-service` | Must equal the fixed logical name `policy-service`. |
 | `HTTP_ADDR` | `127.0.0.1:8080` | Valid host and numeric port; port `0` is available for tests. |
 | `GRPC_ADDR` | `127.0.0.1:9090` | Valid host and numeric port; port `0` is available for tests. |
 | `HEALTH_ADDR` | `127.0.0.1:8081` | Valid host and numeric port; port `0` is available for tests. Nonzero listener addresses must be pairwise distinct. |
@@ -220,12 +219,11 @@ do not repeat its supplied value.
 | `KAFKA_PUBLISH_TIMEOUT` | `3s` when enabled | Positive per-record acknowledgement timeout shorter than the non-telemetry shutdown budget. |
 
 Identity values use 1–128 ASCII letters, digits, dots, underscores or hyphens. The namespace
-`insurance-hub`, implementation `go` and generated logical service name are fixed. `development` is
-the only environment exempt from canonical-version validation. Enabled telemetry requires explicit
-non-development environment/version/instance values and rejects the `local-` instance prefix.
-Kubernetes deployments use the Downward API to inject Pod `metadata.uid`; the existing release
-process derives the matching canonical version from verified full source. See the common
-[Go service identity contract](../../docs/migration/phase-4/go-service-identity-and-validation.md).
+`insurance-hub`, implementation `go` and logical service name `policy-service` are fixed.
+`development` is the only environment exempt from canonical-version validation. Enabled telemetry
+requires explicit non-development environment/version/instance values and rejects the `local-`
+instance prefix. Kubernetes deployments use the Downward API to inject Pod `metadata.uid`; the
+release workflow derives the matching canonical version from the verified full source commit.
 
 Logs are JSON with UTC timestamps and `service_namespace`, `service_name`, `service_version`,
 `service_instance_id`, `deployment_environment_name`, and `service_implementation`. Valid logging
@@ -263,8 +261,8 @@ the HTTP server, gRPC client and gRPC server trace. Service identity stays on th
 The service lifecycle owns provider shutdown within the overall shutdown budget.
 `Config` embeds the shared `Runtime`, `GRPC`, `HTTPServer`, and `Telemetry` setting groups. The local identity
 type embeds `servicekit/identity.Identity` and adds Policy validation. Loading uses the shared
-environment keys and `LoadGRPC` at the existing lookup position, then applies local
-identity, listener and shutdown-budget rules. The development identity uses the shared constructor.
+environment keys and `LoadGRPC`, then applies local identity, listener and shutdown-budget rules.
+The development identity uses the shared constructor.
 Embedding does not load environment variables or automatically validate settings. The telemetry
 provider embeds the shared provider and uses its promoted methods directly.
 All 17 canonical gRPC statuses remain distinct in completion logs and request metrics; unsupported
@@ -489,28 +487,7 @@ analysis and consumer recovery.
 | Storage unreachable before the transaction starts, or not configured | Unavailable | none |
 | Rejected commit or another unexpected failure | Internal | none |
 
-
-Policy uses Product as an operational-design reference and calls Product's API only while creating
-an offer. The modules keep independent runtime code and use the repository's shared non-runtime Go
-Make tooling. New copies must define their own contracts, persistence, authorization, exposure and
-deployment requirements.
-
-| Foundation | Product reference | Policy foundation |
-| --- | --- | --- |
-| Go and shared libraries/tools | `go.mod`, `Makefile` | Exact matching shared pins; independent manifests and tool caches. |
-| Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
-| Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
-| Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, four fixed lifecycle operations, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness including the optional database, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
-| Business architecture | Product application-owned catalog ports and injected adapters | `CreateOffer` owns its Product, Pricing and offer-store ports; adapters are injected by composition. |
-
-
-Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
-fixes with behavior tests, update intentional differences explicitly, and run the renamed copy
-proof. Existing services adopt later fixes through their own reviewed changes.
-
-### Package map and request walkthrough
+## Package map and request walkthrough
 
 | Package | Responsibility |
 | --- | --- |
