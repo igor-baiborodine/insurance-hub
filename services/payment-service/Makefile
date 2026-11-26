@@ -177,7 +177,12 @@ check-candidate-servicekit:
 	@test "$$(GOWORK=off $(GO) list -m -f '{{.Replace.Dir}}' github.com/igor-baiborodine/insurance-hub/libs/servicekit)" = "$$SERVICEKIT_CANDIDATE_LIBRARY" || { echo 'check-candidate-servicekit: wrong library source selected' >&2; exit 1; }
 	@echo 'check-candidate-servicekit: selected verified candidate directory'
 
-check: check-go-pr
+# check-go-pr keeps the module-root profiles that CI reads; check writes them to a disposable directory.
+check:
+	@profile_dir="$$(mktemp -d)" && trap 'rm -rf -- "$$profile_dir"' EXIT && \
+		$(MAKE) --no-print-directory check-go-pr \
+		COVERAGE_FILE="$$profile_dir/coverage.txt" \
+		INTEGRATION_COVERAGE_FILE="$$profile_dir/integration-coverage.txt"
 
 test-integration:
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
