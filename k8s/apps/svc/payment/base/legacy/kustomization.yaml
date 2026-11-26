@@ -21,5 +21,3 @@ configMapGenerator:
       - TRACING_ZIPKIN_ENABLED=true
       - ZIPKIN_HOST=localhost
       - ZIPKIN_PORT=9411
-      - JSREPORT_HOST=localhost
-      - JSREPORT_PORT=5488

@@ -22,4 +22,3 @@ configMapGenerator:
       - KAFKA_HOST=qa-kafka-kafka-bootstrap.qa-data.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=true
       - ZIPKIN_HOST=qa-alloy.qa-monitoring.svc.cluster.local
-      - JSREPORT_HOST=qa-jsreport.qa-svc.svc.cluster.local
