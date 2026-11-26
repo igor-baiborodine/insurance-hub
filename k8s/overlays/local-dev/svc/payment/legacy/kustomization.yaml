@@ -21,4 +21,3 @@ configMapGenerator:
       - PG_HOST=local-dev-postgres-payment-rw.local-dev-all.svc.cluster.local
       - KAFKA_HOST=local-dev-kafka-kafka-bootstrap.local-dev-all.svc.cluster.local
       - TRACING_ZIPKIN_ENABLED=false
-      - JSREPORT_HOST=local-dev-jsreport.local-dev-all.svc.cluster.local
