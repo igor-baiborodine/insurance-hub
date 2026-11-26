@@ -299,9 +299,10 @@ rollback under the writer login.
 
 ### Refusals and retry
 
-- Status and migrate refuse a mismatched enrollment, a partial or incompatible schema, invalid
-  history, or an allocator behind its table. A refused run changes no schema, data or history.
-  Fix the reported cause and rerun; never repair history by hand.
+- Status and migrate refuse a mismatched enrollment, a partial or incompatible schema, or invalid
+  history in `public.policy_schema_version`. Migrate creates the schema, records its version and
+  applies the writer grants in one transaction, so a refused or failed run changes no schema, data
+  or history. Fix the reported cause and rerun; never repair history by hand.
 - An interrupted ensure has already published its Secrets. Rerun it: it reuses those credentials
   and refuses a role that exists without its Secret. Inspect before acting on any other drift.
 - If readiness stays false, run `resource-verify` and migration status, then check that the

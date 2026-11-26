@@ -1,4 +1,3 @@
--- +goose Up
 CREATE TABLE public.offer (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     creation_date date,
@@ -64,3 +63,9 @@ CREATE TABLE public.policy_outbox (
 );
 CREATE INDEX policy_outbox_pending_idx
     ON public.policy_outbox (policy_id, id) WHERE published_at IS NULL;
+
+-- Applied schema versions; written only by the migrator in the same transaction as the schema.
+CREATE TABLE public.policy_schema_version (
+    version_id bigint PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,1 +1,1 @@
-INSERT INTO public.goose_db_version (version_id, is_applied) VALUES (2, true)
+INSERT INTO public.policy_schema_version (version_id) VALUES (2)

@@ -14,8 +14,8 @@ type queryRower interface {
 }
 
 // inspect checks target identity, schema compatibility and logical migration state. The same
-// function runs under the migration session lock and inside read-only status transactions. Only
-// an empty database or one installed by these migrations is accepted.
+// function runs in the locked migration transaction and in read-only status transactions. Only an
+// empty database or one installed by this migration is accepted.
 func inspect(ctx context.Context, db queryRower, target Target) (string, error) {
 	if err := inspectPlatform(ctx, db, target); err != nil {
 		return "", err
@@ -26,28 +26,25 @@ func inspect(ctx context.Context, db queryRower, target Target) (string, error) 
 		Scan(&tables, &outbox, &history); err != nil {
 		return "", fmt.Errorf("inspect schema objects: %w", err)
 	}
-	var installed bool
-	switch {
-	case tables == 0 && !outbox:
-	case tables == businessTables && outbox:
-		installed = true
-	default:
-		return "", errors.New("partial Policy schema")
-	}
 	if !history {
-		if installed {
+		switch {
+		case tables == 0 && !outbox:
+			return "uninitialized", nil
+		case tables == businessTables && outbox:
 			return "", errors.New("installed Policy schema has no migration history")
+		default:
+			return "", errors.New("partial Policy schema")
 		}
-		return "uninitialized", nil
 	}
-	status, err := inspectHistory(ctx, db, installed)
+	status, err := inspectHistory(ctx, db)
 	if err != nil {
 		return "", err
 	}
-	if installed {
-		if err := inspectPolicy(ctx, db); err != nil {
-			return "", err
-		}
+	if tables != businessTables || !outbox {
+		return "", errors.New("partial Policy schema")
+	}
+	if err := inspectPolicy(ctx, db); err != nil {
+		return "", err
 	}
 	return status, nil
 }
@@ -75,19 +72,10 @@ func inspectPolicy(ctx context.Context, db queryRower) error {
 	if !accepted {
 		return errors.New("incompatible Policy schema or owner")
 	}
-	if err := db.QueryRowContext(ctx, inspectIdentityProgressQuery).
-		Scan(&accepted); err != nil {
-		return fmt.Errorf("inspect Policy identity progress: %w", err)
-	}
-	if !accepted {
-		return errors.New(
-			"an identity allocator is behind its Policy table; no repair performed",
-		)
-	}
 	return nil
 }
 
-func inspectHistory(ctx context.Context, db queryRower, installed bool) (string, error) {
+func inspectHistory(ctx context.Context, db queryRower) (string, error) {
 	var shape bool
 	if err := db.QueryRowContext(ctx, inspectHistorySchemaQuery).Scan(&shape); err != nil {
 		return "", fmt.Errorf("inspect migration history shape: %w", err)
@@ -96,7 +84,7 @@ func inspectHistory(ctx context.Context, db queryRower, installed bool) (string,
 		return "", errors.New("incompatible migration history metadata")
 	}
 	var version string
-	if err := db.QueryRowContext(ctx, inspectHistoryRowsQuery, installed).
+	if err := db.QueryRowContext(ctx, inspectHistoryRowsQuery, schemaVersion).
 		Scan(&version); err != nil {
 		return "", fmt.Errorf("inspect migration history rows: %w", err)
 	}

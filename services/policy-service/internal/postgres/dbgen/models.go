@@ -57,6 +57,11 @@ type PolicyOutbox struct {
 	PublishedAt pgtype.Timestamptz
 }
 
+type PolicySchemaVersion struct {
+	VersionID int64
+	AppliedAt pgtype.Timestamptz
+}
+
 type PolicyVersion struct {
 	ID                 int64
 	AccountNumber      pgtype.Text

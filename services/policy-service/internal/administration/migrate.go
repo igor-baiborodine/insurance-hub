@@ -3,109 +3,66 @@ package administration
 import (
 	"context"
 	"database/sql"
-	"embed"
+	_ "embed"
 	"errors"
 	"fmt"
-	"io/fs"
-	"time"
 
 	"github.com/pressly/goose/v3"
-	"github.com/pressly/goose/v3/lock"
 )
 
-// AppliedStatus is the status reported for the current managed schema.
-const AppliedStatus = "version=1"
+const (
+	schemaVersion = 1
+	// AppliedStatus is the status reported for the current Policy schema.
+	AppliedStatus = "version=1"
+)
 
-const cleanupBudget = 5 * time.Second
+//go:embed migrations/00001_policy.sql
+var schemaSQL string
 
-//go:embed migrations/*.sql
-var migrationSQL embed.FS
-
-// Migrate verifies the protected target and schema under the same session lock Goose uses for
-// each migration. Applying an explicit version keeps Goose from initializing history before the
-// validating lock has rejected a wrong target or incompatible schema.
-func Migrate(parent context.Context, db *sql.DB, target Target) error {
-	source, err := fs.Sub(migrationSQL, "migrations")
-	if err != nil {
-		return fmt.Errorf("load migration assets: %w", err)
-	}
-	sessionLocker, err := lock.NewPostgresSessionLocker(
-		lock.WithLockID(policyLockID), lock.WithLockTimeout(1, 30),
-		lock.WithUnlockTimeout(1, 5),
+// Migrate applies the Policy schema, records its version and applies the writer grants in one
+// transaction under the administration lock. A replay inspects the installed schema and reapplies
+// only the grants, so an interrupted run needs no special repair command.
+func Migrate(ctx context.Context, db *sql.DB, target Target) error {
+	migration := goose.NewGoMigration(schemaVersion, &goose.GoFunc{
+		RunTx: func(ctx context.Context, tx *sql.Tx) error {
+			if err := acquirePolicyLock(ctx, tx); err != nil {
+				return err
+			}
+			status, err := inspect(ctx, tx, target)
+			if err != nil {
+				return err
+			}
+			if status != AppliedStatus {
+				if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+					return fmt.Errorf("apply Policy schema version 1: %w", err)
+				}
+				if _, err := tx.ExecContext(
+					ctx,
+					recordSchemaVersionQuery,
+					schemaVersion,
+				); err != nil {
+					return fmt.Errorf("record Policy schema version: %w", err)
+				}
+			}
+			if _, err := tx.ExecContext(ctx, applyWriterGrantsQuery); err != nil {
+				return fmt.Errorf("apply Policy writer grants: %w", err)
+			}
+			return nil
+		},
+	}, nil)
+	// Goose owns the transaction. Policy records its own history inside that transaction, so a
+	// refused or failed run leaves no history, schema or grant behind.
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, nil,
+		goose.WithGoMigrations(migration), goose.WithDisableGlobalRegistry(true),
+		goose.WithDisableVersioning(true),
 	)
 	if err != nil {
-		return fmt.Errorf("configure Policy migration lock: %w", err)
+		return errors.New("configure Policy migration failed")
 	}
-	provider, err := goose.NewProvider(
-		goose.DialectPostgres,
-		db,
-		source,
-		goose.WithDisableGlobalRegistry(true),
-		goose.WithSessionLocker(
-			validatingLocker{SessionLocker: sessionLocker, target: target},
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("configure Policy migration: %w", err)
-	}
-	if _, err := provider.ApplyVersion(parent, 1, true); err != nil &&
-		!isOnlyAlreadyApplied(err) {
-		return fmt.Errorf("apply Policy migration version 1: %w", err)
-	}
-	return applyGrants(parent, db, target)
-}
-
-// applyGrants also runs on replay, so an interrupted grant phase needs no special repair command.
-func applyGrants(ctx context.Context, db *sql.DB, target Target) (resultErr error) {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin Policy grants: %w", err)
-	}
-	defer func() {
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			resultErr = errors.Join(
-				resultErr,
-				fmt.Errorf("rollback Policy grants: %w", err),
-			)
-		}
-	}()
-	if err := acquirePolicyLock(ctx, tx); err != nil {
-		return err
-	}
-	status, err := inspect(ctx, tx, target)
-	if err != nil {
-		return fmt.Errorf("verify Policy migration: %w", err)
-	}
-	if status != AppliedStatus {
-		return fmt.Errorf("verify Policy migration: unexpected state %q", status)
-	}
-	if _, err := tx.ExecContext(ctx, applyWriterGrantsQuery); err != nil {
-		return fmt.Errorf("apply Policy writer grants: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit Policy grants; inspect and retry safely: %w", err)
+	if _, err := provider.ApplyVersion(ctx, schemaVersion, true); err != nil {
+		return fmt.Errorf("run Policy migration: %w", err)
 	}
 	return nil
-}
-
-func isOnlyAlreadyApplied(err error) bool {
-	if !errors.Is(err, goose.ErrAlreadyApplied) {
-		return false
-	}
-	var combined interface{ Unwrap() []error }
-	if !errors.As(err, &combined) {
-		return true
-	}
-	causes := combined.Unwrap()
-	if len(causes) == 0 {
-		return false
-	}
-	for _, cause := range causes {
-		if !isOnlyAlreadyApplied(cause) {
-			return false
-		}
-	}
-	return true
 }
 
 // Status has no Goose calls. Its transaction rejects writes even though the migration login can
@@ -134,27 +91,4 @@ func Status(parent context.Context, db *sql.DB, target Target) (state string, re
 		return "", fmt.Errorf("complete read-only inspection: %w", err)
 	}
 	return state, nil
-}
-
-type validatingLocker struct {
-	lock.SessionLocker
-	target Target
-}
-
-func (l validatingLocker) SessionLock(ctx context.Context, conn *sql.Conn) error {
-	if err := l.SessionLocker.SessionLock(ctx, conn); err != nil {
-		return err
-	}
-	if _, err := inspect(ctx, conn, l.target); err != nil {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupBudget)
-		defer cancel()
-		return errors.Join(err, l.SessionLocker.SessionUnlock(cleanup, conn))
-	}
-	return nil
-}
-
-func (l validatingLocker) SessionUnlock(ctx context.Context, conn *sql.Conn) error {
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupBudget)
-	defer cancel()
-	return l.SessionLocker.SessionUnlock(cleanup, conn)
 }

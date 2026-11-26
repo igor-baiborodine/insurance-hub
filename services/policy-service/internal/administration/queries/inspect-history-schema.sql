@@ -1,11 +1,10 @@
--- Goose owns sequence/index/default details; check readable history and its owner only.
+-- Check the history table shape and owner before reading its rows.
 SELECT history.relkind = 'r' AND history.relpersistence = 'p'
     AND history.relowner = 'policy'::regrole AND NOT history.relrowsecurity
     AND (
-        SELECT count(*) = 4 AND bool_and(
+        SELECT count(*) = 2 AND bool_and(
             attnotnull AND (attname, atttypid) IN (
-                ('id', 'integer'::regtype), ('version_id', 'bigint'::regtype),
-                ('is_applied', 'boolean'::regtype), ('tstamp', 'timestamp'::regtype)
+                ('version_id', 'bigint'::regtype), ('applied_at', 'timestamptz'::regtype)
             )
         )
         FROM pg_attribute
@@ -13,4 +12,4 @@ SELECT history.relkind = 'r' AND history.relpersistence = 'p'
     )
     AND NOT EXISTS (SELECT FROM pg_trigger WHERE tgrelid = history.oid AND NOT tgisinternal)
 FROM pg_class AS history
-WHERE history.oid = 'public.goose_db_version'::regclass
+WHERE history.oid = 'public.policy_schema_version'::regclass

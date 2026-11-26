@@ -12,10 +12,9 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/policy-service/internal/testing/postgresfixture"
 )
 
-const identityAllocators = "cover.id=ALWAYS,goose_db_version.id=BY DEFAULT,offer.id=ALWAYS," +
-	"policy.id=ALWAYS,policy_outbox.id=ALWAYS,policy_version.id=ALWAYS;" +
-	"sequences=cover_id_seq,goose_db_version_id_seq,offer_id_seq,policy_id_seq," +
-	"policy_outbox_id_seq,policy_version_id_seq"
+const identityAllocators = "cover.id=ALWAYS,offer.id=ALWAYS,policy.id=ALWAYS," +
+	"policy_outbox.id=ALWAYS,policy_version.id=ALWAYS;" +
+	"sequences=cover_id_seq,offer_id_seq,policy_id_seq,policy_outbox_id_seq,policy_version_id_seq"
 
 func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 	// given
@@ -75,9 +74,8 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 		t.Fatalf("fresh allocators: got %q", got)
 	}
 	history := fixture.Query(t, ctx, readMigrationHistoryQuery)
-	if !strings.HasPrefix(history, "0:true:") || !strings.Contains(history, ",1:true:") ||
-		strings.Count(history, ",") != 1 {
-		t.Fatalf("expected one base and one applied history row, got %q", history)
+	if !strings.HasPrefix(history, "1:") || strings.Contains(history, ",") {
+		t.Fatalf("expected one applied history row, got %q", history)
 	}
 	if got := generatedAggregate(t, ctx, fixture, true); got != "1,1,1,1:t" {
 		t.Fatalf("fresh writer insert: got %q", got)
@@ -111,15 +109,6 @@ func TestRun_PolicyMigrationFreshTarget(t *testing.T) {
 		refuse(t, ctx, fixture, "status", "incompatible Policy schema or owner")
 		refuse(t, ctx, fixture, "migrate", "incompatible Policy schema or owner")
 	})
-
-	t.Run("allocator behind its table", func(t *testing.T) {
-		// given
-		t.Cleanup(func() { fixture.Query(t, ctx, restoreOfferAllocatorQuery) })
-		fixture.Query(t, ctx, rewindOfferAllocatorQuery)
-
-		refuse(t, ctx, fixture, "status", "identity allocator is behind")
-		refuse(t, ctx, fixture, "migrate", "identity allocator is behind")
-	})
 }
 
 // refuse requires a redacted refusal that leaves schema, history and business rows unchanged.
@@ -151,7 +140,7 @@ func snapshot(t *testing.T, ctx context.Context, fixture *postgresfixture.Fixtur
 	t.Helper()
 	state := fixture.Query(t, ctx, readCatalogSnapshotQuery)
 	history, rows := "", ""
-	if strings.Contains(state, "goose_db_version:r") {
+	if strings.Contains(state, "policy_schema_version:r") {
 		history = fixture.Query(t, ctx, readMigrationHistoryQuery)
 	}
 	if strings.Contains(state, "cover:r") && strings.Contains(state, "offer_answers:r") {

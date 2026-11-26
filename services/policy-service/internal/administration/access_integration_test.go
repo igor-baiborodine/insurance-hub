@@ -58,7 +58,7 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 		{"alter table", "ALTER TABLE public.policy ADD COLUMN denied integer"},
 		{"delete rows", "DELETE FROM public.cover"},
 		{"truncate outbox", "TRUNCATE public.policy_outbox"},
-		{"read migration history", "SELECT count(*) FROM public.goose_db_version"},
+		{"read migration history", "SELECT count(*) FROM public.policy_schema_version"},
 		{"change enrollment", "UPDATE policy_admin.target_identity SET environment = 'qa'"},
 		{"assume owner", "SET ROLE policy"},
 		{"reset identity allocator", "SELECT setval('public.offer_id_seq', 1, false)"},

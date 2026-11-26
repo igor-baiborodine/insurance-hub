@@ -48,8 +48,8 @@ SELECT (SELECT count(*) = 2 AND bool_and(
             AND NOT has_table_privilege('go_policy_migrator', relation,
                 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'))
         FROM managed))
-    AND (to_regclass('public.goose_db_version') IS NULL OR NOT EXISTS (
-        SELECT FROM login WHERE has_table_privilege(oid, 'public.goose_db_version',
+    AND (to_regclass('public.policy_schema_version') IS NULL OR NOT EXISTS (
+        SELECT FROM login WHERE has_table_privilege(oid, 'public.policy_schema_version',
             'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')))
     AND NOT EXISTS (
         SELECT FROM identity_sequence
