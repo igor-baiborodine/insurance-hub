@@ -158,11 +158,19 @@ make test-tooling
 
 ### Repository onboarding
 
-The [Go module topology guide](../../docs/go-module-topology.md) describes inventory and CI
-ownership. When installed as an immediate `services/*-service` directory, the generic Go PR
-workflow selects this module's qualifying inputs; inventory and ownership onboarding is a separate
-reviewed change. The [copy procedure](COPYING.md) records how the foundation was derived from the
-committed template.
+Payment is registered in the root module inventory as a standalone business service owned by
+the Payment service maintainers and as a consumer of the published `libs/servicekit` library. The
+[Go module topology guide](../../docs/go-module-topology.md) describes the inventory and CI
+ownership. Pull requests can rely on these checks:
+
+- The module PR workflow runs `make check-go-pr` for changes to this module. It enforces 75% patch
+  coverage over `coverage.txt` and `integration-coverage.txt` and uploads both profiles.
+- The shared Go PR workflow validates the inventory. When Servicekit changes, it runs this module's
+  `shared-fast-*` and `shared-candidate-*` consumer phases.
+
+Main-branch coverage reporting and the Go service release catalog are not configured for Payment;
+each is a separate registration. The [copy procedure](COPYING.md) records how the foundation was
+derived from the committed template.
 
 ## Runtime configuration
 
