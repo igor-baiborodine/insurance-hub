@@ -587,7 +587,7 @@ def verify(manager: Kubernetes) -> None:
                 )
                 deny(connection, "DELETE FROM public.policy WHERE false")
                 deny(connection, "ALTER TABLE public.policy ADD COLUMN denied integer")
-                deny(connection, "SELECT count(*) FROM public.goose_db_version")
+                deny(connection, "SELECT count(*) FROM public.policy_schema_version")
     print(f"policy-resources: verified {manager.environment} roles, grants and SQL denials")
 
 

@@ -12,7 +12,7 @@
     - [Target selection](#target-selection)
     - [Fresh installation order](#fresh-installation-order)
     - [Access contract](#access-contract)
-    - [Populated compatibility and replay](#populated-compatibility-and-replay)
+    - [Migration qualification](#migration-qualification)
     - [Refusals and retry](#refusals-and-retry)
     - [Post-qualification disposition](#post-qualification-disposition)
 
@@ -222,10 +222,8 @@ Policy table, and the Pod logs `policy database ready` with `database_role=go_po
 
 QA uses the same contract with Secret `qa-postgres-policy-writer-creds` in `qa-svc` and the
 `qa-postgres-policy` CNPG cluster in `qa-data`. A QA release carrying these settings starts only
-after that Secret exists and the schema is adopted, so run `resource-ensure`, migration `status`
+after that Secret exists and the schema is migrated, so run `resource-ensure`, migration `status`
 and `migrate`, then `resource-verify` with the QA coordinates before merging such a release.
-Adoption replaces a shared sequence allocator with table-local identities, so any writer that
-still allocates identifiers from that sequence can no longer insert into the adopted tables.
 
 ### Target selection
 
@@ -270,7 +268,7 @@ kubectl config use-context kind-local-dev-insurance-hub
 4. `POLICY_MIGRATION_OPERATION=status make -C services/policy-service migration` reports
    `uninitialized`. Then `POLICY_MIGRATION_OPERATION=migrate
    POLICY_MIGRATION_CONFIRM=migrate-local-dev-policy-schema make -C services/policy-service
-   migration` returns `version=2`, and status confirms it. The command runs the checkout's migrator
+   migration` returns `version=1`, and status confirms it. The command runs the checkout's migrator
    through an owned port-forward to the primary. It writes the enrollment, CA and tunnel URL only
    to a private temporary directory.
 5. `make -C services/policy-service resource-verify` now also proves writer reads and SQLSTATE
@@ -288,23 +286,23 @@ kubectl config use-context kind-local-dev-insurance-hub
 | `go_policy_writer` | Secret `local-dev-postgres-policy-writer-creds` (workload) | `CONNECT`; `USAGE` on `public`; `SELECT, INSERT, UPDATE` on the six business tables and `policy_outbox` |
 
 `PUBLIC` has no database or `public` schema privileges. Migration reapplies the writer grants on
-every run, so fresh and adopted schemas converge on the same access. Credentials stay in their
+every run, so a replay converges on the same access. Credentials stay in their
 Secrets and temporary 0600 files; never place a value in arguments, logs or evidence.
 
-### Populated compatibility and replay
+### Migration qualification
 
-Populated compatibility is qualified on disposable PostgreSQL rather than a serving database.
-`make -C services/policy-service test-integration` loads an independent compatibility fixture,
-checks its baseline and adopts it. It compares all six table fingerprints, verifies the generated
-IDs `2/3/7/9`, replays without rewinding an allocator, and then exercises reads, atomic issuance
-and rollback under the writer login. Applying adoption to a serving database is a separate
-operation outside this runbook.
+`make -C services/policy-service test-integration` qualifies the migration on disposable
+PostgreSQL rather than a serving database. It migrates an empty target, checks the generated
+identities, replays without changing the schema or history, and refuses schema drift. It then
+seeds a multi-version policy and exercises reads, atomic issuance, termination history and
+rollback under the writer login.
 
 ### Refusals and retry
 
-- Status and migrate refuse a mismatched enrollment, a partial or incompatible schema, invalid
-  history, or an allocator behind its table. A refused run changes no schema, data or history.
-  Fix the reported cause and rerun; never repair history by hand.
+- Status and migrate refuse a mismatched enrollment, a partial or incompatible schema, or invalid
+  history in `public.policy_schema_version`. Migrate creates the schema, records its version and
+  applies the writer grants in one transaction, so a refused or failed run changes no schema, data
+  or history. Fix the reported cause and rerun; never repair history by hand.
 - An interrupted ensure has already published its Secrets. Rerun it: it reuses those credentials
   and refuses a role that exists without its Secret. Inspect before acting on any other drift.
 - If readiness stays false, run `resource-verify` and migration status, then check that the

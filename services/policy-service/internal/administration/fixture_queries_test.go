@@ -55,11 +55,8 @@ var insertUnknownHistoryQuery string
 //go:embed testdata/sql/delete-unknown-history.sql
 var deleteUnknownHistoryQuery string
 
-//go:embed testdata/sql/rewind-offer-allocator.sql
-var rewindOfferAllocatorQuery string
-
-//go:embed testdata/sql/restore-offer-allocator.sql
-var restoreOfferAllocatorQuery string
-
 //go:embed testdata/sql/change-cover-foreign-key-action.sql
 var changeCoverForeignKeyActionQuery string
+
+//go:embed testdata/sql/restore-cover-foreign-key-action.sql
+var restoreCoverForeignKeyActionQuery string

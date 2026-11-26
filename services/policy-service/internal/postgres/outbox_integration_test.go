@@ -30,7 +30,7 @@ func TestRun_PolicyOutboxOrdering(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=2")
+	fixture.Call(t, ctx, "migrate", "version=1")
 	fixture.Exec(t, ctx, insertOrderingIntentsQuery)
 	first := openOutboxStore(t, ctx, fixture)
 	second := openOutboxStore(t, ctx, fixture)

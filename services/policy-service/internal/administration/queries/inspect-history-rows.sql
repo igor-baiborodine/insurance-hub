@@ -1,20 +1,7 @@
--- $1 indicates that the managed Policy schema is installed.
+-- $1 is the current schema version. The migrator creates history with that version applied.
 SELECT CASE
-    WHEN count(*) = 1
-         AND count(*) FILTER (WHERE version_id = 0 AND is_applied) = 1
-         AND NOT $1
-        THEN 'pending'
-    WHEN count(*) = 2
-         AND count(*) FILTER (WHERE version_id = 0 AND is_applied) = 1
-         AND count(*) FILTER (WHERE version_id = 1 AND is_applied) = 1
-         AND $1
-        THEN 'version=1'
-    WHEN count(*) = 3
-         AND count(*) FILTER (WHERE version_id = 0 AND is_applied) = 1
-         AND count(*) FILTER (WHERE version_id = 1 AND is_applied) = 1
-         AND count(*) FILTER (WHERE version_id = 2 AND is_applied) = 1
-         AND $1
-        THEN 'version=2'
+    WHEN count(*) = 1 AND count(*) FILTER (WHERE version_id = $1) = 1
+        THEN 'version=' || $1::bigint::text
     ELSE 'invalid'
 END
-FROM public.goose_db_version
+FROM public.policy_schema_version

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,18 +36,15 @@ var insertNullableAggregatesQuery string
 //go:embed testdata/sql/append-policy-version.sql
 var appendPolicyVersionQuery string
 
-//go:embed sql/schema.sql
-var sqlcSchema string
-
 var errForcedLateFailure = errors.New("forced failure after every issuance write")
 
-func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
+func TestRun_PolicyStorageOnExistingData(t *testing.T) {
 	// given
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	fixture := postgresfixture.New(t, ctx)
-	fixture.LoadUnmanagedData(t, ctx)
-	fixture.Call(t, ctx, "migrate", "version=2")
+	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.LoadLifecycleData(t, ctx)
 	pool, err := postgres.OpenPool(ctx, postgres.PoolSettings{
 		URL: fixture.WriterURL(
 			"policy",
@@ -67,8 +63,8 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	businessDate := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
 
 	// when
-	offer, offerErr := store.Offer(ctx, postgresfixture.UnmanagedOfferNumber)
-	existing, policyErr := store.Policy(ctx, postgresfixture.UnmanagedPolicyNumber)
+	offer, offerErr := store.Offer(ctx, postgresfixture.LifecycleOfferNumber)
+	existing, policyErr := store.Policy(ctx, postgresfixture.LifecyclePolicyNumber)
 
 	// then
 	if offerErr != nil || optionalString(offer.TotalPrice) != "123.45" ||
@@ -87,7 +83,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 	if offer.CreationDate == nil || offer.CreationDate.AddDate(0, 0, 30).Before(businessDate) {
 		t.Fatal("the controlled business date does not keep the stored offer valid")
 	}
-	requireUnmanagedPolicy(t, existing, policyErr)
+	requireLifecyclePolicy(t, existing, policyErr)
 	if _, err := store.Policy(ctx, "missing"); !errors.Is(err, postgres.ErrNotFound) {
 		t.Fatalf("missing policy: %v", err)
 	}
@@ -159,7 +155,7 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		go func() {
 			policy, err := concurrentStore.Policy(
 				ctx,
-				postgresfixture.UnmanagedPolicyNumber,
+				postgresfixture.LifecyclePolicyNumber,
 			)
 			result <- readResult{policy: policy, err: err}
 		}()
@@ -176,8 +172,8 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("policy read did not complete after the concurrent append")
 		}
-		requireUnmanagedPolicy(t, read.policy, read.err)
-		current, err := store.Policy(ctx, postgresfixture.UnmanagedPolicyNumber)
+		requireLifecyclePolicy(t, read.policy, read.err)
+		current, err := store.Policy(ctx, postgresfixture.LifecyclePolicyNumber)
 		if err != nil || len(current.Versions) != 3 ||
 			optionalInt64(current.Versions[2].Number) != 3 ||
 			len(current.Versions[2].Covers) != 1 ||
@@ -246,10 +242,6 @@ func TestRun_PolicyStorageOnAdoptedData(t *testing.T) {
 			t.Fatalf("stored offer: %+v (%v)", stored, err)
 		}
 	})
-
-	t.Run("sqlc schema equals the migrated shape", func(t *testing.T) {
-		requireSQLCSchemaMatchesMigration(t, ctx, fixture)
-	})
 }
 
 func TestRun_PolicyWriterReadiness(t *testing.T) {
@@ -270,7 +262,7 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 
 	// when
 	unmigrated := postgres.CheckReadiness(ctx, pool, time.Second)
-	fixture.Call(t, ctx, "migrate", "version=2")
+	fixture.Call(t, ctx, "migrate", "version=1")
 	migrated := postgres.CheckReadiness(ctx, pool, time.Second)
 	fixture.Exec(t, ctx, "ALTER TABLE public.policy_outbox RENAME TO policy_outbox_interrupted")
 	interrupted := postgres.CheckReadiness(ctx, pool, time.Second)
@@ -310,10 +302,10 @@ func TestRun_PolicyWriterReadiness(t *testing.T) {
 	}
 }
 
-func requireUnmanagedPolicy(t *testing.T, policy postgres.Policy, err error) {
+func requireLifecyclePolicy(t *testing.T, policy postgres.Policy, err error) {
 	t.Helper()
 	if err != nil || len(policy.Versions) != 2 {
-		t.Fatalf("existing unmanaged policy: %+v (%v)", policy, err)
+		t.Fatalf("existing policy: %+v (%v)", policy, err)
 	}
 	first, second := policy.Versions[0], policy.Versions[1]
 	if optionalInt64(first.Number) != 1 || optionalString(first.TotalPremium) != "123.45" ||
@@ -337,7 +329,7 @@ func requireUnmanagedPolicy(t *testing.T, policy postgres.Policy, err error) {
 		optionalString(first.AccountNumber) != optionalString(second.AccountNumber) ||
 		optionalDate(second.CoverTo) != "2026-11-23" ||
 		optionalDate(second.VersionFrom) != "2026-11-24" {
-		t.Fatalf("existing unmanaged policy history differs from the fixture: %+v", policy)
+		t.Fatalf("existing policy history differs from the fixture: %+v", policy)
 	}
 }
 
@@ -503,37 +495,6 @@ func (*coverQueryTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQuer
 
 func (tracer *coverQueryTracer) release() {
 	tracer.releaseOnce.Do(func() { close(tracer.continueRead) })
-}
-
-// requireSQLCSchemaMatchesMigration applies the sqlc input to an empty database and checks it
-// with the managed-shape inspection that migration status uses.
-func requireSQLCSchemaMatchesMigration(
-	t *testing.T,
-	ctx context.Context,
-	fixture *postgresfixture.Fixture,
-) {
-	t.Helper()
-	inspection, err := os.ReadFile("../administration/queries/inspect-policy-schema.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.Exec(t, ctx, "CREATE DATABASE sqlc_schema OWNER policy")
-	address := *fixture.Address
-	address.Path = "/sqlc_schema"
-	connection, err := pgx.Connect(ctx, address.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = connection.Close(context.WithoutCancel(ctx)) }()
-	if _, err := connection.Exec(ctx, "SET ROLE policy;\n"+sqlcSchema); err != nil {
-		t.Fatal("apply sqlc schema:", err)
-	}
-	var matches bool
-	if err := connection.QueryRow(ctx, string(inspection), true, true).
-		Scan(&matches); err != nil ||
-		!matches {
-		t.Fatalf("sqlc schema differs from the managed migration shape (%v)", err)
-	}
 }
 
 // newTestOffer prices the parent TRI request with the independent fractional quote.

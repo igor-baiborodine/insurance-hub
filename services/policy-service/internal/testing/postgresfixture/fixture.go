@@ -37,20 +37,20 @@ const (
 	ClusterUID = "11111111-1111-4111-8111-111111111111"
 	InstanceID = "22222222-2222-4222-8222-222222222222"
 
-	// UnmanagedFacts are the independently stated expectations before new writes.
-	UnmanagedFacts = "counts=1/2/2/1/2/4;quote=123.45;offerCovers=123.45;" +
+	// LifecycleFacts are the independently stated expectations before new writes.
+	LifecycleFacts = "counts=1/2/2/1/2/4;quote=123.45;offerCovers=123.45;" +
 		"versions=1:123.45:123.45:2027-11-13:2026-11-13,2:3.71:3.71:2026-11-23:2026-11-24;" +
 		"orphans=0;answers=NUM_OF_CLAIM=0,TYPE=APARTMENT"
-	// UnmanagedOfferNumber and UnmanagedPolicyNumber identify the pre-existing aggregate.
-	UnmanagedOfferNumber  = "7e0a1c84-6f43-4c1e-9b7a-2f5d0c3e8a11"
-	UnmanagedPolicyNumber = "a9c43c58-0f9e-4f68-8c1d-5b6c1e2f7d22"
+	// LifecycleOfferNumber and LifecyclePolicyNumber identify the pre-existing aggregate.
+	LifecycleOfferNumber  = "7e0a1c84-6f43-4c1e-9b7a-2f5d0c3e8a11"
+	LifecyclePolicyNumber = "a9c43c58-0f9e-4f68-8c1d-5b6c1e2f7d22"
 )
 
 //go:embed sql/setup-target-identity.sql
 var setupTargetIdentityQuery string
 
-//go:embed sql/setup-unmanaged-fixture.sql
-var setupUnmanagedFixtureQuery string
+//go:embed sql/insert-lifecycle-fixture.sql
+var insertLifecycleFixtureQuery string
 
 // ReadBusinessFacts aggregates counts, amounts, versions and orphans of the six business tables.
 //
@@ -130,12 +130,13 @@ func (f *Fixture) Call(t *testing.T, ctx context.Context, operation, want string
 	}
 }
 
-// LoadUnmanagedData loads the unmanaged Hibernate-shaped schema and rows, then checks the baseline.
-func (f *Fixture) LoadUnmanagedData(t *testing.T, ctx context.Context) {
+// LoadLifecycleData inserts a multi-version aggregate into the migrated tables, then checks the
+// baseline.
+func (f *Fixture) LoadLifecycleData(t *testing.T, ctx context.Context) {
 	t.Helper()
-	f.Exec(t, ctx, setupUnmanagedFixtureQuery)
-	if got := f.Query(t, ctx, ReadBusinessFacts); got != UnmanagedFacts {
-		t.Fatalf("unmanaged fixture differs from the baseline: %q", got)
+	f.Exec(t, ctx, insertLifecycleFixtureQuery)
+	if got := f.Query(t, ctx, ReadBusinessFacts); got != LifecycleFacts {
+		t.Fatalf("lifecycle fixture differs from the baseline: %q", got)
 	}
 }
 

@@ -25,7 +25,7 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 	if !accessMatches(t, ctx, fixture) {
 		t.Fatal("provisioned access before migration differs from the contract")
 	}
-	fixture.Call(t, ctx, "migrate", "version=2")
+	fixture.Call(t, ctx, "migrate", "version=1")
 
 	// when
 	writer := writerConnection(t, ctx, fixture.WriterURL("policy"))
@@ -58,7 +58,7 @@ func TestRun_PolicyWriterAccess(t *testing.T) {
 		{"alter table", "ALTER TABLE public.policy ADD COLUMN denied integer"},
 		{"delete rows", "DELETE FROM public.cover"},
 		{"truncate outbox", "TRUNCATE public.policy_outbox"},
-		{"read migration history", "SELECT count(*) FROM public.goose_db_version"},
+		{"read migration history", "SELECT count(*) FROM public.policy_schema_version"},
 		{"change enrollment", "UPDATE policy_admin.target_identity SET environment = 'qa'"},
 		{"assume owner", "SET ROLE policy"},
 		{"reset identity allocator", "SELECT setval('public.offer_id_seq', 1, false)"},
