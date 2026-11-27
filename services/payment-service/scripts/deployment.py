@@ -55,7 +55,7 @@ PROBE_IMAGE = (
     "sha256:463eaf6072688fe96ac64fa623fe73e1dbe25d8ad6c34404a669ad3ce1f104b6"
 )
 PROBE_OWNER_LABEL = "insurance-hub.io/payment-denial-owner"
-DIRECT_RPC_SMOKE = "TestDeployedDirectRPC_Echo"
+DIRECT_RPC_SMOKE = "TestDeployedDirectRPC_ListAccounts"
 NETWORK_POLICY_CONVERGENCE_SECONDS = 4
 # curl reports a completed TCP handshake as either message, depending on its version.
 PROBE_SHELL_FUNCTIONS = (
@@ -784,7 +784,7 @@ def verify_direct_rpc(module_path: str, port: int) -> None:
             timeout=120,
         )
     except CommandError as error:
-        raise lifecycle.DeploymentError("Payment direct RPC Echo smoke failed") from error
+        raise lifecycle.DeploymentError("Payment direct RPC account-list smoke failed") from error
     validate_direct_rpc_output(output)
 
 
@@ -825,9 +825,9 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
             and response(ports["management"], "/readyz") == (200, b"ready\n"),
             "Payment liveness or readiness response differs",
         )
-        status, body = response(ports["http"], "/v1/example/echo", b'{"message":"hello"}')
+        status, body = response(ports["http"], "/payment/accounts")
         require(
-            status == 200 and json.loads(body) == {"message": "hello"}, "Payment HTTP Echo differs"
+            status == 200 and isinstance(json.loads(body), list), "Payment account list differs"
         )
         verify_direct_rpc(target.record["modulePath"], ports["grpc"])
     logs = target.kubectl("logs", pod["metadata"]["name"], "-c", "payment-api")
@@ -858,7 +858,7 @@ def verify_workload(target: Target, items: dict[str, dict]) -> dict:
     )
     print("Payment database readiness passed through the writer role and verified TLS")
     print(
-        f"Payment HTTP Echo, direct gRPC Echo, liveness, readiness and identity passed: {expected}"
+        f"Payment HTTP and direct gRPC account lists, liveness, readiness and identity passed: {expected}"
     )
     if probe == "1":
         verify_denial(target, pod)

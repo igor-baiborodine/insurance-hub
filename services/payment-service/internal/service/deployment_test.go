@@ -15,7 +15,7 @@ import (
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
 )
 
-func TestDeployedDirectRPC_Echo(t *testing.T) {
+func TestDeployedDirectRPC_ListAccounts(t *testing.T) {
 	// given
 	address := os.Getenv("PAYMENT_SMOKE_GRPC_ADDR")
 	host, port, err := net.SplitHostPort(address)
@@ -34,13 +34,13 @@ func TestDeployedDirectRPC_Echo(t *testing.T) {
 	defer cancel()
 
 	// when
-	result, err := paymentv1.NewExampleServiceClient(conn).Echo(
+	result, err := paymentv1.NewPaymentServiceClient(conn).ListAccounts(
 		ctx,
-		&paymentv1.EchoRequest{Message: "hello"},
+		&paymentv1.ListAccountsRequest{},
 	)
 
 	// then
-	if err != nil || result.GetMessage() != "hello" {
-		t.Fatalf("direct Payment Echo = (%v, %v)", result, err)
+	if err != nil || result == nil {
+		t.Fatalf("direct Payment account list = (%v, %v)", result, err)
 	}
 }

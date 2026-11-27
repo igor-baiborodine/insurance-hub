@@ -50,7 +50,7 @@ workload fails the check. Local-dev requires an explicit, source-matched image t
 operations. For disposable qualification, build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=payment` with the selected image and source revision exported.
 The smoke copies the three local-dev workload Secrets into one labeled Kind namespace, runs the
-private workload checks (startup dependency checks, Echo, probes, identity, Pod denial, caller
+private workload checks (startup dependency checks, account reads, probes, identity, Pod denial, caller
 admission and scale-to-zero) and removes that namespace afterward.
 
 ## Direct local-dev
@@ -137,7 +137,7 @@ require it to match the ready Pod image ID.
 ## Private verification and recovery
 
 `go-svc-deploy-verify` resolves the ready Payment Pod and uses private port-forwards for all three
-listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management `200 live\n` and
+listeners. It checks the HTTP and generated-client gRPC account lists, management `200 live\n` and
 `200 ready\n`, the six safe startup identity fields including the Pod UID, and the
 `payment database ready` record with `database_role=go_payment_writer`. It then confirms, without
 mutation, that each ready gateway Pod has no `payment-service` upstream override, that the
@@ -155,8 +155,8 @@ For manual troubleshooting, forward the exact Pod selected by status and send bo
 : "${PAYMENT_POD:?set the ready Go Payment Pod name from status}"
 kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" port-forward --address 127.0.0.1 \
   "pod/$PAYMENT_POD" 18080:8080 19090:9090 18081:8081
-curl --max-time 5 -sS -w '\n%{http_code}\n' -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' http://127.0.0.1:18080/v1/example/echo
+curl --max-time 5 -sS -w '\n%{http_code}\n' \
+  http://127.0.0.1:18080/payment/accounts
 make -C services/payment-service _deploy-smoke-rpc PAYMENT_SMOKE_GRPC_ADDR=127.0.0.1:19090
 curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz

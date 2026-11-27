@@ -337,7 +337,7 @@ func TestLoad_ValidOverrides(t *testing.T) {
 	}
 }
 
-func TestLoad_RejectsInvalidSettingsWithoutEchoingValues(t *testing.T) {
+func TestLoad_RejectsInvalidSettingsWithoutExposingValues(t *testing.T) {
 	// given
 	const privateMarker = "private-marker"
 	tests := []struct {
@@ -685,7 +685,7 @@ func TestLoad_AllowsPlainHTTPObjectStoreWithoutCA(t *testing.T) {
 	}
 }
 
-func TestLoad_RejectsInvalidDependencySettingsWithoutEchoingValues(t *testing.T) {
+func TestLoad_RejectsInvalidDependencySettingsWithoutExposingValues(t *testing.T) {
 	// given
 	validURL := validDependencySettings()[databaseURLSetting]
 	tests := []struct {

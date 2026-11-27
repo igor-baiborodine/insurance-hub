@@ -6,43 +6,40 @@ import (
 	"errors"
 	"net"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/logger"
 
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
 )
 
-func TestExampleService_GeneratedIdentity(t *testing.T) {
+func TestPaymentService_GeneratedIdentity(t *testing.T) {
 	// given
 	const (
-		wantFile       = "payment/v1/example_service.proto"
+		wantFile       = "payment/v1/payment_service.proto"
 		wantPackage    = "payment.v1"
 		wantModule     = "github.com/igor-baiborodine/insurance-hub/services/payment-service"
-		wantService    = "payment.v1.ExampleService"
-		wantFullMethod = "/payment.v1.ExampleService/Echo"
+		wantService    = "payment.v1.PaymentService"
+		wantFullMethod = "/payment.v1.PaymentService/GetAccountBalance"
 	)
 	wantGoPackage := wantModule + "/gen/payment/v1;paymentv1"
 
 	// when
-	descriptor := (&paymentv1.EchoRequest{}).ProtoReflect().Descriptor().ParentFile()
+	descriptor := (&paymentv1.GetAccountBalanceRequest{}).ProtoReflect().
+		Descriptor().
+		ParentFile()
 
 	// then
 	if descriptor.Path() != wantFile || string(descriptor.Package()) != wantPackage {
@@ -55,363 +52,160 @@ func TestExampleService_GeneratedIdentity(t *testing.T) {
 		)
 	}
 	options, ok := descriptor.Options().(*descriptorpb.FileOptions)
-	if !ok {
+	if !ok || options.GetGoPackage() != wantGoPackage {
 		t.Fatalf(
-			"descriptor options type = %T, want *descriptorpb.FileOptions",
+			"go_package options = %T %v, want %q",
 			descriptor.Options(),
+			options,
+			wantGoPackage,
 		)
 	}
-	if options.GetGoPackage() != wantGoPackage {
-		t.Errorf("go_package = %q, want %q", options.GetGoPackage(), wantGoPackage)
-	}
-	service := descriptor.Services().ByName("ExampleService")
+	service := descriptor.Services().ByName("PaymentService")
 	if service == nil || string(service.FullName()) != wantService {
 		t.Errorf("service descriptor = %v, want %q", service, wantService)
 	}
-	if paymentv1.ExampleService_Echo_FullMethodName != wantFullMethod {
+	if paymentv1.PaymentService_GetAccountBalance_FullMethodName != wantFullMethod {
 		t.Errorf(
 			"full method = %q, want %q",
-			paymentv1.ExampleService_Echo_FullMethodName,
+			paymentv1.PaymentService_GetAccountBalance_FullMethodName,
 			wantFullMethod,
 		)
 	}
 }
 
-func TestExampleService_Echo_Boundaries(t *testing.T) {
+func TestPaymentService_MapsAccountReads(t *testing.T) {
 	// given
-	var calls atomic.Int64
-	echo := func(ctx context.Context, message string) (string, error) {
-		calls.Add(1)
-		return transport.IdentityEcho(ctx, message)
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	tests := []struct {
-		name     string
-		message  string
-		wantCode codes.Code
-		wantCall bool
-	}{
-		{name: "empty", message: "", wantCode: codes.InvalidArgument},
-		{name: "one ASCII byte", message: "a", wantCode: codes.OK, wantCall: true},
-		{name: "two-byte UTF-8", message: "é", wantCode: codes.OK, wantCall: true},
-		{
-			name:     "128 ASCII bytes",
-			message:  strings.Repeat("a", 128),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "128 multibyte UTF-8 bytes",
-			message:  strings.Repeat("é", 64),
-			wantCode: codes.OK,
-			wantCall: true,
-		},
-		{
-			name:     "129 ASCII bytes",
-			message:  strings.Repeat("a", 129),
-			wantCode: codes.InvalidArgument,
-		},
-		{
-			name:     "129 bytes ending in ASCII after multibyte UTF-8",
-			message:  strings.Repeat("é", 64) + "a",
-			wantCode: codes.InvalidArgument,
+	created := time.Date(2024, time.January, 2, 3, 4, 5, 6000000, time.UTC)
+	updated := created.Add(24 * time.Hour)
+	reads := &fakeAccountReads{
+		accounts: []application.Account{{
+			PolicyAccountNumber: "payment-1",
+			PolicyNumber:        "policy-1",
+			Created:             created,
+			Updated:             updated,
+		}},
+		balance: application.AccountBalance{
+			Account: application.Account{
+				PolicyAccountNumber: "payment-1",
+				PolicyNumber:        "policy-1",
+				Created:             created,
+				Updated:             updated,
+			},
+			Balance: "12.3400",
 		},
 	}
+	client := newPaymentClient(t, reads, new(bytes.Buffer))
 
+	// when
+	list, err := client.ListAccounts(context.Background(), &paymentv1.ListAccountsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := client.GetAccountBalance(
+		context.Background(),
+		&paymentv1.GetAccountBalanceRequest{AccountNumber: "payment-1"},
+	)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.GetAccounts()) != 1 {
+		t.Fatalf("accounts = %v, want one", list.GetAccounts())
+	}
+	account := list.GetAccounts()[0]
+	if account.GetPolicyAccountNumber() != "payment-1" ||
+		account.GetPolicyNumber() != "policy-1" ||
+		account.GetCreated() != created.UnixMilli() ||
+		account.GetUpdated() != updated.UnixMilli() {
+		t.Errorf("list account = %v", account)
+	}
+	balanced := detail.GetAccount()
+	if reads.accountNumber != "payment-1" ||
+		balanced.GetPolicyAccountNumber() != "payment-1" ||
+		balanced.GetPolicyNumber() != "policy-1" ||
+		balanced.GetBalance() != "12.3400" ||
+		balanced.GetCreated() != created.UnixMilli() ||
+		balanced.GetUpdated() != updated.UnixMilli() {
+		t.Errorf("detail account = %v, requested = %q", balanced, reads.accountNumber)
+	}
+}
+
+func TestPaymentService_MapsFailuresWithoutSensitiveValues(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		code codes.Code
+	}{
+		{name: "missing", err: application.ErrAccountNotFound, code: codes.NotFound},
+		{
+			name: "storage unavailable",
+			err:  application.ErrStorageUnavailable,
+			code: codes.Unavailable,
+		},
+		{name: "canceled", err: context.Canceled, code: codes.Canceled},
+		{name: "deadline", err: context.DeadlineExceeded, code: codes.DeadlineExceeded},
+		{
+			name: "unexpected",
+			err:  errors.New("private-adapter-marker"),
+			code: codes.Internal,
+		},
+	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// given
-			callsBefore := calls.Load()
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
+			const accountMarker = "private-account-marker"
+			var logs bytes.Buffer
+			client := newPaymentClient(t, &fakeAccountReads{err: test.err}, &logs)
 
 			// when
-			response, err := client.Echo(
-				ctx,
-				&paymentv1.EchoRequest{Message: test.message},
+			response, err := client.GetAccountBalance(
+				context.Background(),
+				&paymentv1.GetAccountBalanceRequest{AccountNumber: accountMarker},
 			)
 
 			// then
-			if status.Code(err) != test.wantCode {
+			if response != nil || status.Code(err) != test.code {
 				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
+					"GetAccountBalance() = (%v, %v), want (nil, %v)",
+					response,
 					err,
+					test.code,
 				)
 			}
-			wantCalls := callsBefore
-			if test.wantCall {
-				wantCalls++
-			}
-			if calls.Load() != wantCalls {
-				t.Errorf("handler calls = %d, want %d", calls.Load(), wantCalls)
-			}
-			if test.wantCode != codes.OK {
-				if response != nil {
-					t.Errorf("response = %v, want nil", response)
-				}
-				if status.Convert(err).Message() != "invalid request" {
-					t.Errorf(
-						"message = %q, want invalid request",
-						status.Convert(err).Message(),
-					)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Echo: %v", err)
-			}
-			want := &paymentv1.EchoResponse{Message: test.message}
-			if !proto.Equal(response, want) {
-				t.Errorf("response = %v, want byte-identical message", response)
+			if strings.Contains(logs.String(), accountMarker) ||
+				strings.Contains(logs.String(), "private-adapter-marker") {
+				t.Fatalf("logs expose private values: %s", logs.String())
 			}
 		})
 	}
 }
 
-func TestExampleService_Echo_PreservesCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	ctx, cancel := context.WithCancel(context.Background())
-	result := make(chan error, 1)
-
-	// when
-	go func() {
-		_, err := client.Echo(ctx, &paymentv1.EchoRequest{Message: "cancel"})
-		result <- err
-	}()
-
-	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
-	}
-
-	// when
-	cancel()
-
-	// then
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.Canceled {
-			t.Fatalf("status = %v, want Canceled: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("canceled RPC did not return")
-	}
-}
-
-func TestExampleService_Echo_PreservesDeadline(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	echo := func(ctx context.Context, _ string) (string, error) {
-		close(started)
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	client := newExampleClient(
-		t,
-		echo,
-		noop.NewTracerProvider(),
-		propagation.TraceContext{},
-		new(bytes.Buffer),
-	)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	result := make(chan error, 1)
-
-	// when
-	go func() {
-		_, err := client.Echo(ctx, &paymentv1.EchoRequest{Message: "deadline"})
-		result <- err
-	}()
-
-	// then
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("handler did not start")
-	}
-	select {
-	case err := <-result:
-		if status.Code(err) != codes.DeadlineExceeded {
-			t.Fatalf("status = %v, want DeadlineExceeded: %v", status.Code(err), err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("deadline RPC did not return")
-	}
-}
-
-func TestExampleService_Echo_MapsHandlerContextErrors(t *testing.T) {
-	// given
-	tests := []struct {
-		name       string
-		handlerErr error
-		wantCode   codes.Code
-	}{
-		{name: "canceled", handlerErr: context.Canceled, wantCode: codes.Canceled},
-		{
-			name:       "deadline exceeded",
-			handlerErr: context.DeadlineExceeded,
-			wantCode:   codes.DeadlineExceeded,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+func TestPaymentService_RejectsInvalidAccountNumberBeforeApplication(t *testing.T) {
+	tests := []string{"", strings.Repeat("a", 256)}
+	for _, accountNumber := range tests {
+		t.Run(strings.Repeat("x", min(len(accountNumber)+1, 20)), func(t *testing.T) {
 			// given
-			handlerContextErr := make(chan error, 1)
-			echo := func(ctx context.Context, _ string) (string, error) {
-				handlerContextErr <- ctx.Err()
-				return "", test.handlerErr
-			}
-			client := newExampleClient(
-				t,
-				echo,
-				noop.NewTracerProvider(),
-				propagation.TraceContext{},
-				new(bytes.Buffer),
-			)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			reads := &fakeAccountReads{}
+			client := newPaymentClient(t, reads, new(bytes.Buffer))
 
 			// when
-			response, err := client.Echo(
-				ctx,
-				&paymentv1.EchoRequest{Message: "handler context error"},
+			response, err := client.GetAccountBalance(
+				context.Background(),
+				&paymentv1.GetAccountBalanceRequest{AccountNumber: accountNumber},
 			)
 
 			// then
-			if handlerErr := <-handlerContextErr; handlerErr != nil {
-				t.Errorf(
-					"handler context error before return = %v, want nil",
-					handlerErr,
-				)
-			}
-			if ctx.Err() != nil {
-				t.Errorf(
-					"client context error after response = %v, want nil",
-					ctx.Err(),
-				)
-			}
-			if response != nil {
-				t.Errorf("response = %v, want nil", response)
-			}
-			if status.Code(err) != test.wantCode {
+			if response != nil || status.Code(err) != codes.InvalidArgument {
 				t.Fatalf(
-					"status = %v, want %v: %v",
-					status.Code(err),
-					test.wantCode,
+					"GetAccountBalance() = (%v, %v), want invalid argument",
+					response,
 					err,
 				)
 			}
+			if reads.balanceCalls != 0 {
+				t.Errorf("application calls = %d, want zero", reads.balanceCalls)
+			}
 		})
-	}
-}
-
-func TestExampleService_Echo_MapsInternalFailureAndPropagatesTrace(t *testing.T) {
-	// given
-	const (
-		payloadMarker = "payload-marker"
-		privateMarker = "private-adapter-marker"
-	)
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := tracerProvider.Shutdown(ctx); err != nil {
-			t.Errorf("shutdown tracer provider: %v", err)
-		}
-	})
-	handlerContext := make(chan trace.SpanContext, 1)
-	echo := func(ctx context.Context, _ string) (string, error) {
-		handlerContext <- trace.SpanContextFromContext(ctx)
-		return "", status.Error(codes.Unknown, privateMarker)
-	}
-	var logs bytes.Buffer
-	propagator := propagation.TraceContext{}
-	client := newExampleClient(t, echo, tracerProvider, propagator, &logs)
-	parentCtx, parentSpan := tracerProvider.Tracer("test").Start(context.Background(), "parent")
-	parentSpanContext := parentSpan.SpanContext()
-
-	// when
-	response, err := client.Echo(parentCtx, &paymentv1.EchoRequest{Message: payloadMarker})
-	parentSpan.End()
-
-	// then
-	if status.Code(err) != codes.Internal {
-		t.Fatalf("status = %v, want Internal: %v", status.Code(err), err)
-	}
-	if status.Convert(err).Message() != "internal error" {
-		t.Errorf("message = %q, want internal error", status.Convert(err).Message())
-	}
-	if response != nil {
-		t.Errorf("response = %v, want nil", response)
-	}
-	var serverSpanContext trace.SpanContext
-	select {
-	case serverSpanContext = <-handlerContext:
-	case <-time.After(time.Second):
-		t.Fatal("handler context was not captured")
-	}
-	if !serverSpanContext.IsValid() ||
-		serverSpanContext.TraceID() != parentSpanContext.TraceID() {
-		t.Errorf(
-			"server trace context = %v, parent = %v",
-			serverSpanContext,
-			parentSpanContext,
-		)
-	}
-	if strings.Contains(logs.String(), payloadMarker) ||
-		strings.Contains(logs.String(), privateMarker) {
-		t.Fatalf("logs expose request or error marker: %s", logs.String())
-	}
-	if !strings.Contains(logs.String(), `"service":"payment-service"`) ||
-		!strings.Contains(
-			logs.String(),
-			`"trace_id":"`+serverSpanContext.TraceID().String()+`"`,
-		) {
-		t.Errorf("logs lack service or trace identity: %s", logs.String())
-	}
-	var clientSpanFound, serverSpanFound bool
-	for _, span := range spanRecorder.Ended() {
-		if span.SpanContext().TraceID() != parentSpanContext.TraceID() {
-			continue
-		}
-		switch span.SpanKind() {
-		case trace.SpanKindClient:
-			clientSpanFound = true
-		case trace.SpanKindServer:
-			serverSpanFound = true
-		}
-	}
-	if !clientSpanFound || !serverSpanFound {
-		t.Errorf(
-			"request spans found: client=%t server=%t",
-			clientSpanFound,
-			serverSpanFound,
-		)
 	}
 }
 
@@ -425,12 +219,12 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 		loggerMissing     bool
 		tracerMissing     bool
 		propagatorMissing bool
-		echoMissing       bool
+		readsMissing      bool
 	}{
 		{name: "logger", loggerMissing: true},
 		{name: "tracer provider", tracerMissing: true},
 		{name: "propagator", propagatorMissing: true},
-		{name: "echo handler", echoMissing: true},
+		{name: "account reads", readsMissing: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -438,7 +232,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			selectedLogger := log
 			selectedTracer := trace.TracerProvider(tracerProvider)
 			selectedPropagator := propagation.TextMapPropagator(propagator)
-			selectedEcho := transport.Echo(transport.IdentityEcho)
+			selectedReads := transport.AccountReads(&fakeAccountReads{})
 			if test.loggerMissing {
 				selectedLogger = nil
 			}
@@ -448,8 +242,8 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 			if test.propagatorMissing {
 				selectedPropagator = nil
 			}
-			if test.echoMissing {
-				selectedEcho = nil
+			if test.readsMissing {
+				selectedReads = nil
 			}
 
 			// when
@@ -458,7 +252,7 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 				selectedTracer,
 				selectedPropagator,
 				defaultSettings(),
-				selectedEcho,
+				selectedReads,
 			)
 
 			// then
@@ -469,13 +263,11 @@ func TestNewServer_RejectsMissingDependencies(t *testing.T) {
 	}
 }
 
-func newExampleClient(
+func newPaymentClient(
 	t *testing.T,
-	echo transport.Echo,
-	tracerProvider trace.TracerProvider,
-	propagator propagation.TextMapPropagator,
+	reads transport.AccountReads,
 	logs *bytes.Buffer,
-) paymentv1.ExampleServiceClient {
+) paymentv1.PaymentServiceClient {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -483,27 +275,20 @@ func newExampleClient(
 	}
 	server, err := transport.NewServer(
 		logger.New(logs, "payment-service", 0),
-		tracerProvider,
-		propagator,
+		noop.NewTracerProvider(),
+		propagation.TraceContext{},
 		defaultSettings(),
-		echo,
+		reads,
 	)
 	if err != nil {
 		_ = listener.Close()
 		t.Fatalf("new server: %v", err)
 	}
 	serveResult := make(chan error, 1)
-	go func() {
-		serveResult <- server.Serve(listener)
-	}()
+	go func() { serveResult <- server.Serve(listener) }()
 	connection, err := grpcgo.NewClient(
 		listener.Addr().String(),
 		grpcgo.WithTransportCredentials(insecure.NewCredentials()),
-		grpcgo.WithStatsHandler(otelgrpc.NewClientHandler(
-			otelgrpc.WithTracerProvider(tracerProvider),
-			otelgrpc.WithPropagators(propagator),
-			otelgrpc.WithMeterProvider(metricnoop.NewMeterProvider()),
-		)),
 	)
 	if err != nil {
 		server.Stop()
@@ -511,13 +296,9 @@ func newExampleClient(
 		t.Fatalf("new client: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := connection.Close(); err != nil {
-			t.Errorf("close client: %v", err)
-		}
+		_ = connection.Close()
 		server.Stop()
-		if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			t.Errorf("close listener: %v", err)
-		}
+		_ = listener.Close()
 		select {
 		case err := <-serveResult:
 			if err != nil && !errors.Is(err, grpcgo.ErrServerStopped) {
@@ -527,7 +308,28 @@ func newExampleClient(
 			t.Error("server did not stop")
 		}
 	})
-	return paymentv1.NewExampleServiceClient(connection)
+	return paymentv1.NewPaymentServiceClient(connection)
+}
+
+type fakeAccountReads struct {
+	accounts      []application.Account
+	balance       application.AccountBalance
+	err           error
+	accountNumber string
+	balanceCalls  int
+}
+
+func (reads *fakeAccountReads) List(context.Context) ([]application.Account, error) {
+	return reads.accounts, reads.err
+}
+
+func (reads *fakeAccountReads) Balance(
+	_ context.Context,
+	accountNumber string,
+) (application.AccountBalance, error) {
+	reads.accountNumber = accountNumber
+	reads.balanceCalls++
+	return reads.balance, reads.err
 }
 
 func defaultSettings() transport.Settings {

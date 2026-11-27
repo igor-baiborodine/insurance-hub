@@ -1,4 +1,4 @@
-// Package logger retains the scaffold's completion-log contract over shared logging mechanics.
+// Package logger owns Payment completion records over shared logging mechanics.
 package logger
 
 import (

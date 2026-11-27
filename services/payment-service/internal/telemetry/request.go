@@ -14,7 +14,7 @@ import (
 	servicelogger "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/logger"
 )
 
-// RequestObserver records only the fixed Echo operation and bounded transport outcomes.
+// RequestObserver records fixed operations and bounded transport outcomes.
 type RequestObserver struct {
 	logger   *slog.Logger
 	requests metric.Int64Counter
@@ -57,18 +57,25 @@ type Request struct {
 	route     string
 }
 
-func (observer *RequestObserver) StartGRPC(ctx context.Context) *Request {
+// StartGRPCOperation begins one observation using a fixed operation selected by the transport.
+func (observer *RequestObserver) StartGRPCOperation(
+	ctx context.Context,
+	operation string,
+) *Request {
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),
-		transport: "grpc", operation: "echo",
+		transport: "grpc", operation: operation,
 	}
 }
 
 // StartHTTP begins a bounded HTTP transport observation after trace extraction.
 func (observer *RequestObserver) StartHTTP(ctx context.Context, route string) *Request {
 	operation := "unknown"
-	if route == "POST /v1/example/echo" {
-		operation = "echo"
+	switch route {
+	case "GET /payment/accounts":
+		operation = "list_accounts"
+	case "GET /payment/accounts/{accountNumber}":
+		operation = "get_account_balance"
 	}
 	return &Request{
 		observer: observer, started: time.Now(), span: trace.SpanFromContext(ctx),

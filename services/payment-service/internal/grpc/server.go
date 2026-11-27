@@ -19,20 +19,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
 const internalMessage = "internal error"
 
-// Echo handles the example's single responsibility independently of transport details.
-type Echo func(context.Context, string) (string, error)
-
-// IdentityEcho returns the supplied message while preserving a canceled request context.
-func IdentityEcho(ctx context.Context, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return message, nil
+// AccountReads is the application boundary exposed through the private Payment API.
+type AccountReads interface {
+	List(context.Context) ([]application.Account, error)
+	Balance(context.Context, string) (application.AccountBalance, error)
 }
 
 type Settings struct {
@@ -43,13 +39,13 @@ type Settings struct {
 	MeterProvider   metric.MeterProvider
 }
 
-// NewServer constructs the instrumented server and registers the generated ExampleService.
+// NewServer constructs the instrumented server and registers the generated PaymentService.
 func NewServer(
 	logger *slog.Logger,
 	tracerProvider trace.TracerProvider,
 	propagator propagation.TextMapPropagator,
 	settings Settings,
-	echo Echo,
+	reads AccountReads,
 ) (*grpcgo.Server, error) {
 	if logger == nil {
 		return nil, errors.New("create gRPC server: logger is required")
@@ -60,8 +56,8 @@ func NewServer(
 	if propagator == nil {
 		return nil, errors.New("create gRPC server: propagator is required")
 	}
-	if echo == nil {
-		return nil, errors.New("create gRPC server: echo handler is required")
+	if reads == nil {
+		return nil, errors.New("create gRPC server: account reads are required")
 	}
 
 	if settings.RequestTimeout <= 0 || settings.MaxReceiveBytes <= 0 ||
@@ -72,7 +68,10 @@ func NewServer(
 	}
 
 	validator, err := protovalidate.New(
-		protovalidate.WithMessages(&paymentv1.EchoRequest{}),
+		protovalidate.WithMessages(
+			&paymentv1.ListAccountsRequest{},
+			&paymentv1.GetAccountBalanceRequest{},
+		),
 		protovalidate.WithDisableLazy(),
 	)
 	if err != nil {
@@ -94,54 +93,106 @@ func NewServer(
 					otelgrpc.WithPropagators(propagator),
 					otelgrpc.WithMeterProvider(meterProvider),
 					otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
-						return info.FullMethodName == paymentv1.ExampleService_Echo_FullMethodName
+						_, observed := rpcOperation(info.FullMethodName)
+						return observed
 					}),
 				),
 			},
 		),
 		grpcgo.UnaryInterceptor(validationInterceptor(logger, validator)),
 	)
-	paymentv1.RegisterExampleServiceServer(server, &exampleServer{
+	paymentv1.RegisterPaymentServiceServer(server, &paymentServer{
 		logger:         logger,
 		requestTimeout: settings.RequestTimeout,
-		echo:           echo,
+		reads:          reads,
 	})
 	return server, nil
 }
 
-type exampleServer struct {
-	paymentv1.UnimplementedExampleServiceServer
+type paymentServer struct {
+	paymentv1.UnimplementedPaymentServiceServer
 	logger         *slog.Logger
 	requestTimeout time.Duration
-	echo           Echo
+	reads          AccountReads
 }
 
-func (server *exampleServer) Echo(
+func (server *paymentServer) ListAccounts(
 	ctx context.Context,
-	request *paymentv1.EchoRequest,
-) (*paymentv1.EchoResponse, error) {
+	_ *paymentv1.ListAccountsRequest,
+) (*paymentv1.ListAccountsResponse, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
 	defer cancel()
-	message, err := server.echo(requestCtx, request.GetMessage())
+	accounts, err := server.reads.List(requestCtx)
 	if err == nil {
 		err = requestCtx.Err()
 	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, status.Error(codes.Canceled, context.Canceled.Error())
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, status.Error(
-				codes.DeadlineExceeded,
-				context.DeadlineExceeded.Error(),
-			)
-		}
-		server.logger.ErrorContext(ctx, "echo request failed",
-			slog.String("rpc", paymentv1.ExampleService_Echo_FullMethodName),
+		return nil, server.accountError(
+			ctx,
+			paymentv1.PaymentService_ListAccounts_FullMethodName,
+			err,
 		)
-		return nil, status.Error(codes.Internal, internalMessage)
 	}
-	return &paymentv1.EchoResponse{Message: message}, nil
+	result := make([]*paymentv1.Account, 0, len(accounts))
+	for _, account := range accounts {
+		result = append(result, accountMessage(account))
+	}
+	return &paymentv1.ListAccountsResponse{Accounts: result}, nil
+}
+
+func (server *paymentServer) GetAccountBalance(
+	ctx context.Context,
+	request *paymentv1.GetAccountBalanceRequest,
+) (*paymentv1.GetAccountBalanceResponse, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, server.requestTimeout)
+	defer cancel()
+	account, err := server.reads.Balance(requestCtx, request.GetAccountNumber())
+	if err == nil {
+		err = requestCtx.Err()
+	}
+	if err != nil {
+		return nil, server.accountError(
+			ctx,
+			paymentv1.PaymentService_GetAccountBalance_FullMethodName,
+			err,
+		)
+	}
+	return &paymentv1.GetAccountBalanceResponse{Account: &paymentv1.AccountBalance{
+		PolicyAccountNumber: account.PolicyAccountNumber,
+		PolicyNumber:        account.PolicyNumber,
+		Balance:             account.Balance,
+		Created:             account.Created.UnixMilli(),
+		Updated:             account.Updated.UnixMilli(),
+	}}, nil
+}
+
+func accountMessage(account application.Account) *paymentv1.Account {
+	return &paymentv1.Account{
+		PolicyAccountNumber: account.PolicyAccountNumber,
+		PolicyNumber:        account.PolicyNumber,
+		Created:             account.Created.UnixMilli(),
+		Updated:             account.Updated.UnixMilli(),
+	}
+}
+
+func (server *paymentServer) accountError(ctx context.Context, method string, err error) error {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, context.Canceled.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
+	case errors.Is(err, application.ErrAccountNotFound):
+		return status.Error(codes.NotFound, "account not found")
+	case errors.Is(err, application.ErrStorageUnavailable):
+		return status.Error(codes.Unavailable, "service unavailable")
+	default:
+		server.logger.ErrorContext(
+			ctx,
+			"account request failed",
+			slog.String("rpc", method),
+		)
+		return status.Error(codes.Internal, internalMessage)
+	}
 }
 
 func validationInterceptor(
@@ -186,11 +237,28 @@ func (handler *requestStatsHandler) TagRPC(
 	info *stats.RPCTagInfo,
 ) context.Context {
 	ctx = handler.Handler.TagRPC(ctx, info)
-	if handler.observer != nil &&
-		info.FullMethodName == paymentv1.ExampleService_Echo_FullMethodName {
-		return context.WithValue(ctx, requestStateKey{}, handler.observer.StartGRPC(ctx))
+	if operation, observed := rpcOperation(
+		info.FullMethodName,
+	); handler.observer != nil &&
+		observed {
+		return context.WithValue(
+			ctx,
+			requestStateKey{},
+			handler.observer.StartGRPCOperation(ctx, operation),
+		)
 	}
 	return ctx
+}
+
+func rpcOperation(method string) (string, bool) {
+	switch method {
+	case paymentv1.PaymentService_ListAccounts_FullMethodName:
+		return "list_accounts", true
+	case paymentv1.PaymentService_GetAccountBalance_FullMethodName:
+		return "get_account_balance", true
+	default:
+		return "", false
+	}
 }
 
 func (handler *requestStatsHandler) HandleRPC(ctx context.Context, event stats.RPCStats) {

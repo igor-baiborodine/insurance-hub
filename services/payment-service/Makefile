@@ -26,13 +26,13 @@ GOVULNCHECK := $(TOOLS_BIN)/govulncheck
 SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/payment/v1/example_service.proto
+PROTO_SCHEMA := api/payment/v1/payment_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/payment/v1/example_service.pb.go \
-	gen/payment/v1/example_service.pb.gw.go \
-	gen/payment/v1/example_service_grpc.pb.go \
-	gen/openapiv2/payment/v1/example_service.swagger.json
+	gen/payment/v1/payment_service.pb.go \
+	gen/payment/v1/payment_service.pb.gw.go \
+	gen/payment/v1/payment_service_grpc.pb.go \
+	gen/openapiv2/payment/v1/payment_service.swagger.json
 
 GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
@@ -190,7 +190,7 @@ check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/payment/v1/example_service.swagger.json
+		--swagger gen/openapiv2/payment/v1/payment_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -275,7 +275,7 @@ deploy-smoke: python-toolchain-check
 
 _deploy-smoke-rpc:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run '^TestDeployedDirectRPC_Echo$$' -json ./internal/service
+		-run '^TestDeployedDirectRPC_ListAccounts$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \

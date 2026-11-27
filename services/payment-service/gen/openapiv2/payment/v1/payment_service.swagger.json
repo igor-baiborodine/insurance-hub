@@ -1,0 +1,199 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "payment/v1/payment_service.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "PaymentService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/payment/accounts": {
+      "get": {
+        "operationId": "PaymentService_ListAccounts",
+        "responses": {
+          "200": {
+            "description": "Every Payment account as a bare JSON array.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "$ref": "#/definitions/v1Account"
+              }
+            },
+            "examples": {
+              "application/json": [
+                {
+                  "policyAccountNumber": "payment-1",
+                  "policyNumber": "policy-1",
+                  "created": 1704067200000,
+                  "updated": 1704153600000
+                }
+              ]
+            }
+          }
+        },
+        "tags": [
+          "PaymentService"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    },
+    "/payment/accounts/{accountNumber}": {
+      "get": {
+        "operationId": "PaymentService_GetAccountBalance",
+        "responses": {
+          "200": {
+            "description": "The Payment account and its current dated balance.",
+            "schema": {
+              "$ref": "#/definitions/v1AccountBalance"
+            },
+            "examples": {
+              "application/json": {
+                "policyAccountNumber": "payment-1",
+                "policyNumber": "policy-1",
+                "balance": 12.34,
+                "created": 1704067200000,
+                "updated": 1704153600000
+              }
+            }
+          },
+          "500": {
+            "description": "The account is missing or the request failed unexpectedly.",
+            "schema": {
+              "$ref": "#/definitions/v1LegacyErrorResponse"
+            },
+            "examples": {
+              "application/json": {
+                "_links": {
+                  "self": {
+                    "href": "/payment/accounts/missing",
+                    "templated": false
+                  }
+                },
+                "message": "Internal Server Error"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountNumber",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "PaymentService"
+        ],
+        "produces": [
+          "application/json"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "v1Account": {
+      "type": "object",
+      "properties": {
+        "policyAccountNumber": {
+          "type": "string"
+        },
+        "policyNumber": {
+          "type": "string"
+        },
+        "created": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updated": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "v1AccountBalance": {
+      "type": "object",
+      "properties": {
+        "policyAccountNumber": {
+          "type": "string"
+        },
+        "policyNumber": {
+          "type": "string"
+        },
+        "balance": {
+          "type": "number"
+        },
+        "created": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updated": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "v1GetAccountBalanceResponse": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/v1AccountBalance"
+        }
+      }
+    },
+    "v1LegacyErrorLink": {
+      "type": "object",
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "templated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1LegacyErrorLinks": {
+      "type": "object",
+      "properties": {
+        "self": {
+          "$ref": "#/definitions/v1LegacyErrorLink"
+        }
+      }
+    },
+    "v1LegacyErrorResponse": {
+      "type": "object",
+      "properties": {
+        "_links": {
+          "$ref": "#/definitions/v1LegacyErrorLinks"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "v1ListAccountsResponse": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Account"
+          }
+        }
+      }
+    }
+  }
+}

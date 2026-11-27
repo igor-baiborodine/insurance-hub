@@ -633,6 +633,8 @@ def test_workload_verification_checks_database_readiness(
     def answer(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
         if payload:
             return 200, payload
+        if path == "/payment/accounts":
+            return 200, b"[]"
         return 200, b"live\n" if path == "/livez" else b"ready\n"
 
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)
@@ -848,7 +850,7 @@ def test_payment_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
     # The writer, reader and public Kafka CA Secrets are copied into the owned namespace and
-    # removed with it. The workload only runs its read-only startup and readiness checks; Echo
+    # removed with it. The workload only runs its read-only startup and readiness checks; account
     # writes nothing. The fully qualified broker name preserves the ordinary cluster while DNS
     # originates in the disposable namespace.
     for item in items.values():
