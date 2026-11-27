@@ -205,12 +205,12 @@ check:
 # Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration smoke tests (Docker required)
+test-integration: ## Run the service composition and disposable PostgreSQL migration and writer-access smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget)$$' \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess)$$' \
 		./internal/service ./internal/administration \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
@@ -289,5 +289,5 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
 		'  make build            Compile the server and migrator' \
-		'  make test-integration Run service composition and disposable PostgreSQL migration smoke tests' \
+		'  make test-integration Run service composition and disposable PostgreSQL migration and access smoke tests' \
 		'  make run              Start the service with environment configuration'

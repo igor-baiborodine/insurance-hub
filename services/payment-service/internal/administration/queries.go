@@ -5,6 +5,9 @@ import _ "embed"
 //go:embed queries/acquire-administration-lock.sql
 var acquireAdministrationLockQuery string
 
+//go:embed queries/apply-writer-grants.sql
+var applyWriterGrantsQuery string
+
 //go:embed queries/insert-payment-schema-version.sql
 var recordSchemaVersionQuery string
 

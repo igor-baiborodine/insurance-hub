@@ -33,3 +33,30 @@ var changeEntryForeignKeyActionQuery string
 
 //go:embed testdata/sql/restore-entry-foreign-key-action.sql
 var restoreEntryForeignKeyActionQuery string
+
+//go:embed testdata/sql/insert-writer-registration.sql
+var insertWriterRegistrationQuery string
+
+//go:embed testdata/sql/read-writer-registration-match.sql
+var readWriterRegistrationMatchQuery string
+
+//go:embed testdata/sql/insert-writer-entry.sql
+var insertWriterEntryQuery string
+
+//go:embed testdata/sql/insert-writer-receipt.sql
+var insertWriterReceiptQuery string
+
+//go:embed testdata/sql/update-writer-receipt-state.sql
+var updateWriterReceiptStateQuery string
+
+//go:embed testdata/sql/read-writer-receipt-facts.sql
+var readWriterReceiptFactsQuery string
+
+//go:embed testdata/sql/read-writer-balance.sql
+var readWriterBalanceQuery string
+
+//go:embed testdata/sql/grant-writer-delete.sql
+var grantWriterDeleteQuery string
+
+//go:embed testdata/sql/revoke-writer-delete.sql
+var revokeWriterDeleteQuery string

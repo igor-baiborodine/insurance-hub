@@ -19,9 +19,9 @@ const (
 //go:embed migrations/00001_payment.sql
 var schemaSQL string
 
-// Migrate applies the Payment schema and records its version in one transaction under the
-// administration lock. A replay inspects the installed schema and changes nothing, so an
-// interrupted run needs no special repair command.
+// Migrate applies the Payment schema, records its version and applies the writer grants in one
+// transaction under the administration lock. A replay inspects the installed schema and reapplies
+// only the grants, so an interrupted run needs no special repair command.
 func Migrate(ctx context.Context, db *sql.DB, target Target) error {
 	migration := goose.NewGoMigration(schemaVersion, &goose.GoFunc{
 		RunTx: func(ctx context.Context, tx *sql.Tx) error {
@@ -32,24 +32,26 @@ func Migrate(ctx context.Context, db *sql.DB, target Target) error {
 			if err != nil {
 				return err
 			}
-			if status == AppliedStatus {
-				return nil
+			if status != AppliedStatus {
+				if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+					return fmt.Errorf("apply Payment schema version 1: %w", err)
+				}
+				if _, err := tx.ExecContext(
+					ctx,
+					recordSchemaVersionQuery,
+					schemaVersion,
+				); err != nil {
+					return fmt.Errorf("record Payment schema version: %w", err)
+				}
 			}
-			if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
-				return fmt.Errorf("apply Payment schema version 1: %w", err)
-			}
-			if _, err := tx.ExecContext(
-				ctx,
-				recordSchemaVersionQuery,
-				schemaVersion,
-			); err != nil {
-				return fmt.Errorf("record Payment schema version: %w", err)
+			if _, err := tx.ExecContext(ctx, applyWriterGrantsQuery); err != nil {
+				return fmt.Errorf("apply Payment writer grants: %w", err)
 			}
 			return nil
 		},
 	}, nil)
 	// Goose owns the transaction. Payment records its own history inside that transaction, so a
-	// refused or failed run leaves no history or schema behind.
+	// refused or failed run leaves no history, schema or grant behind.
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, nil,
 		goose.WithGoMigrations(migration), goose.WithDisableGlobalRegistry(true),
 		goose.WithDisableVersioning(true),

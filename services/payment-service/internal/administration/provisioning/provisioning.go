@@ -8,3 +8,8 @@ import _ "embed"
 //
 //go:embed provision-access.sql
 var ProvisionAccess string
+
+// InspectAccess returns true only when both Payment logins have exactly the contracted access.
+//
+//go:embed inspect-access.sql
+var InspectAccess string
