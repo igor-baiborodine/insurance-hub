@@ -75,3 +75,9 @@ var revokeWriterDeleteQuery string
 
 //go:embed testdata/sql/grant-writer-receipt-update.sql
 var grantWriterReceiptUpdateQuery string
+
+//go:embed testdata/sql/grant-writer-entry-amount-update.sql
+var grantWriterEntryAmountUpdateQuery string
+
+//go:embed testdata/sql/revoke-writer-entry-amount-update.sql
+var revokeWriterEntryAmountUpdateQuery string

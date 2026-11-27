@@ -260,6 +260,18 @@ func TestRun_PaymentWriterAccess(t *testing.T) {
 			t.Fatal("writer DELETE grant passed access verification")
 		}
 	})
+	t.Run("verification rejects column privilege", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { fixture.Exec(t, ctx, revokeWriterEntryAmountUpdateQuery) })
+		fixture.Exec(t, ctx, grantWriterEntryAmountUpdateQuery)
+
+		// when / then
+		if accessMatches(t, ctx, fixture) {
+			t.Fatal(
+				"writer accounting-entry amount UPDATE grant passed access verification",
+			)
+		}
+	})
 }
 
 // postStatement records one posted receipt and a credit for each account in the caller's

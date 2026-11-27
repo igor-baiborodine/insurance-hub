@@ -9,6 +9,8 @@ WITH login AS (
 ), privilege (name) AS (
     SELECT unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES',
         'TRIGGER', 'MAINTAIN'])
+), column_privilege (name) AS (
+    SELECT unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES'])
 ), identity_sequence (name) AS (
     SELECT pg_get_serial_sequence(relation, 'id')
     FROM managed
@@ -45,13 +47,25 @@ SELECT (SELECT count(*) = 2 AND bool_and(
             has_table_privilege('go_payment_writer', relation, name) = (name = ANY (granted))
             AND NOT has_table_privilege('go_payment_migrator', relation, name))
         FROM managed CROSS JOIN privilege))
+    -- Compare every grantable column privilege. Table rights supply SELECT/INSERT on every column;
+    -- only receipt state and its timestamp add UPDATE.
     AND (to_regclass('public.statement_receipt') IS NULL OR (
-        SELECT bool_and(has_column_privilege(
-            'go_payment_writer', 'public.statement_receipt', column_name, 'UPDATE'
-        ) = (column_name = ANY (ARRAY['state', 'updated_at'])))
-        FROM unnest(ARRAY[
-            'id', 'source_name', 'sha256', 'state', 'created_at', 'updated_at'
-        ]) AS receipt_column (column_name)))
+        SELECT bool_and(
+            has_column_privilege(
+                'go_payment_writer', relation, attname, column_privilege.name
+            ) = (column_privilege.name = ANY (granted) OR (
+                relation = 'public.statement_receipt'
+                AND attname = ANY (ARRAY['state', 'updated_at'])
+                AND column_privilege.name = 'UPDATE'
+            ))
+            AND NOT has_column_privilege(
+                'go_payment_migrator', relation, attname, column_privilege.name
+            )
+        )
+        FROM managed
+        JOIN pg_attribute ON attrelid = to_regclass(relation)
+            AND attnum > 0 AND NOT attisdropped
+        CROSS JOIN column_privilege))
     AND (to_regclass('public.payment_schema_version') IS NULL OR NOT EXISTS (
         SELECT FROM login WHERE has_table_privilege(oid, 'public.payment_schema_version',
             'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')))
