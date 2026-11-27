@@ -52,6 +52,68 @@ func (q *Queries) GetAccountBalance(ctx context.Context, arg GetAccountBalancePa
 	return i, err
 }
 
+const insertExpectedPayment = `-- name: InsertExpectedPayment :exec
+INSERT INTO public.accounting_entry (
+    policy_account_id, kind, creation_date, effective_date, amount
+)
+VALUES (
+    $1, 'expected_payment', $2,
+    $3, $4::text::numeric
+)
+`
+
+type InsertExpectedPaymentParams struct {
+	PolicyAccountID int64
+	CreationDate    pgtype.Date
+	EffectiveDate   pgtype.Date
+	Amount          string
+}
+
+func (q *Queries) InsertExpectedPayment(ctx context.Context, arg InsertExpectedPaymentParams) error {
+	_, err := q.db.Exec(ctx, insertExpectedPayment,
+		arg.PolicyAccountID,
+		arg.CreationDate,
+		arg.EffectiveDate,
+		arg.Amount,
+	)
+	return err
+}
+
+const insertPolicyAccount = `-- name: InsertPolicyAccount :one
+INSERT INTO public.policy_account (
+    policy_number, policy_account_number, registered_premium, registered_cover_from,
+    created, updated
+)
+VALUES (
+    $1, $2,
+    $3::text::numeric, $4,
+    $5, $5
+)
+ON CONFLICT (policy_number) DO NOTHING
+RETURNING id
+`
+
+type InsertPolicyAccountParams struct {
+	PolicyNumber        string
+	PolicyAccountNumber string
+	RegisteredPremium   string
+	RegisteredCoverFrom pgtype.Date
+	RegisteredAt        pgtype.Timestamp
+}
+
+func (q *Queries) InsertPolicyAccount(ctx context.Context, arg InsertPolicyAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertPolicyAccount,
+		arg.PolicyNumber,
+		arg.PolicyAccountNumber,
+		arg.RegisteredPremium,
+		arg.RegisteredCoverFrom,
+		arg.RegisteredAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listAccounts = `-- name: ListAccounts :many
 SELECT policy_account_number, policy_number, created, updated
 FROM public.policy_account
@@ -87,4 +149,24 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const registrationMatches = `-- name: RegistrationMatches :one
+SELECT registered_premium = $1::text::numeric
+    AND registered_cover_from = $2
+FROM public.policy_account
+WHERE policy_number = $3
+`
+
+type RegistrationMatchesParams struct {
+	RegisteredPremium   string
+	RegisteredCoverFrom pgtype.Date
+	PolicyNumber        string
+}
+
+func (q *Queries) RegistrationMatches(ctx context.Context, arg RegistrationMatchesParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, registrationMatches, arg.RegisteredPremium, arg.RegisteredCoverFrom, arg.PolicyNumber)
+	var column_1 pgtype.Bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }

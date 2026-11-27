@@ -61,6 +61,40 @@ func TestStoreReadOnly_UsesBoundedReadTransaction(t *testing.T) {
 	}
 }
 
+func TestStoreWrite_UsesReadCommittedTransaction(t *testing.T) {
+	// given
+	tx := &fakeTx{rollbackErr: pgx.ErrTxClosed}
+	beginner := &fakeTxBeginner{tx: tx}
+	store, err := NewStore(beginner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workCalls := 0
+	work := func(*dbgen.Queries) error {
+		workCalls++
+		return nil
+	}
+
+	// when
+	err = store.write(t.Context(), work)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beginner.options.IsoLevel != pgx.ReadCommitted ||
+		beginner.options.AccessMode != pgx.ReadWrite {
+		t.Fatalf("transaction options = %+v", beginner.options)
+	}
+	if workCalls != 1 || tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf(
+			"calls = work %d, commit %d, rollback %d",
+			workCalls,
+			tx.commitCalls,
+			tx.rollbackCalls,
+		)
+	}
+}
+
 func TestStoreReadOnly_PreservesFailures(t *testing.T) {
 	// given
 	workErr := errors.New("work marker")
@@ -197,7 +231,7 @@ func TestBeginError_PrefersContextFailure(t *testing.T) {
 	cancel()
 
 	// when
-	err := beginError(ctx, errors.New("begin marker"))
+	err := beginError(ctx, "begin test transaction", errors.New("begin marker"))
 
 	// then
 	if !errors.Is(err, context.Canceled) {
@@ -224,7 +258,7 @@ func TestBeginError_ClassifiesConnectionFailure(t *testing.T) {
 	}
 
 	// when
-	err = beginError(t.Context(), connectErr)
+	err = beginError(t.Context(), "begin test transaction", connectErr)
 
 	// then
 	if !errors.Is(err, application.ErrStorageUnavailable) ||

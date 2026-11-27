@@ -219,7 +219,7 @@ test-integration: ## Run service composition and disposable PostgreSQL smokes (D
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads)$$' \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction)$$' \
 		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 

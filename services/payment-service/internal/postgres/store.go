@@ -17,12 +17,12 @@ import (
 
 const storageCleanupBudget = 5 * time.Second
 
-// TxBeginner starts read-only transactions on the process-owned writer pool.
+// TxBeginner starts transactions on the process-owned writer pool.
 type TxBeginner interface {
 	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
-// Store reads Payment accounts through the runtime writer pool.
+// Store reads and writes Payment accounts through the runtime writer pool.
 type Store struct {
 	pool TxBeginner
 }
@@ -98,6 +98,78 @@ func (store *Store) ReadAccountBalance(
 	return result, resultErr
 }
 
+// StoreRegistration creates one account and expected debit, or compares a durable replay.
+func (store *Store) StoreRegistration(
+	ctx context.Context,
+	registration application.AccountRegistration,
+) error {
+	return store.write(ctx, func(queries *dbgen.Queries) error {
+		coverageStart := pgtype.Date{Time: registration.CoverageStart, Valid: true}
+		accountID, err := queries.InsertPolicyAccount(
+			ctx,
+			dbgen.InsertPolicyAccountParams{
+				PolicyNumber:        registration.PolicyNumber,
+				PolicyAccountNumber: registration.PolicyAccountNumber,
+				RegisteredPremium:   registration.Premium,
+				RegisteredCoverFrom: coverageStart,
+				RegisteredAt: pgtype.Timestamp{
+					Time:  registration.RegisteredAt,
+					Valid: true,
+				},
+			},
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			same, err := queries.RegistrationMatches(
+				ctx,
+				dbgen.RegistrationMatchesParams{
+					RegisteredPremium:   registration.Premium,
+					RegisteredCoverFrom: coverageStart,
+					PolicyNumber:        registration.PolicyNumber,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("compare payment registration: %w", err)
+			}
+			if !same.Valid {
+				return errors.New("compare payment registration: result is missing")
+			}
+			if !same.Bool {
+				return application.ErrRegistrationConflict
+			}
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("insert payment account: %w", err)
+		}
+		registeredAt := registration.RegisteredAt.UTC()
+		creationDate := pgtype.Date{
+			Time: time.Date(
+				registeredAt.Year(),
+				registeredAt.Month(),
+				registeredAt.Day(),
+				0,
+				0,
+				0,
+				0,
+				time.UTC,
+			),
+			Valid: true,
+		}
+		if err := queries.InsertExpectedPayment(
+			ctx,
+			dbgen.InsertExpectedPaymentParams{
+				PolicyAccountID: accountID,
+				CreationDate:    creationDate,
+				EffectiveDate:   coverageStart,
+				Amount:          registration.Premium,
+			},
+		); err != nil {
+			return fmt.Errorf("insert expected payment: %w", err)
+		}
+		return nil
+	})
+}
+
 func (store *Store) readOnly(
 	ctx context.Context,
 	work func(*dbgen.Queries) error,
@@ -107,7 +179,7 @@ func (store *Store) readOnly(
 		AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {
-		return beginError(ctx, err)
+		return beginError(ctx, "begin Payment read transaction", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(
@@ -131,18 +203,52 @@ func (store *Store) readOnly(
 	return nil
 }
 
-func beginError(ctx context.Context, err error) error {
+func (store *Store) write(
+	ctx context.Context,
+	work func(*dbgen.Queries) error,
+) (resultErr error) {
+	tx, err := store.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.ReadCommitted,
+		AccessMode: pgx.ReadWrite,
+	})
+	if err != nil {
+		return beginError(ctx, "begin Payment registration transaction", err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			storageCleanupBudget,
+		)
+		defer cancel()
+		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			resultErr = errors.Join(
+				resultErr,
+				fmt.Errorf("roll back Payment registration transaction: %w", err),
+			)
+		}
+	}()
+	if err := work(dbgen.New(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit Payment registration transaction: %w", err)
+	}
+	return nil
+}
+
+func beginError(ctx context.Context, operation string, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("begin Payment read transaction: %w", ctxErr)
+		return fmt.Errorf("%s: %w", operation, ctxErr)
 	}
 	if _, connect := errors.AsType[*pgconn.ConnectError](err); connect {
 		return fmt.Errorf(
-			"begin Payment read transaction: %w: %w",
+			"%s: %w: %w",
+			operation,
 			application.ErrStorageUnavailable,
 			err,
 		)
 	}
-	return fmt.Errorf("begin Payment read transaction: %w", err)
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func accountProjection(
