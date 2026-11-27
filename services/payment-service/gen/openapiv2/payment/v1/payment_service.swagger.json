@@ -71,7 +71,7 @@
           "500": {
             "description": "The account is missing or the request failed unexpectedly.",
             "schema": {
-              "$ref": "#/definitions/v1LegacyErrorResponse"
+              "$ref": "#/definitions/v1LegacyError"
             },
             "examples": {
               "application/json": {
@@ -145,15 +145,7 @@
         }
       }
     },
-    "v1GetAccountBalanceResponse": {
-      "type": "object",
-      "properties": {
-        "account": {
-          "$ref": "#/definitions/v1AccountBalance"
-        }
-      }
-    },
-    "v1LegacyErrorLink": {
+    "v1ErrorLink": {
       "type": "object",
       "properties": {
         "href": {
@@ -162,26 +154,45 @@
         "templated": {
           "type": "boolean"
         }
-      }
+      },
+      "required": [
+        "href",
+        "templated"
+      ]
     },
-    "v1LegacyErrorLinks": {
+    "v1ErrorLinks": {
       "type": "object",
       "properties": {
         "self": {
-          "$ref": "#/definitions/v1LegacyErrorLink"
+          "$ref": "#/definitions/v1ErrorLink"
+        }
+      },
+      "required": [
+        "self"
+      ]
+    },
+    "v1GetAccountBalanceResponse": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/v1AccountBalance"
         }
       }
     },
-    "v1LegacyErrorResponse": {
+    "v1LegacyError": {
       "type": "object",
       "properties": {
         "_links": {
-          "$ref": "#/definitions/v1LegacyErrorLinks"
+          "$ref": "#/definitions/v1ErrorLinks"
         },
         "message": {
           "type": "string"
         }
-      }
+      },
+      "required": [
+        "message",
+        "_links"
+      ]
     },
     "v1ListAccountsResponse": {
       "type": "object",

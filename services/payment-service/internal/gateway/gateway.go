@@ -272,21 +272,25 @@ func safeGatewayError(
 	}
 }
 
-type legacyErrorLink struct {
+type legacyLink struct {
 	Href      string `json:"href"`
 	Templated bool   `json:"templated"`
 }
 
-type legacyErrorBody struct {
-	Links struct {
-		Self legacyErrorLink `json:"self"`
-	} `json:"_links"`
-	Message string `json:"message"`
+type legacyLinks struct {
+	Self legacyLink `json:"self"`
+}
+
+type legacyError struct {
+	Links   legacyLinks `json:"_links"`
+	Message string      `json:"message"`
 }
 
 func writeLegacyError(writer http.ResponseWriter, path string) {
-	body := legacyErrorBody{Message: "Internal Server Error"}
-	body.Links.Self = legacyErrorLink{Href: path}
+	body := legacyError{
+		Links:   legacyLinks{Self: legacyLink{Href: path}},
+		Message: "Internal Server Error",
+	}
 	encoded, _ := json.Marshal(body)
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusInternalServerError)

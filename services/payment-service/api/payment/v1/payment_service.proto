@@ -51,7 +51,7 @@ service PaymentService {
         value: {
           description: "The account is missing or the request failed unexpectedly."
           schema: {
-            json_schema: {ref: ".payment.v1.LegacyErrorResponse"}
+            json_schema: {ref: ".payment.v1.LegacyError"}
           }
           examples: {
             key: "application/json"
@@ -107,16 +107,40 @@ message AccountBalance {
   }];
 }
 
-message LegacyErrorResponse {
-  LegacyErrorLinks links = 1 [json_name = "_links"];
+message LegacyError {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "message",
+        "_links"
+      ]
+    }
+  };
+
+  ErrorLinks links = 1 [json_name = "_links"];
   string message = 2;
 }
 
-message LegacyErrorLinks {
-  LegacyErrorLink self = 1;
+message ErrorLinks {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: ["self"]
+    }
+  };
+
+  ErrorLink self = 1;
 }
 
-message LegacyErrorLink {
+message ErrorLink {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "href",
+        "templated"
+      ]
+    }
+  };
+
   string href = 1;
   bool templated = 2;
 }

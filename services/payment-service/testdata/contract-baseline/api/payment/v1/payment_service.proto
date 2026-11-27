@@ -38,16 +38,16 @@ message AccountBalance {
   int64 updated = 5;
 }
 
-message LegacyErrorResponse {
-  LegacyErrorLinks links = 1 [json_name = "_links"];
+message LegacyError {
+  ErrorLinks links = 1 [json_name = "_links"];
   string message = 2;
 }
 
-message LegacyErrorLinks {
-  LegacyErrorLink self = 1;
+message ErrorLinks {
+  ErrorLink self = 1;
 }
 
-message LegacyErrorLink {
+message ErrorLink {
   string href = 1;
   bool templated = 2;
 }

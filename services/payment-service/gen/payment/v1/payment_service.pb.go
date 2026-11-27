@@ -336,28 +336,28 @@ func (x *AccountBalance) GetUpdated() int64 {
 	return 0
 }
 
-type LegacyErrorResponse struct {
+type LegacyError struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Links         *LegacyErrorLinks      `protobuf:"bytes,1,opt,name=links,json=_links,proto3" json:"links,omitempty"`
+	Links         *ErrorLinks            `protobuf:"bytes,1,opt,name=links,json=_links,proto3" json:"links,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LegacyErrorResponse) Reset() {
-	*x = LegacyErrorResponse{}
+func (x *LegacyError) Reset() {
+	*x = LegacyError{}
 	mi := &file_payment_v1_payment_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LegacyErrorResponse) String() string {
+func (x *LegacyError) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LegacyErrorResponse) ProtoMessage() {}
+func (*LegacyError) ProtoMessage() {}
 
-func (x *LegacyErrorResponse) ProtoReflect() protoreflect.Message {
+func (x *LegacyError) ProtoReflect() protoreflect.Message {
 	mi := &file_payment_v1_payment_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -369,46 +369,46 @@ func (x *LegacyErrorResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LegacyErrorResponse.ProtoReflect.Descriptor instead.
-func (*LegacyErrorResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use LegacyError.ProtoReflect.Descriptor instead.
+func (*LegacyError) Descriptor() ([]byte, []int) {
 	return file_payment_v1_payment_service_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *LegacyErrorResponse) GetLinks() *LegacyErrorLinks {
+func (x *LegacyError) GetLinks() *ErrorLinks {
 	if x != nil {
 		return x.Links
 	}
 	return nil
 }
 
-func (x *LegacyErrorResponse) GetMessage() string {
+func (x *LegacyError) GetMessage() string {
 	if x != nil {
 		return x.Message
 	}
 	return ""
 }
 
-type LegacyErrorLinks struct {
+type ErrorLinks struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Self          *LegacyErrorLink       `protobuf:"bytes,1,opt,name=self,proto3" json:"self,omitempty"`
+	Self          *ErrorLink             `protobuf:"bytes,1,opt,name=self,proto3" json:"self,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LegacyErrorLinks) Reset() {
-	*x = LegacyErrorLinks{}
+func (x *ErrorLinks) Reset() {
+	*x = ErrorLinks{}
 	mi := &file_payment_v1_payment_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LegacyErrorLinks) String() string {
+func (x *ErrorLinks) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LegacyErrorLinks) ProtoMessage() {}
+func (*ErrorLinks) ProtoMessage() {}
 
-func (x *LegacyErrorLinks) ProtoReflect() protoreflect.Message {
+func (x *ErrorLinks) ProtoReflect() protoreflect.Message {
 	mi := &file_payment_v1_payment_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -420,19 +420,19 @@ func (x *LegacyErrorLinks) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LegacyErrorLinks.ProtoReflect.Descriptor instead.
-func (*LegacyErrorLinks) Descriptor() ([]byte, []int) {
+// Deprecated: Use ErrorLinks.ProtoReflect.Descriptor instead.
+func (*ErrorLinks) Descriptor() ([]byte, []int) {
 	return file_payment_v1_payment_service_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *LegacyErrorLinks) GetSelf() *LegacyErrorLink {
+func (x *ErrorLinks) GetSelf() *ErrorLink {
 	if x != nil {
 		return x.Self
 	}
 	return nil
 }
 
-type LegacyErrorLink struct {
+type ErrorLink struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Href          string                 `protobuf:"bytes,1,opt,name=href,proto3" json:"href,omitempty"`
 	Templated     bool                   `protobuf:"varint,2,opt,name=templated,proto3" json:"templated,omitempty"`
@@ -440,20 +440,20 @@ type LegacyErrorLink struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LegacyErrorLink) Reset() {
-	*x = LegacyErrorLink{}
+func (x *ErrorLink) Reset() {
+	*x = ErrorLink{}
 	mi := &file_payment_v1_payment_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LegacyErrorLink) String() string {
+func (x *ErrorLink) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LegacyErrorLink) ProtoMessage() {}
+func (*ErrorLink) ProtoMessage() {}
 
-func (x *LegacyErrorLink) ProtoReflect() protoreflect.Message {
+func (x *ErrorLink) ProtoReflect() protoreflect.Message {
 	mi := &file_payment_v1_payment_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -465,19 +465,19 @@ func (x *LegacyErrorLink) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LegacyErrorLink.ProtoReflect.Descriptor instead.
-func (*LegacyErrorLink) Descriptor() ([]byte, []int) {
+// Deprecated: Use ErrorLink.ProtoReflect.Descriptor instead.
+func (*ErrorLink) Descriptor() ([]byte, []int) {
 	return file_payment_v1_payment_service_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *LegacyErrorLink) GetHref() string {
+func (x *ErrorLink) GetHref() string {
 	if x != nil {
 		return x.Href
 	}
 	return ""
 }
 
-func (x *LegacyErrorLink) GetTemplated() bool {
+func (x *ErrorLink) GetTemplated() bool {
 	if x != nil {
 		return x.Templated
 	}
@@ -508,27 +508,31 @@ const file_payment_v1_payment_service_proto_rawDesc = "" +
 	"\rpolicy_number\x18\x02 \x01(\tR\fpolicyNumber\x12!\n" +
 	"\abalance\x18\x03 \x01(\tB\a\x92A\x04\x9a\x02\x01\x05R\abalance\x12)\n" +
 	"\acreated\x18\x04 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\acreated\x12)\n" +
-	"\aupdated\x18\x05 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\aupdated\"d\n" +
-	"\x13LegacyErrorResponse\x123\n" +
-	"\x05links\x18\x01 \x01(\v2\x1c.payment.v1.LegacyErrorLinksR\x06_links\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"C\n" +
-	"\x10LegacyErrorLinks\x12/\n" +
-	"\x04self\x18\x01 \x01(\v2\x1b.payment.v1.LegacyErrorLinkR\x04self\"C\n" +
-	"\x0fLegacyErrorLink\x12\x12\n" +
+	"\aupdated\x18\x05 \x01(\x03B\x0f\x92A\f\x9a\x02\x01\x03\xa2\x02\x05int64R\aupdated\"p\n" +
+	"\vLegacyError\x12-\n" +
+	"\x05links\x18\x01 \x01(\v2\x16.payment.v1.ErrorLinksR\x06_links\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage:\x18\x92A\x15\n" +
+	"\x13\xd2\x01\amessage\xd2\x01\x06_links\"E\n" +
+	"\n" +
+	"ErrorLinks\x12)\n" +
+	"\x04self\x18\x01 \x01(\v2\x15.payment.v1.ErrorLinkR\x04self:\f\x92A\t\n" +
+	"\a\xd2\x01\x04self\"W\n" +
+	"\tErrorLink\x12\x12\n" +
 	"\x04href\x18\x01 \x01(\tR\x04href\x12\x1c\n" +
-	"\ttemplated\x18\x02 \x01(\bR\ttemplated2\xcf\a\n" +
+	"\ttemplated\x18\x02 \x01(\bR\ttemplated:\x18\x92A\x15\n" +
+	"\x13\xd2\x01\x04href\xd2\x01\ttemplated2\xc7\a\n" +
 	"\x0ePaymentService\x12\xcb\x02\n" +
 	"\fListAccounts\x12\x1f.payment.v1.ListAccountsRequest\x1a .payment.v1.ListAccountsResponse\"\xf7\x01\x92A\xd0\x01:\x10application/jsonJ\xbb\x01\n" +
 	"\x03200\x12\xb3\x01\n" +
 	"+Every Payment account as a bare JSON array.\"\x83\x01\n" +
-	"\x10application/json\x12o[{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"created\":1704067200000,\"updated\":1704153600000}]\x82\xd3\xe4\x93\x02\x1db\baccounts\x12\x11/payment/accounts\x12\xee\x04\n" +
-	"\x11GetAccountBalance\x12$.payment.v1.GetAccountBalanceRequest\x1a%.payment.v1.GetAccountBalanceResponse\"\x8b\x04\x92A\xd4\x03:\x10application/jsonJ\xd0\x01\n" +
+	"\x10application/json\x12o[{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"created\":1704067200000,\"updated\":1704153600000}]\x82\xd3\xe4\x93\x02\x1db\baccounts\x12\x11/payment/accounts\x12\xe6\x04\n" +
+	"\x11GetAccountBalance\x12$.payment.v1.GetAccountBalanceRequest\x1a%.payment.v1.GetAccountBalanceResponse\"\x83\x04\x92A\xcc\x03:\x10application/jsonJ\xd0\x01\n" +
 	"\x03200\x12\xc8\x01\n" +
 	"2The Payment account and its current dated balance.\"\x91\x01\n" +
-	"\x10application/json\x12}{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"balance\":12.34,\"created\":1704067200000,\"updated\":1704153600000}J\xec\x01\n" +
-	"\x03500\x12\xe4\x01\n" +
-	":The account is missing or the request failed unexpectedly.\x12#\n" +
-	"!\x1a\x1f.payment.v1.LegacyErrorResponse\"\x80\x01\n" +
+	"\x10application/json\x12}{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"balance\":12.34,\"created\":1704067200000,\"updated\":1704153600000}J\xe4\x01\n" +
+	"\x03500\x12\xdc\x01\n" +
+	":The account is missing or the request failed unexpectedly.\x12\x1b\n" +
+	"\x19\x1a\x17.payment.v1.LegacyError\"\x80\x01\n" +
 	"\x10application/json\x12l{\"_links\":{\"self\":{\"href\":\"/payment/accounts/missing\",\"templated\":false}},\"message\":\"Internal Server Error\"}\x82\xd3\xe4\x93\x02-b\aaccount\x12\"/payment/accounts/{account_number}B]Z[github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1;paymentv1b\x06proto3"
 
 var (
@@ -551,15 +555,15 @@ var file_payment_v1_payment_service_proto_goTypes = []any{
 	(*GetAccountBalanceResponse)(nil), // 3: payment.v1.GetAccountBalanceResponse
 	(*Account)(nil),                   // 4: payment.v1.Account
 	(*AccountBalance)(nil),            // 5: payment.v1.AccountBalance
-	(*LegacyErrorResponse)(nil),       // 6: payment.v1.LegacyErrorResponse
-	(*LegacyErrorLinks)(nil),          // 7: payment.v1.LegacyErrorLinks
-	(*LegacyErrorLink)(nil),           // 8: payment.v1.LegacyErrorLink
+	(*LegacyError)(nil),               // 6: payment.v1.LegacyError
+	(*ErrorLinks)(nil),                // 7: payment.v1.ErrorLinks
+	(*ErrorLink)(nil),                 // 8: payment.v1.ErrorLink
 }
 var file_payment_v1_payment_service_proto_depIdxs = []int32{
 	4, // 0: payment.v1.ListAccountsResponse.accounts:type_name -> payment.v1.Account
 	5, // 1: payment.v1.GetAccountBalanceResponse.account:type_name -> payment.v1.AccountBalance
-	7, // 2: payment.v1.LegacyErrorResponse.links:type_name -> payment.v1.LegacyErrorLinks
-	8, // 3: payment.v1.LegacyErrorLinks.self:type_name -> payment.v1.LegacyErrorLink
+	7, // 2: payment.v1.LegacyError.links:type_name -> payment.v1.ErrorLinks
+	8, // 3: payment.v1.ErrorLinks.self:type_name -> payment.v1.ErrorLink
 	0, // 4: payment.v1.PaymentService.ListAccounts:input_type -> payment.v1.ListAccountsRequest
 	2, // 5: payment.v1.PaymentService.GetAccountBalance:input_type -> payment.v1.GetAccountBalanceRequest
 	1, // 6: payment.v1.PaymentService.ListAccounts:output_type -> payment.v1.ListAccountsResponse

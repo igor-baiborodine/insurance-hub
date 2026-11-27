@@ -34,12 +34,17 @@ def add_response(swagger: dict[str, Any]) -> None:
     swagger["paths"]["/payment/accounts"]["get"]["responses"]["418"] = {"description": "unexpected"}
 
 
+def remove_required_field(swagger: dict[str, Any]) -> None:
+    swagger["definitions"]["v1LegacyError"]["required"].remove("message")
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (change_path, "paths differ from the contract"),
         (change_status_example, "response 500 example differs"),
         (add_response, "response status set differs"),
+        (remove_required_field, "required fields differ from the contract"),
     ],
 )
 def test_contract_check_rejects_controlled_swagger_drift(

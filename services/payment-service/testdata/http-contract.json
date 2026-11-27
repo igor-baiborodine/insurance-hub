@@ -58,7 +58,7 @@
         },
         "500": {
           "schema": {
-            "$ref": "#/definitions/v1LegacyErrorResponse"
+            "$ref": "#/definitions/v1LegacyError"
           },
           "example": {
             "_links": {
@@ -128,20 +128,20 @@
         "format": "int64"
       }
     },
-    "v1LegacyErrorResponse": {
+    "v1LegacyError": {
       "_links": {
-        "$ref": "#/definitions/v1LegacyErrorLinks"
+        "$ref": "#/definitions/v1ErrorLinks"
       },
       "message": {
         "type": "string"
       }
     },
-    "v1LegacyErrorLinks": {
+    "v1ErrorLinks": {
       "self": {
-        "$ref": "#/definitions/v1LegacyErrorLink"
+        "$ref": "#/definitions/v1ErrorLink"
       }
     },
-    "v1LegacyErrorLink": {
+    "v1ErrorLink": {
       "href": {
         "type": "string"
       },
@@ -149,5 +149,18 @@
         "type": "boolean"
       }
     }
+  },
+  "schema_required": {
+    "v1LegacyError": [
+      "message",
+      "_links"
+    ],
+    "v1ErrorLinks": [
+      "self"
+    ],
+    "v1ErrorLink": [
+      "href",
+      "templated"
+    ]
   }
 }

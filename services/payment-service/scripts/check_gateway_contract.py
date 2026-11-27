@@ -53,13 +53,27 @@ def require_schema(
             )
 
 
+def require_schema_fields(definitions: dict[str, Any], name: str, required: list[str]) -> None:
+    schema = definitions.get(name)
+    require(isinstance(schema, dict), f"Swagger definition is missing: {name}")
+    assert isinstance(schema, dict)
+    actual = schema.get("required")
+    require(isinstance(actual, list), f"Swagger definition {name} lacks required fields")
+    require(
+        len(actual) == len(required) and set(actual) == set(required),
+        f"Swagger definition {name} required fields differ from the contract",
+    )
+
+
 def check_contract(contract_path: Path, swagger_path: Path) -> None:
     contract = load_object(contract_path, "HTTP contract")
     swagger = load_object(swagger_path, "generated Swagger")
     operations_contract = contract.get("operations")
     schemas_contract = contract.get("schemas")
+    required_contract = contract.get("schema_required", {})
     require(isinstance(operations_contract, list), "HTTP contract operations must be an array")
     require(isinstance(schemas_contract, dict), "HTTP contract schemas must be an object")
+    require(isinstance(required_contract, dict), "HTTP contract schema_required must be an object")
     assert isinstance(operations_contract, list)
     assert isinstance(schemas_contract, dict)
 
@@ -143,6 +157,13 @@ def check_contract(contract_path: Path, swagger_path: Path) -> None:
             f"HTTP contract schema {name} must be an object",
         )
         require_schema(definitions, name, expected_properties)
+    for name, required_fields in required_contract.items():
+        require(
+            isinstance(required_fields, list)
+            and all(isinstance(field, str) for field in required_fields),
+            f"HTTP contract required fields for {name} must be an array of strings",
+        )
+        require_schema_fields(definitions, name, required_fields)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
