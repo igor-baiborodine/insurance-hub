@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/testing/postgresfixture"
 )
@@ -24,7 +25,7 @@ func TestRun_PaymentAccountReads(t *testing.T) {
 	fixture := postgresfixture.New(t, ctx)
 	fixture.Call(t, ctx, "migrate", "version=1")
 	fixture.Exec(t, ctx, seedAccountReadsQuery)
-	pool, err := postgres.OpenPool(ctx, fixture.WriterSettings(t))
+	pool, err := postgres.OpenPool(ctx, writerSettings(t, fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +93,21 @@ func TestRun_PaymentAccountReads(t *testing.T) {
 	if after := businessCounts(t, ctx, fixture); after != before {
 		t.Fatalf("account reads changed rows: before %q, after %q", before, after)
 	}
+}
+
+func writerSettings(t *testing.T, fixture *postgresfixture.Fixture) config.Database {
+	t.Helper()
+	t.Setenv("PAYMENT_DATABASE_URL", fixture.WriterURL("payment"))
+	t.Setenv("MINIO_ENDPOINT", "http://minio.example:9000")
+	t.Setenv("MINIO_ACCESS_KEY", "access")
+	t.Setenv("MINIO_SECRET_KEY", "secret")
+	t.Setenv("KAFKA_BROKERS", "kafka.example:9093")
+	t.Setenv("KAFKA_CA_FILE", "/etc/payment-service/kafka/ca.crt")
+	settings, err := config.Load()
+	if err != nil {
+		t.Fatal("load disposable writer settings:", err)
+	}
+	return settings.Database
 }
 
 func findAccount(t *testing.T, accounts []application.Account, number string) application.Account {

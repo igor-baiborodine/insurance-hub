@@ -28,7 +28,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/administration/provisioning"
-	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/service"
 )
 
@@ -112,22 +111,6 @@ func (f *Fixture) WriterURL(database string) string {
 	writerURL.User = url.UserPassword("go_payment_writer", f.WriterPassword)
 	writerURL.RawQuery = url.Values{"sslmode": {"verify-full"}, "sslrootcert": {f.CA}}.Encode()
 	return writerURL.String()
-}
-
-// WriterSettings loads the production database settings for this disposable writer login.
-func (f *Fixture) WriterSettings(t *testing.T) config.Database {
-	t.Helper()
-	t.Setenv("PAYMENT_DATABASE_URL", f.WriterURL("payment"))
-	t.Setenv("MINIO_ENDPOINT", "http://minio.example:9000")
-	t.Setenv("MINIO_ACCESS_KEY", "access")
-	t.Setenv("MINIO_SECRET_KEY", "secret")
-	t.Setenv("KAFKA_BROKERS", "kafka.example:9093")
-	t.Setenv("KAFKA_CA_FILE", "/etc/payment-service/kafka/ca.crt")
-	settings, err := config.Load()
-	if err != nil {
-		t.Fatal("load disposable writer settings:", err)
-	}
-	return settings.Database
 }
 
 // Exec runs fixture-owner SQL.
