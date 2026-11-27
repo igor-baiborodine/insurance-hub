@@ -227,16 +227,21 @@ password or widen its privileges.
 `mc` alias for the tenant administrator from the tenant's `<tenant namespace>-storage-config`
 Secret, entering the credentials at the prompt, through a loopback port-forward to Service
 `minio`. In QA, trust the tenant namespace `kube-root-ca.crt` and keep hostname verification.
+Keep `endpoint` on the in-cluster Service port for the workload Secret. The administrative alias
+uses the local forward's port instead; `mc --resolve` accepts a bare IP on the right and retains
+port `19000` from that alias URL.
 
 ```bash
 port=80 scheme=http; [ "$ENV" = qa ] && port=443 scheme=https
-endpoint="$scheme://minio.$MINIO_NS.svc.cluster.local:$port"
+host="minio.$MINIO_NS.svc.cluster.local"
+endpoint="$scheme://$host:$port"
+admin_endpoint="$scheme://$host:19000"
 kubectl --context "$CTX" -n "$MINIO_NS" port-forward --address 127.0.0.1 svc/minio 19000:"$port" &
 mkdir -p "$work/mc/certs/CAs" && : > "$work/minio-ca.crt"
 [ "$ENV" = qa ] && kubectl --context "$CTX" -n "$MINIO_NS" get configmap kube-root-ca.crt \
   -o jsonpath='{.data.ca\.crt}' > "$work/minio-ca.crt" && cp "$work/minio-ca.crt" "$work/mc/certs/CAs/"
-mc() { command mc --config-dir "$work/mc" --resolve "minio.$MINIO_NS.svc.cluster.local:$port=127.0.0.1:19000" "$@"; }
-mc alias set payment-admin "$endpoint"
+mc() { command mc --config-dir "$work/mc" --resolve "$host:19000=127.0.0.1" "$@"; }
+mc alias set payment-admin "$admin_endpoint"
 cat > "$work/payment-reader.json" <<'EOF'
 {"Version": "2012-10-17", "Statement": [
   {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::payments-import/*"]},
@@ -244,7 +249,9 @@ cat > "$work/payment-reader.json" <<'EOF'
    "Resource": ["arn:aws:s3:::payments-import"]}]}
 EOF
 mc admin policy create payment-admin payment-reader "$work/payment-reader.json"
-openssl rand -hex 20 > "$work/secret-key" && printf payment-reader > "$work/access-key"
+openssl rand -hex 20 | tr -d '\n' > "$work/secret-key"
+test "$(wc -c < "$work/secret-key")" -eq 40
+printf '%s' payment-reader > "$work/access-key"
 mc admin user add payment-admin   # enter payment-reader and the contents of $work/secret-key
 mc admin policy attach payment-admin payment-reader --user payment-reader
 printf '%s' "$endpoint" > "$work/endpoint"
