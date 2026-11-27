@@ -181,16 +181,15 @@ anything else.
 ### Registration worker activation and held records
 
 Current local-dev and QA manifests intentionally leave `EVENT_WORKERS_ENABLED=false`; the Go
-workload performs metadata-only Kafka checks while the Java Payment service owns serving group
-`payment-service`. Issue 486 does not transfer that ownership or retire Java. Do not enable both
-consumers: the Go preflight rejects an active serving group, and changing `KAFKA_GROUP` is not
-supported.
+workload performs metadata-only Kafka checks while another consumer owns serving group
+`payment-service`. Do not enable both consumers: the Go preflight rejects an active serving group,
+and changing `KAFKA_GROUP` is not supported.
 
 Enable the Go worker only as part of a separately reviewed and authorized direct cutover after the
-Java service has stopped consuming and the serving group's committed positions have been
-preserved. Set `EVENT_WORKERS_ENABLED=true`; leave `KAFKA_GROUP` unset to select its fixed
+current consumer has stopped and the serving group's committed positions have been preserved. Set
+`EVENT_WORKERS_ENABLED=true`; leave `KAFKA_GROUP` unset to select its fixed
 `payment-service` default. Do not initialize or reset group progress. The disposable qualification
-below proves recovery with group `payment-service-issue-486` and never touches local-dev or QA:
+below proves recovery with group `payment-service-qualification` and never touches local-dev or QA:
 
 ```bash
 make -C services/payment-service test-integration

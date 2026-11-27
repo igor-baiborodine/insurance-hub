@@ -41,7 +41,7 @@ import (
 const (
 	kafkaImage = "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f"
 	kafkaTopic = "policy-registered"
-	kafkaGroup = "payment-service-issue-486"
+	kafkaGroup = "payment-service-qualification"
 )
 
 type compatibilityEvent struct {
