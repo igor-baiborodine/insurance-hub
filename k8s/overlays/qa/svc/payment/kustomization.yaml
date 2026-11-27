@@ -12,7 +12,8 @@ resources:
 images:
   - name: insurance-hub-payment-api
     newName: ghcr.io/igor-baiborodine/insurance-hub/payment-api
-    newTag: 0.0.0-unpublished
+    newTag: 1.0.0
+    digest: sha256:845c56f9e27f932652f8a26d68e1b477985eff5ff159303deef3efeebd955dab
 configMapGenerator:
   - name: payment-config
     behavior: merge
@@ -20,7 +21,7 @@ configMapGenerator:
       - OTEL_ENABLED=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://qa-alloy.qa-monitoring.svc.cluster.local:4317
       - DEPLOYMENT_ENVIRONMENT=qa
-      - SERVICE_VERSION=git-000000000000
+      - SERVICE_VERSION=git-f52fbb20834a
       - DB_MAX_CONNS=4
       - DB_CONNECT_TIMEOUT=3s
       - DB_QUERY_TIMEOUT=1s
