@@ -205,6 +205,7 @@ do not repeat its supplied value.
 | `MINIO_BUCKET` | `payments-import` | Must select the fixed `payments-import` bucket. |
 | `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
 | `MINIO_FETCH_TIMEOUT` | `3s` | Positive duration bounding each object-store connection attempt. |
+| `MINIO_MAX_STATEMENT_BYTES` | `1048576` | Integer from 1 through 8388608; bounds one statement snapshot before parsing and hashing. |
 | `KAFKA_BROKERS` | required | Comma-separated TLS `host:port` bootstrap addresses. |
 | `EVENT_WORKERS_ENABLED` | `false` | Boolean. The default performs metadata-only Kafka checks and joins no group. `true` explicitly enables registration consumption. |
 | `KAFKA_GROUP` | `payment-service` when event workers are enabled; otherwise unset | Consuming mode accepts only the serving group `payment-service`. Supplying this setting while workers are disabled is rejected. |
@@ -356,7 +357,7 @@ and use the repository's shared non-runtime Go Make tooling.
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL-, MinIO- and worker-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT` and the bounded `SELECT 1` readiness check. |
-| Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import` and idle-connection release on shutdown. |
+| Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import`, one bounded statement snapshot read and idle-connection release on shutdown. |
 | Kafka | Dashboard `internal/kafka` and composition | The same TLS trust and bounded CA file. Metadata-only mode joins no group. Explicit consuming mode validates stable committed positions for group `payment-service`, handles one registration at a time and commits only after durable success. |
 | Business architecture | Product application-owned catalog ports and injected adapters | Account reads and policy registration are application-owned use cases over PostgreSQL ports; transport and storage remain replaceable adapters. |
 
@@ -371,8 +372,8 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
 | `cmd/migrate`, `internal/administration` | Operator-run `migrate`/`status` against one protected target enrollment: target identity checks, an advisory lock, the versioned schema and its history in one transaction, and exact schema inspection. |
-| `internal/application` | Account-list, current-UTC-business-date balance and idempotent policy-registration use cases plus their storage ports and classified failures. |
-| `internal/postgres`, `internal/objectstore` | sqlc-backed account reads and atomic registration/debit writes on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and the bounded `payments-import` read check. |
+| `internal/application` | Account-list, current-UTC-business-date balance, idempotent policy-registration and whole-file bank-statement validation use cases plus their storage ports and classified failures. |
+| `internal/postgres`, `internal/objectstore` | sqlc-backed account reads and atomic registration/debit writes on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and bounded `payments-import` checks and statement snapshots. |
 | `internal/kafka` | TLS registration-topic metadata client and opt-in group worker with stable-progress preflight, strict event decoding and commit-after-storage ordering. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Payment registration, account projection, request validation, deadlines, size limits, safe status mapping and final-status observation. |

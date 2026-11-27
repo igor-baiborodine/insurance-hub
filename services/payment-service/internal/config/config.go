@@ -29,6 +29,7 @@ const (
 	objectCAFileSetting     = "MINIO_CA_FILE"
 	objectBucketSetting     = "MINIO_BUCKET"
 	objectFetchTimeout      = "MINIO_FETCH_TIMEOUT"
+	objectStatementMaxBytes = "MINIO_MAX_STATEMENT_BYTES"
 	kafkaBrokersSetting     = "KAFKA_BROKERS"
 	eventWorkersSetting     = "EVENT_WORKERS_ENABLED"
 	kafkaGroupSetting       = "KAFKA_GROUP"
@@ -37,6 +38,7 @@ const (
 	defaultBucket           = "payments-import"
 	defaultRegisteredTopic  = "policy-registered"
 	defaultKafkaGroup       = "payment-service"
+	defaultStatementBytes   = 1024 * 1024
 )
 
 // Database holds the Payment runtime connection and pool limits.
@@ -67,12 +69,13 @@ func (Secret) GoString() string { return "[REDACTED]" }
 
 // ObjectStore contains the statement-import bucket connection and fetch bound.
 type ObjectStore struct {
-	Endpoint     *url.URL
-	AccessKey    Secret
-	SecretKey    Secret
-	CAFile       string
-	Bucket       string
-	FetchTimeout time.Duration
+	Endpoint              *url.URL
+	AccessKey             Secret
+	SecretKey             Secret
+	CAFile                string
+	Bucket                string
+	FetchTimeout          time.Duration
+	MaximumStatementBytes int
 }
 
 // Kafka holds the broker discovery and trust for the registration topic.
@@ -462,13 +465,24 @@ func loadObjectStore(lookup lookupEnv) (ObjectStore, error) {
 	if err != nil {
 		return ObjectStore{}, err
 	}
+	maximumStatementBytes, err := kitconfig.LoadBoundedInt(
+		lookup,
+		objectStatementMaxBytes,
+		strconv.Itoa(defaultStatementBytes),
+		1,
+		8*1024*1024,
+	)
+	if err != nil {
+		return ObjectStore{}, err
+	}
 	return ObjectStore{
-		Endpoint:     endpoint,
-		AccessKey:    Secret{value: accessKey},
-		SecretKey:    Secret{value: secretKey},
-		CAFile:       caFile,
-		Bucket:       bucket,
-		FetchTimeout: fetchTimeout,
+		Endpoint:              endpoint,
+		AccessKey:             Secret{value: accessKey},
+		SecretKey:             Secret{value: secretKey},
+		CAFile:                caFile,
+		Bucket:                bucket,
+		FetchTimeout:          fetchTimeout,
+		MaximumStatementBytes: maximumStatementBytes,
 	}, nil
 }
 

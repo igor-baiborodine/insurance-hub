@@ -3,33 +3,42 @@ package objectstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 )
 
 type minioClient interface {
+	GetObject(context.Context, string, string, minio.GetObjectOptions) (*minio.Object, error)
 	ListObjects(context.Context, string, minio.ListObjectsOptions) <-chan minio.ObjectInfo
 }
 
 // Reader reads from the fixed payments-import bucket.
 type Reader struct {
-	client    minioClient
-	transport *http.Transport
-	bucket    string
+	client                minioClient
+	transport             *http.Transport
+	bucket                string
+	maximumStatementBytes int
+	fetchTimeout          time.Duration
 }
 
 // NewReader constructs the verified read-only object-store adapter.
 func NewReader(settings config.ObjectStore) (*Reader, error) {
-	if settings.Endpoint == nil || settings.Bucket == "" || settings.FetchTimeout <= 0 {
+	if settings.Endpoint == nil || settings.Bucket == "" || settings.FetchTimeout <= 0 ||
+		settings.MaximumStatementBytes <= 0 {
 		return nil, errors.New(
 			"create object reader: configuration and limits are required",
 		)
@@ -62,7 +71,11 @@ func NewReader(settings config.ObjectStore) (*Reader, error) {
 		transport.CloseIdleConnections()
 		return nil, errors.New("create object reader: initialize client")
 	}
-	return &Reader{client: client, transport: transport, bucket: settings.Bucket}, nil
+	return &Reader{
+		client: client, transport: transport, bucket: settings.Bucket,
+		maximumStatementBytes: settings.MaximumStatementBytes,
+		fetchTimeout:          settings.FetchTimeout,
+	}, nil
 }
 
 // Close releases retained idle connections without owning remote resources.
@@ -96,4 +109,49 @@ func (reader *Reader) CheckReadAccess(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// ReadStatement captures and hashes one bounded source object without retrying the payload read.
+func (reader *Reader) ReadStatement(
+	ctx context.Context,
+	key string,
+) (application.StatementSnapshot, error) {
+	if reader == nil || reader.client == nil || key == "" {
+		return application.StatementSnapshot{}, application.ErrStatementUnavailable
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	defer cancel()
+	object, err := reader.client.GetObject(
+		fetchCtx,
+		reader.bucket,
+		key,
+		minio.GetObjectOptions{},
+	)
+	if err != nil {
+		return application.StatementSnapshot{}, statementReadError(ctx)
+	}
+	defer func() { _ = object.Close() }()
+	content, err := io.ReadAll(io.LimitReader(
+		object,
+		int64(reader.maximumStatementBytes)+1,
+	))
+	if err != nil {
+		return application.StatementSnapshot{}, statementReadError(ctx)
+	}
+	if len(content) > reader.maximumStatementBytes {
+		return application.StatementSnapshot{}, application.ErrStatementLimit
+	}
+	digest := sha256.Sum256(content)
+	return application.StatementSnapshot{
+		SourceName: key,
+		SHA256:     fmt.Sprintf("%x", digest),
+		Content:    content,
+	}, nil
+}
+
+func statementReadError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return application.ErrStatementUnavailable
 }

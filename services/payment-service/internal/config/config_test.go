@@ -641,12 +641,14 @@ func TestLoad_DependencySettings(t *testing.T) {
 	}
 	if got.ObjectStore.Endpoint.String() != "https://minio.payment.svc:9000" ||
 		got.ObjectStore.Bucket != "payments-import" ||
-		got.ObjectStore.FetchTimeout != 3*time.Second {
+		got.ObjectStore.FetchTimeout != 3*time.Second ||
+		got.ObjectStore.MaximumStatementBytes != 1024*1024 {
 		t.Errorf(
-			"object store = (%s, %q, %v)",
+			"object store = (%s, %q, %v, %d)",
 			got.ObjectStore.Endpoint,
 			got.ObjectStore.Bucket,
 			got.ObjectStore.FetchTimeout,
+			got.ObjectStore.MaximumStatementBytes,
 		)
 	}
 	wantBrokers := []string{"kafka-bootstrap.data.svc:9093", "kafka-1.data.svc:9093"}
@@ -795,6 +797,11 @@ func TestLoad_RejectsInvalidDependencySettingsWithoutExposingValues(t *testing.T
 			"foreign bucket",
 			map[string]string{objectBucketSetting: "policies"},
 			objectBucketSetting, "must match the fixed payments-import bucket",
+		},
+		{
+			"statement size above maximum",
+			map[string]string{objectStatementMaxBytes: "8388609"},
+			objectStatementMaxBytes, "must be an integer from 1 through 8388608",
 		},
 		{
 			"missing brokers",
