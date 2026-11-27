@@ -151,8 +151,10 @@ mutation, that each ready gateway Pod has no `payment-service` upstream override
 
 With explicit authorization for temporary probe Pods, run
 `make go-svc-deploy-verify SVC_NAME=payment DEPLOY_DENIAL_PROBE=1`. It checks that an ordinary
-workload cannot open any Payment port, that a Pod carrying the gateway identity and caller label
-reaches the Service on port 80 while an unlabeled Pod cannot, and removes its own probe Pods.
+workload cannot open any Payment port. A Pod carrying the gateway identity and caller label then
+requests the account list, a listed account's detail and a synthetic missing account from the
+private Service; an unlabeled Pod must remain unable to reach port 80. The probes retain only
+sanitized pass/fail lines and remove their owned Pods.
 
 For manual troubleshooting, forward the exact Pod selected by status and send bounded requests.
 

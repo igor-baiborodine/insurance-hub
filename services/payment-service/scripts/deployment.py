@@ -67,6 +67,26 @@ PROBE_SHELL_FUNCTIONS = (
     'allowed() { output=$(curl --verbose --connect-timeout 2 --max-time 3 "telnet://$1" 2>&1) '
     '|| true; connected "$output"; }; '
 )
+BUSINESS_HTTP_PROBE = r"""address=$1
+missing_account=$2
+list=$(curl --fail --silent --show-error --max-time 5 \
+    "http://$address/payment/accounts") || exit 1
+account=$(printf "%s" "$list" | sed -n \
+    's/.*"policyAccountNumber"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+[ -n "$account" ] || exit 1
+case "$account" in *[!A-Za-z0-9._~-]*) exit 1;; esac
+echo "Payment account list passed"
+detail=$(curl --fail --silent --show-error --max-time 5 \
+    "http://$address/payment/accounts/$account") || exit 1
+printf "%s" "$detail" | grep -Fq \
+    "\"policyAccountNumber\":\"$account\"" || exit 1
+echo "Payment account detail passed"
+status=$(curl --silent --show-error --max-time 5 --output /dev/null \
+    --write-out "%{http_code}" \
+    "http://$address/payment/accounts/$missing_account") || exit 1
+[ "$status" = 500 ] || exit 1
+echo "Payment missing account response passed"
+"""
 # Agents keep reaching Java Payment through the gateway; the Go workload has no gateway upstream.
 JAVA_SELECTOR = {
     "app.kubernetes.io/name": "payment-api-legacy",
@@ -1073,14 +1093,23 @@ def verify_denial(target: Target, pod: dict) -> None:
 
 def verify_business_access(target: Target) -> None:
     address = f"{target.deployment}:80"
+    missing_account = f"SYN-MISSING-{uuid.uuid4().hex}"
     allowed = run_probe(
         target,
         "payment-gateway-allowed",
-        "gateway allow",
-        ['allowed "$1" || exit 1; echo "allowed $1"', address],
+        "gateway business HTTP",
+        [BUSINESS_HTTP_PROBE, address, missing_account],
         labels=gateway_selector(target.environment),
     )
-    require(allowed == [f"allowed {address}"], "gateway identity cannot reach Payment HTTP")
+    require(
+        allowed
+        == [
+            "Payment account list passed",
+            "Payment account detail passed",
+            "Payment missing account response passed",
+        ],
+        "gateway identity cannot complete Payment business HTTP reads",
+    )
     denied = run_probe(
         target,
         "payment-http-denied",
@@ -1088,7 +1117,7 @@ def verify_business_access(target: Target) -> None:
         ['denied "$1" || exit 1; echo "denied $1"', address],
     )
     require(denied == [f"denied {address}"], "an unrelated workload reaches Payment HTTP")
-    print("Payment HTTP passed for the gateway identity and was denied otherwise")
+    print("Payment business HTTP reads passed for the gateway identity and were denied otherwise")
 
 
 def main() -> int:
