@@ -55,3 +55,5 @@ ignore:
   - "services/policy-service/gen/**"
   - "services/policy-service/internal/postgres/dbgen/**"
   - "services/policy-service/internal/testing/**"
+  - "services/payment-service/gen/**"
+  - "services/payment-service/internal/testing/**"
