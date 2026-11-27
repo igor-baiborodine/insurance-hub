@@ -56,7 +56,9 @@ func newEventObserver(
 	now func() time.Time,
 ) (*EventObserver, error) {
 	if logger == nil || meterProvider == nil || tracerProvider == nil || now == nil {
-		return nil, errors.New("create event observer: logger, providers and clock are required")
+		return nil, errors.New(
+			"create event observer: logger, providers and clock are required",
+		)
 	}
 	meter := meterProvider.Meter("insurance-hub/service")
 	events, err := meter.Int64Counter(
