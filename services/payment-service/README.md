@@ -312,7 +312,7 @@ The generated `payment.v1.PaymentService` exposes `ListAccounts` and `GetAccount
 Protovalidate rejects an empty or oversized detail identifier at the gRPC boundary. Cancellation
 and deadlines retain their gRPC status; missing accounts use `NotFound`; unavailable storage uses
 `Unavailable`; unexpected failures return `Internal` with the stable message `internal error`.
-The generated gateway serves the Java-compatible private reads:
+The generated gateway serves the private reads:
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8080/payment/accounts
@@ -345,7 +345,7 @@ and use the repository's shared non-runtime Go Make tooling.
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict Java-compatible HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL- and MinIO-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT` and the bounded `SELECT 1` readiness check. |
 | Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import` and idle-connection release on shutdown. |
