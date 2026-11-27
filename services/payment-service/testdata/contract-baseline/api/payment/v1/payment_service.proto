@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1;paymentv1";
+
+service PaymentService {
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+  rpc GetAccountBalance(GetAccountBalanceRequest) returns (GetAccountBalanceResponse);
+}
+
+message ListAccountsRequest {}
+
+message ListAccountsResponse {
+  repeated Account accounts = 1;
+}
+
+message GetAccountBalanceRequest {
+  string account_number = 1;
+}
+
+message GetAccountBalanceResponse {
+  AccountBalance account = 1;
+}
+
+message Account {
+  string policy_account_number = 1;
+  string policy_number = 2;
+  int64 created = 3;
+  int64 updated = 4;
+}
+
+message AccountBalance {
+  string policy_account_number = 1;
+  string policy_number = 2;
+  string balance = 3;
+  int64 created = 4;
+  int64 updated = 5;
+}
+
+message LegacyError {
+  ErrorLinks links = 1 [json_name = "_links"];
+  string message = 2;
+}
+
+message ErrorLinks {
+  ErrorLink self = 1;
+}
+
+message ErrorLink {
+  string href = 1;
+  bool templated = 2;
+}

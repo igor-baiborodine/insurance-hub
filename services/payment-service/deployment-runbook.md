@@ -49,9 +49,14 @@ release without a digest, a missing caller label or a selector that reaches anot
 workload fails the check. Local-dev requires an explicit, source-matched image to perform
 operations. For disposable qualification, build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=payment` with the selected image and source revision exported.
-The smoke copies the three local-dev workload Secrets into one labeled Kind namespace, runs the
-private workload checks (startup dependency checks, Echo, probes, identity, Pod denial, caller
-admission and scale-to-zero) and removes that namespace afterward.
+The smoke copies the three workload Secrets into one labeled Kind namespace and performs only
+read-only checks: startup dependencies, account lists, probes, identity, Pod denial, caller
+admission and scale-to-zero. It does not migrate, seed or reset environment data. Cleanup verifies
+ownership before removing the disposable namespace.
+
+Run `make -C services/payment-service test-integration` for account-list and account-detail
+integration coverage. Those tests provision their own TLS PostgreSQL container, apply their own
+schema and fixture, and remove the container afterward; they do not use local-dev or QA data.
 
 ## Direct local-dev
 
@@ -137,7 +142,7 @@ require it to match the ready Pod image ID.
 ## Private verification and recovery
 
 `go-svc-deploy-verify` resolves the ready Payment Pod and uses private port-forwards for all three
-listeners. It checks HTTP and generated-client gRPC Echo of `hello`, management `200 live\n` and
+listeners. It checks the HTTP and generated-client gRPC account lists, management `200 live\n` and
 `200 ready\n`, the six safe startup identity fields including the Pod UID, and the
 `payment database ready` record with `database_role=go_payment_writer`. It then confirms, without
 mutation, that each ready gateway Pod has no `payment-service` upstream override, that the
@@ -146,8 +151,10 @@ mutation, that each ready gateway Pod has no `payment-service` upstream override
 
 With explicit authorization for temporary probe Pods, run
 `make go-svc-deploy-verify SVC_NAME=payment DEPLOY_DENIAL_PROBE=1`. It checks that an ordinary
-workload cannot open any Payment port, that a Pod carrying the gateway identity and caller label
-reaches the Service on port 80 while an unlabeled Pod cannot, and removes its own probe Pods.
+workload cannot open any Payment port. A Pod carrying the gateway identity and caller label then
+requests the account list, a listed account's detail and a synthetic missing account from the
+private Service; an unlabeled Pod must remain unable to reach port 80. The probes retain only
+sanitized pass/fail lines and remove their owned Pods.
 
 For manual troubleshooting, forward the exact Pod selected by status and send bounded requests.
 
@@ -155,8 +162,8 @@ For manual troubleshooting, forward the exact Pod selected by status and send bo
 : "${PAYMENT_POD:?set the ready Go Payment Pod name from status}"
 kubectl --context "$DEPLOY_CONTEXT" -n "$DEPLOY_SVC_NS" port-forward --address 127.0.0.1 \
   "pod/$PAYMENT_POD" 18080:8080 19090:9090 18081:8081
-curl --max-time 5 -sS -w '\n%{http_code}\n' -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' http://127.0.0.1:18080/v1/example/echo
+curl --max-time 5 -sS -w '\n%{http_code}\n' \
+  http://127.0.0.1:18080/payment/accounts
 make -C services/payment-service _deploy-smoke-rpc PAYMENT_SMOKE_GRPC_ADDR=127.0.0.1:19090
 curl --fail --max-time 5 http://127.0.0.1:18081/livez
 curl --fail --max-time 5 http://127.0.0.1:18081/readyz

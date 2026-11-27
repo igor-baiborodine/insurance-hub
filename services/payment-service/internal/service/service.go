@@ -25,6 +25,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
 
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
@@ -72,6 +73,7 @@ type gatewayConnection interface {
 // databasePool is the process-owned Payment writer pool.
 type databasePool interface {
 	postgres.QueryRower
+	postgres.TxBeginner
 	Close()
 }
 
@@ -85,19 +87,19 @@ type eventWorker interface {
 }
 
 type dependencies struct {
-	openPool       func(context.Context, config.Database) (databasePool, error)
-	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
-	newObjectStore func(config.ObjectStore) (managedDependency, error)
-	newWorker      func(paymentkafka.Settings) (eventWorker, error)
-	listen         func(string, string) (net.Listener, error)
-	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
-	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
-	newConnection  func(string, telemetryProvider, config.Config) (gatewayConnection, error)
-	newGateway     func(paymentv1.ExampleServiceClient, gateway.Settings) (http.Handler, error)
-	newUnavailable func(gateway.Settings) (http.Handler, error)
-	newBusiness    func(http.Handler, config.Config) httpServer
-	newManagement  func(*health.State) httpServer
-	echo           transport.Echo
+	openPool        func(context.Context, config.Database) (databasePool, error)
+	checkDatabase   func(context.Context, postgres.QueryRower, time.Duration) error
+	newObjectStore  func(config.ObjectStore) (managedDependency, error)
+	newWorker       func(paymentkafka.Settings) (eventWorker, error)
+	newAccountReads func(databasePool) (transport.AccountReads, error)
+	listen          func(string, string) (net.Listener, error)
+	newTelemetry    func(context.Context, string, config.Telemetry) (telemetryProvider, error)
+	newGRPCServer   func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.AccountReads) (grpcServer, error)
+	newConnection   func(string, telemetryProvider, config.Config) (gatewayConnection, error)
+	newGateway      func(paymentv1.PaymentServiceClient, gateway.Settings) (http.Handler, error)
+	newUnavailable  func(gateway.Settings) (http.Handler, error)
+	newBusiness     func(http.Handler, config.Config) httpServer
+	newManagement   func(*health.State) httpServer
 }
 
 func productionDependencies() dependencies {
@@ -110,12 +112,19 @@ func productionDependencies() dependencies {
 		newWorker: func(settings paymentkafka.Settings) (eventWorker, error) {
 			return paymentkafka.NewWorker(settings)
 		},
+		newAccountReads: func(pool databasePool) (transport.AccountReads, error) {
+			store, err := postgres.NewStore(pool)
+			if err != nil {
+				return nil, err
+			}
+			return application.NewAccountReads(store, time.Now)
+		},
 		listen: net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
 		},
-		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, echo transport.Echo) (grpcServer, error) {
-			return transport.NewServer(logger, tracer, propagator, settings, echo)
+		newGRPCServer: func(logger *slog.Logger, tracer trace.TracerProvider, propagator propagation.TextMapPropagator, settings transport.Settings, reads transport.AccountReads) (grpcServer, error) {
+			return transport.NewServer(logger, tracer, propagator, settings, reads)
 		},
 		newConnection:  newGatewayConnection,
 		newGateway:     gateway.NewHandler,
@@ -131,7 +140,6 @@ func productionDependencies() dependencies {
 			}
 		},
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
-		echo:          transport.IdentityEcho,
 	}
 }
 
@@ -264,6 +272,10 @@ func run(
 	if err != nil {
 		return fail(err)
 	}
+	accountReads, err := deps.newAccountReads(runtime.pool)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize account reads: %w", err))
+	}
 	runtime.grpcServer, err = deps.newGRPCServer(
 		logger, provider.TracerProvider(), provider.GRPCPropagator(),
 		transport.Settings{
@@ -272,7 +284,7 @@ func run(
 			MaxSendBytes:    settings.MaxSendBytes,
 			Observer:        observer,
 			MeterProvider:   provider.MeterProvider(),
-		}, deps.echo,
+		}, accountReads,
 	)
 	if err != nil {
 		return fail(fmt.Errorf("run service: initialize gRPC transport: %w", err))
@@ -353,7 +365,7 @@ func run(
 		Observer:       observer,
 	}
 	handler, err := deps.newGateway(
-		paymentv1.NewExampleServiceClient(runtime.connection),
+		paymentv1.NewPaymentServiceClient(runtime.connection),
 		gatewaySettings,
 	)
 	if err != nil {

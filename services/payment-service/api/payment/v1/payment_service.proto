@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package payment.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1;paymentv1";
+
+service PaymentService {
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse) {
+    option (google.api.http) = {
+      get: "/payment/accounts"
+      response_body: "accounts"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "Every Payment account as a bare JSON array."
+          examples: {
+            key: "application/json"
+            value: "[{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"created\":1704067200000,\"updated\":1704153600000}]"
+          }
+        }
+      }
+    };
+  }
+
+  rpc GetAccountBalance(GetAccountBalanceRequest) returns (GetAccountBalanceResponse) {
+    option (google.api.http) = {
+      get: "/payment/accounts/{account_number}"
+      response_body: "account"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      produces: "application/json"
+      responses: {
+        key: "200"
+        value: {
+          description: "The Payment account and its current dated balance."
+          examples: {
+            key: "application/json"
+            value: "{\"policyAccountNumber\":\"payment-1\",\"policyNumber\":\"policy-1\",\"balance\":12.34,\"created\":1704067200000,\"updated\":1704153600000}"
+          }
+        }
+      }
+      responses: {
+        key: "500"
+        value: {
+          description: "The account is missing or the request failed unexpectedly."
+          schema: {
+            json_schema: {ref: ".payment.v1.LegacyError"}
+          }
+          examples: {
+            key: "application/json"
+            value: "{\"_links\":{\"self\":{\"href\":\"/payment/accounts/missing\",\"templated\":false}},\"message\":\"Internal Server Error\"}"
+          }
+        }
+      }
+    };
+  }
+}
+
+message ListAccountsRequest {}
+
+message ListAccountsResponse {
+  repeated Account accounts = 1;
+}
+
+message GetAccountBalanceRequest {
+  string account_number = 1 [(buf.validate.field).string = {
+    min_bytes: 1
+    max_bytes: 255
+  }];
+}
+
+message GetAccountBalanceResponse {
+  AccountBalance account = 1;
+}
+
+message Account {
+  string policy_account_number = 1;
+  string policy_number = 2;
+  int64 created = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+  int64 updated = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+}
+
+message AccountBalance {
+  string policy_account_number = 1;
+  string policy_number = 2;
+  string balance = 3 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {type: NUMBER}];
+  int64 created = 4 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+  int64 updated = 5 [(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+    type: INTEGER
+    format: "int64"
+  }];
+}
+
+message LegacyError {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "message",
+        "_links"
+      ]
+    }
+  };
+
+  ErrorLinks links = 1 [json_name = "_links"];
+  string message = 2;
+}
+
+message ErrorLinks {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: ["self"]
+    }
+  };
+
+  ErrorLink self = 1;
+}
+
+message ErrorLink {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "href",
+        "templated"
+      ]
+    }
+  };
+
+  string href = 1;
+  bool templated = 2;
+}

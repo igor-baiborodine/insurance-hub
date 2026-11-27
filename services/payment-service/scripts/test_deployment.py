@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -20,6 +22,166 @@ import deployment as payment
 
 QA = Path("k8s/overlays/qa/svc")
 SMOKE_LABEL = "insurance-hub.io/payment-disposable"
+POSTGRES_IMAGE = (
+    "postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193"
+)
+
+
+def disposable_postgres_resources(target: payment.Target) -> tuple[list[dict], tuple[str, dict]]:
+    service = "payment-smoke-postgres"
+    password = uuid.uuid4().hex
+    with tempfile.TemporaryDirectory() as directory:
+        cert = Path(directory) / "tls.crt"
+        key = Path(directory) / "tls.key"
+        payment.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(key),
+                "-out",
+                str(cert),
+                "-days",
+                "1",
+                "-subj",
+                f"/CN={service}",
+                "-addext",
+                f"subjectAltName=DNS:{service},DNS:{service}.{target.namespace}.svc",
+            ]
+        )
+        certificate = cert.read_bytes()
+        private_key = key.read_bytes()
+
+    def encode(value: bytes) -> str:
+        return base64.b64encode(value).decode("ascii")
+
+    app_secret = (
+        f"{target.environment}-postgres-payment-writer-creds",
+        {
+            "database-url": encode(
+                (
+                    f"postgresql://go_payment_writer:{password}@{service}:5432/payment"
+                    "?sslmode=verify-full&sslrootcert=/etc/payment-service/postgres/ca.crt"
+                ).encode()
+            ),
+            "ca.crt": encode(certificate),
+        },
+    )
+    migration = (
+        payment.ROOT
+        / "services/payment-service/internal/administration/migrations/00001_payment.sql"
+    ).read_text()
+    fixture = (
+        payment.ROOT / "services/payment-service/internal/postgres/testdata/seed-account-reads.sql"
+    ).read_text()
+    labels = {
+        "app.kubernetes.io/name": service,
+        SMOKE_LABEL: target.namespace.removeprefix("payment-smoke-"),
+    }
+    resources = [
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": f"{service}-credentials", "namespace": target.namespace},
+            "type": "Opaque",
+            "data": {"password": encode(password.encode())},
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": f"{service}-tls", "namespace": target.namespace},
+            "type": "kubernetes.io/tls",
+            "data": {"tls.crt": encode(certificate), "tls.key": encode(private_key)},
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {"name": f"{service}-init", "namespace": target.namespace},
+            "data": {"001-schema.sql": migration, "002-fixture.sql": fixture},
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": {"name": service, "namespace": target.namespace},
+            "spec": {
+                "selector": labels,
+                "ports": [{"name": "postgres", "port": 5432, "targetPort": 5432}],
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": service, "namespace": target.namespace, "labels": labels},
+            "spec": {
+                "restartPolicy": "Never",
+                "automountServiceAccountToken": False,
+                "enableServiceLinks": False,
+                "securityContext": {"fsGroup": 70, "seccompProfile": {"type": "RuntimeDefault"}},
+                "containers": [
+                    {
+                        "name": "postgres",
+                        "image": POSTGRES_IMAGE,
+                        "args": [
+                            "-c",
+                            "ssl=on",
+                            "-c",
+                            "ssl_cert_file=/tls/tls.crt",
+                            "-c",
+                            "ssl_key_file=/tls/tls.key",
+                        ],
+                        "ports": [{"name": "postgres", "containerPort": 5432}],
+                        "resources": {
+                            "requests": {"cpu": "50m", "memory": "128Mi"},
+                            "limits": {"cpu": "500m", "memory": "512Mi"},
+                        },
+                        "env": [
+                            {"name": "POSTGRES_DB", "value": "payment"},
+                            {"name": "POSTGRES_USER", "value": "go_payment_writer"},
+                            {
+                                "name": "POSTGRES_PASSWORD",
+                                "valueFrom": {
+                                    "secretKeyRef": {
+                                        "name": f"{service}-credentials",
+                                        "key": "password",
+                                    }
+                                },
+                            },
+                        ],
+                        "readinessProbe": {
+                            "exec": {
+                                "command": [
+                                    "pg_isready",
+                                    "-U",
+                                    "go_payment_writer",
+                                    "-d",
+                                    "payment",
+                                ]
+                            },
+                            "periodSeconds": 2,
+                            "timeoutSeconds": 2,
+                            "failureThreshold": 45,
+                        },
+                        "volumeMounts": [
+                            {"name": "init", "mountPath": "/docker-entrypoint-initdb.d"},
+                            {"name": "tls", "mountPath": "/tls", "readOnly": True},
+                        ],
+                    }
+                ],
+                "volumes": [
+                    {"name": "init", "configMap": {"name": f"{service}-init"}},
+                    {
+                        "name": "tls",
+                        "secret": {"secretName": f"{service}-tls", "defaultMode": 288},
+                    },
+                ],
+            },
+        },
+    ]
+    return resources, app_secret
 
 
 def test_wrong_target_is_rejected_before_access(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,6 +194,43 @@ def test_wrong_target_is_rejected_before_access(monkeypatch: pytest.MonkeyPatch)
     # when / then
     with pytest.raises(DeploymentError, match="coordinates"):
         payment.Target()
+
+
+def test_disposable_postgres_uses_owned_c04_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = payment.Target()
+    target.namespace = "payment-smoke-0123456789ab"
+
+    def generate_certificate(argv: list[str], **_kwargs: object) -> str:
+        Path(argv[argv.index("-out") + 1]).write_text("certificate")
+        Path(argv[argv.index("-keyout") + 1]).write_text("private-key")
+        return ""
+
+    monkeypatch.setattr(payment, "run", generate_certificate)
+
+    # when
+    resources, writer_secret = disposable_postgres_resources(target)
+
+    # then
+    assert [resource["kind"] for resource in resources] == [
+        "Secret",
+        "Secret",
+        "ConfigMap",
+        "Service",
+        "Pod",
+    ]
+    config = resources[2]["data"]
+    assert "CREATE TABLE public.policy_account" in config["001-schema.sql"]
+    assert "SYN-ACCOUNT-A" in config["002-fixture.sql"]
+    assert writer_secret[0] == "local-dev-postgres-payment-writer-creds"
+    database_url = base64.b64decode(writer_secret[1]["database-url"]).decode()
+    assert "@payment-smoke-postgres:5432/payment?sslmode=verify-full" in database_url
+    assert "local-dev-postgres-payment" not in database_url
 
 
 @pytest.mark.parametrize(
@@ -424,7 +623,13 @@ def test_payment_http_requires_gateway_identity_and_ordinary_denial(
 
     def probe(_target: object, name: str, _description: str, args: list[str], labels=None):
         probes.append((name, args[1:], labels))
-        verb = "allowed" if labels else ("denied" if denied_output else "reached")
+        if labels:
+            return [
+                "Payment account list passed",
+                "Payment account detail passed",
+                "Payment missing account response passed",
+            ]
+        verb = "denied" if denied_output else "reached"
         return [f"{verb} {address}"]
 
     monkeypatch.setattr(payment, "run_probe", probe)
@@ -435,12 +640,41 @@ def test_payment_http_requires_gateway_identity_and_ordinary_denial(
     else:
         with pytest.raises(DeploymentError, match="unrelated workload reaches Payment HTTP"):
             payment.verify_business_access(target)
-    assert probes[0] == (
-        "payment-gateway-allowed",
-        [address],
-        payment.gateway_selector("local-dev"),
-    )
+    assert probes[0][0] == "payment-gateway-allowed"
+    assert probes[0][1][0] == address
+    assert probes[0][1][1].startswith("SYN-MISSING-")
+    assert probes[0][2] == payment.gateway_selector("local-dev")
     assert probes[1] == ("payment-http-denied", [address], None)
+
+
+def test_business_http_probe_is_valid_and_sanitized() -> None:
+    # when
+    payment.run(["sh", "-n"], input_text=payment.BUSINESS_HTTP_PROBE)
+
+    # then
+    assert "/payment/accounts/$account" in payment.BUSINESS_HTTP_PROBE
+    assert "/payment/accounts/$missing_account" in payment.BUSINESS_HTTP_PROBE
+    assert 'echo "$account"' not in payment.BUSINESS_HTTP_PROBE
+    assert 'echo "$detail"' not in payment.BUSINESS_HTTP_PROBE
+
+
+def test_payment_http_rejects_incomplete_gateway_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # given
+    monkeypatch.setenv("DEPLOY_ENV", "local-dev")
+    monkeypatch.setenv("DEPLOY_CONTEXT", "kind-local-dev-insurance-hub")
+    monkeypatch.setenv("DEPLOY_SVC_NS", "local-dev-all")
+    target = payment.Target()
+    monkeypatch.setattr(
+        payment,
+        "run_probe",
+        lambda *_args, **_kwargs: ["Payment account list passed"],
+    )
+
+    # when / then
+    with pytest.raises(DeploymentError, match="business HTTP reads"):
+        payment.verify_business_access(target)
 
 
 def test_requested_route_supports_shared_runner_hook(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -633,6 +867,8 @@ def test_workload_verification_checks_database_readiness(
     def answer(port: int, path: str, payload: bytes | None = None) -> tuple[int, bytes]:
         if payload:
             return 200, payload
+        if path == "/payment/accounts":
+            return 200, b"[]"
         return 200, b"live\n" if path == "/livez" else b"ready\n"
 
     monkeypatch.setattr(target, "live", lambda *_args, **_kwargs: pod)
@@ -824,7 +1060,6 @@ def test_payment_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
     require(selected == image, "disposable image differs")
     secrets = []
     for name, keys in (
-        (f"{target.environment}-postgres-payment-writer-creds", {"database-url", "ca.crt"}),
         (
             f"{target.environment}-minio-payment-reader-creds",
             {"endpoint", "access-key", "secret-key", "ca.crt"},
@@ -847,10 +1082,11 @@ def test_payment_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
         "kind": "Namespace",
         "metadata": {"name": target.namespace, "labels": {SMOKE_LABEL: token}},
     }
-    # The writer, reader and public Kafka CA Secrets are copied into the owned namespace and
-    # removed with it. The workload only runs its read-only startup and readiness checks; Echo
-    # writes nothing. The fully qualified broker name preserves the ordinary cluster while DNS
-    # originates in the disposable namespace.
+    postgres_resources, writer_secret = disposable_postgres_resources(target)
+    secrets.append(writer_secret)
+    # The object-store reader and public Kafka CA are copied into the owned namespace. PostgreSQL
+    # runs there with the C04 schema and synthetic account fixture. Every resource and credential
+    # is removed with the namespace; the Payment workload only performs business reads.
     for item in items.values():
         item["metadata"]["namespace"] = target.namespace
     ingress_peer = items["NetworkPolicy"]["spec"]["ingress"][0]["from"][0]
@@ -860,6 +1096,17 @@ def test_payment_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
     items["ConfigMap"]["data"]["KAFKA_BROKERS"] = (
         "local-dev-kafka-kafka-bootstrap.local-dev-all.svc:9093"
     )
+    database_rule = next(
+        rule
+        for rule in items["NetworkPolicy"]["spec"]["egress"]
+        if rule["ports"] == [{"port": payment.DATABASE_PORT, "protocol": "TCP"}]
+    )
+    database_rule["to"] = [
+        {
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": target.namespace}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "payment-smoke-postgres"}},
+        }
+    ]
 
     try:
         # when
@@ -873,6 +1120,15 @@ def test_payment_in_owned_disposable_kind_namespace(monkeypatch: pytest.MonkeyPa
                 "data": data,
             }
             target.kubectl("create", "-f", "-", input_text=json.dumps(secret))
+        for resource in postgres_resources:
+            target.kubectl("create", "-f", "-", input_text=json.dumps(resource))
+        target.kubectl(
+            "wait",
+            "--for=condition=Ready",
+            "pod/payment-smoke-postgres",
+            "--timeout=90s",
+            timeout=100,
+        )
         payment.run(
             ["kind", "load", "docker-image", image, "--name", target.configuration["kindCluster"]],
             timeout=120,

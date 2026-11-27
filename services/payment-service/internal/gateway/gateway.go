@@ -2,7 +2,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,7 +27,10 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
-const echoRoute = "POST /v1/example/echo"
+const (
+	accountListRoute   = "GET /payment/accounts"
+	accountDetailRoute = "GET /payment/accounts/{accountNumber}"
+)
 
 type Settings struct {
 	RequestTimeout time.Duration
@@ -39,15 +41,12 @@ type Settings struct {
 	Observer       *telemetry.RequestObserver
 }
 
-// NewHandler registers the generated client while retaining a strict HTTP contract.
-func NewHandler(client paymentv1.ExampleServiceClient, settings Settings) (http.Handler, error) {
+// NewHandler registers the generated clients while retaining a strict HTTP contract.
+func NewHandler(client paymentv1.PaymentServiceClient, settings Settings) (http.Handler, error) {
 	if client == nil || !validSettings(settings) {
 		return nil, errors.New("create gateway: all dependencies and limits are required")
 	}
-	marshaler := &runtime.JSONPb{
-		MarshalOptions:   protojson.MarshalOptions{},
-		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
-	}
+	marshaler := newPaymentMarshaler()
 	mux := runtime.NewServeMux(
 		runtime.WithMarshalerOption(runtime.MIMEWildcard, marshaler),
 		runtime.WithIncomingHeaderMatcher(denyHeader),
@@ -57,15 +56,22 @@ func NewHandler(client paymentv1.ExampleServiceClient, settings Settings) (http.
 		runtime.WithDisableHTTPMethodOverride(),
 		runtime.WithDisablePathLengthFallback(),
 	)
-	if err := paymentv1.RegisterExampleServiceHandlerClient(
+	if err := paymentv1.RegisterPaymentServiceHandlerClient(
 		context.Background(),
 		mux,
 		client,
 	); err != nil {
-		return nil, errors.New("create gateway: register generated handler")
+		return nil, errors.New("create gateway: register Payment handler")
 	}
 	handler := &Handler{mux: mux, settings: settings}
-	handler.echo = handler.instrument(echoRoute, http.HandlerFunc(handler.serveEcho))
+	handler.accountList = handler.instrument(
+		accountListRoute,
+		http.HandlerFunc(handler.serveAccount),
+	)
+	handler.accountDetail = handler.instrument(
+		accountDetailRoute,
+		http.HandlerFunc(handler.serveAccount),
+	)
 	handler.unmatched = handler.instrument(
 		"unmatched",
 		http.HandlerFunc(handler.serveUnmatched),
@@ -101,10 +107,11 @@ func validSettings(settings Settings) bool {
 }
 
 type Handler struct {
-	mux       http.Handler
-	settings  Settings
-	echo      http.Handler
-	unmatched http.Handler
+	mux           http.Handler
+	settings      Settings
+	accountList   http.Handler
+	accountDetail http.Handler
+	unmatched     http.Handler
 }
 
 type requestFacts struct {
@@ -125,33 +132,23 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	)
 	defer cancel()
 	request = request.WithContext(requestCtx)
-	if facts.originalPath == "/v1/example/echo" && request.Method == http.MethodPost {
-		handler.echo.ServeHTTP(writer, request)
+	if facts.originalPath == "/payment/accounts" && request.Method == http.MethodGet {
+		handler.accountList.ServeHTTP(writer, request)
+		return
+	}
+	if accountDetailPath(facts.originalPath) && request.Method == http.MethodGet {
+		request.URL.Path = "/payment/accounts/{accountNumber}"
+		request.URL.RawPath = ""
+		handler.accountDetail.ServeHTTP(writer, request)
 		return
 	}
 	request.URL.Path = "/unmatched"
 	handler.unmatched.ServeHTTP(writer, request)
 }
 
-func (handler *Handler) instrument(route string, next http.Handler) http.Handler {
-	observed := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		captured := &statusWriter{ResponseWriter: writer, status: http.StatusOK}
-		observation := handler.settings.Observer.StartHTTP(request.Context(), route)
-		next.ServeHTTP(captured, request)
-		observation.FinishHTTP(request.Context(), captured.status)
-	})
-	return otelhttp.NewHandler(
-		observed,
-		route,
-		otelhttp.WithTracerProvider(handler.settings.TracerProvider),
-		otelhttp.WithMeterProvider(handler.settings.MeterProvider),
-		otelhttp.WithPropagators(handler.settings.Propagator),
-		otelhttp.WithSpanNameFormatter(func(string, *http.Request) string { return route }),
-	)
-}
-
-func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Request) {
-	if facts, _ := request.Context().Value(factsKey{}).(requestFacts); facts.hadQuery {
+func (handler *Handler) serveAccount(writer http.ResponseWriter, request *http.Request) {
+	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
+	if facts.hadQuery {
 		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
 		return
 	}
@@ -164,40 +161,34 @@ func (handler *Handler) serveEcho(writer http.ResponseWriter, request *http.Requ
 		)
 		return
 	}
-	if !isJSON(request.Header.Get("Content-Type")) {
-		writeError(
-			writer,
-			http.StatusUnsupportedMediaType,
-			codes.InvalidArgument,
-			"unsupported media type",
-		)
-		return
-	}
-	body, tooLarge, err := readBounded(request.Body, handler.settings.MaxBodyBytes)
-	if err != nil {
-		writeError(writer, http.StatusInternalServerError, codes.Internal, "internal error")
-		return
-	}
-	if tooLarge {
-		writeError(
-			writer,
-			http.StatusRequestEntityTooLarge,
-			codes.ResourceExhausted,
-			"request body too large",
-		)
-		return
-	}
-	if !validRequestJSON(body) {
-		writeError(writer, http.StatusBadRequest, codes.InvalidArgument, "invalid request")
-		return
-	}
-	request.Body = io.NopCloser(bytes.NewReader(body))
 	handler.mux.ServeHTTP(writer, request)
+}
+
+func (handler *Handler) instrument(route string, next http.Handler) http.Handler {
+	observed := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		captured := &statusWriter{ResponseWriter: writer, status: http.StatusOK}
+		observation := handler.settings.Observer.StartHTTP(request.Context(), route)
+		nextRequest := request.Clone(request.Context())
+		if facts, ok := request.Context().Value(factsKey{}).(requestFacts); ok {
+			nextRequest.URL.Path = facts.originalPath
+			nextRequest.URL.RawPath = ""
+		}
+		next.ServeHTTP(captured, nextRequest)
+		observation.FinishHTTP(request.Context(), captured.status)
+	})
+	return otelhttp.NewHandler(
+		observed,
+		route,
+		otelhttp.WithTracerProvider(handler.settings.TracerProvider),
+		otelhttp.WithMeterProvider(handler.settings.MeterProvider),
+		otelhttp.WithPropagators(handler.settings.Propagator),
+		otelhttp.WithSpanNameFormatter(func(string, *http.Request) string { return route }),
+	)
 }
 
 func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http.Request) {
 	facts, _ := request.Context().Value(factsKey{}).(requestFacts)
-	if facts.originalPath == "/v1/example/echo" {
+	if facts.originalPath == "/payment/accounts" || accountDetailPath(facts.originalPath) {
 		writeError(
 			writer,
 			http.StatusMethodNotAllowed,
@@ -207,6 +198,12 @@ func (handler *Handler) serveUnmatched(writer http.ResponseWriter, request *http
 		return
 	}
 	writeError(writer, http.StatusNotFound, codes.NotFound, "not found")
+}
+
+func accountDetailPath(path string) bool {
+	const prefix = "/payment/accounts/"
+	return strings.HasPrefix(path, prefix) && len(path) > len(prefix) &&
+		!strings.Contains(path[len(prefix):], "/")
 }
 
 func sanitizeRequest(request *http.Request) *http.Request {
@@ -251,10 +248,14 @@ func safeGatewayError(
 	_ *runtime.ServeMux,
 	_ runtime.Marshaler,
 	writer http.ResponseWriter,
-	_ *http.Request,
+	request *http.Request,
 	err error,
 ) {
 	code := status.Code(err)
+	if code == codes.NotFound && accountDetailPath(request.URL.Path) {
+		writeLegacyError(writer, request.URL.EscapedPath())
+		return
+	}
 	switch code {
 	case codes.InvalidArgument:
 		writeError(writer, http.StatusBadRequest, code, "invalid request")
@@ -271,6 +272,31 @@ func safeGatewayError(
 	}
 }
 
+type legacyLink struct {
+	Href      string `json:"href"`
+	Templated bool   `json:"templated"`
+}
+
+type legacyLinks struct {
+	Self legacyLink `json:"self"`
+}
+
+type legacyError struct {
+	Links   legacyLinks `json:"_links"`
+	Message string      `json:"message"`
+}
+
+func writeLegacyError(writer http.ResponseWriter, path string) {
+	body := legacyError{
+		Links:   legacyLinks{Self: legacyLink{Href: path}},
+		Message: "Internal Server Error",
+	}
+	encoded, _ := json.Marshal(body)
+	writer.Header().Set("Content-Type", "application/json")
+	writer.WriteHeader(http.StatusInternalServerError)
+	_, _ = writer.Write(encoded)
+}
+
 func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, message string) {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(httpStatus)
@@ -281,53 +307,6 @@ func writeError(writer http.ResponseWriter, httpStatus int, code codes.Code, mes
 }
 
 func jsonNumber(value int32) string { return strconv.FormatInt(int64(value), 10) }
-
-func readBounded(body io.ReadCloser, maximum int) ([]byte, bool, error) {
-	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, int64(maximum)+1))
-	return data, len(data) > maximum, err
-}
-
-func validRequestJSON(data []byte) bool {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return false
-	}
-	seen := false
-	for decoder.More() {
-		name, err := decoder.Token()
-		if err != nil || name != "message" || seen {
-			return false
-		}
-		seen = true
-		var value any
-		if err := decoder.Decode(&value); err != nil {
-			return false
-		}
-		if value != nil {
-			if _, ok := value.(string); !ok {
-				return false
-			}
-		}
-	}
-	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return false
-	}
-	_, err = decoder.Token()
-	return errors.Is(err, io.EOF)
-}
-
-func isJSON(value string) bool {
-	mediaType, parameters, err := mime.ParseMediaType(value)
-	if err != nil || mediaType != "application/json" {
-		return false
-	}
-	if len(parameters) == 0 {
-		return true
-	}
-	return len(parameters) == 1 && strings.EqualFold(parameters["charset"], "utf-8")
-}
 
 func acceptsJSON(value string) bool {
 	if value == "" {
@@ -342,6 +321,89 @@ func acceptsJSON(value string) bool {
 	}
 	return false
 }
+
+type paymentMarshaler struct{ *runtime.JSONPb }
+
+func newPaymentMarshaler() *paymentMarshaler {
+	return &paymentMarshaler{JSONPb: &runtime.JSONPb{
+		MarshalOptions:   protojson.MarshalOptions{},
+		UnmarshalOptions: protojson.UnmarshalOptions{DiscardUnknown: false},
+	}}
+}
+
+type accountBody struct {
+	PolicyAccountNumber string `json:"policyAccountNumber"`
+	PolicyNumber        string `json:"policyNumber"`
+	Created             int64  `json:"created"`
+	Updated             int64  `json:"updated"`
+}
+
+type accountBalanceBody struct {
+	PolicyAccountNumber string          `json:"policyAccountNumber"`
+	PolicyNumber        string          `json:"policyNumber"`
+	Balance             json.RawMessage `json:"balance"`
+	Created             int64           `json:"created"`
+	Updated             int64           `json:"updated"`
+}
+
+func (marshaler *paymentMarshaler) Marshal(value any) ([]byte, error) {
+	switch response := value.(type) {
+	case []*paymentv1.Account:
+		accounts := make([]accountBody, 0, len(response))
+		for _, account := range response {
+			accounts = append(accounts, accountBody{
+				PolicyAccountNumber: account.GetPolicyAccountNumber(),
+				PolicyNumber:        account.GetPolicyNumber(),
+				Created:             account.GetCreated(),
+				Updated:             account.GetUpdated(),
+			})
+		}
+		return json.Marshal(accounts)
+	case *paymentv1.AccountBalance:
+		balance, valid := exactJSONNumber(response.GetBalance())
+		if !valid {
+			return nil, errors.New("marshal Payment account: invalid balance")
+		}
+		return json.Marshal(accountBalanceBody{
+			PolicyAccountNumber: response.GetPolicyAccountNumber(),
+			PolicyNumber:        response.GetPolicyNumber(),
+			Balance:             balance,
+			Created:             response.GetCreated(),
+			Updated:             response.GetUpdated(),
+		})
+	default:
+		return marshaler.JSONPb.Marshal(value)
+	}
+}
+
+func exactJSONNumber(text string) (json.RawMessage, bool) {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	if _, ok := value.(json.Number); !ok {
+		return nil, false
+	}
+	_, err := decoder.Token()
+	return json.RawMessage(text), errors.Is(err, io.EOF)
+}
+
+func (marshaler *paymentMarshaler) NewEncoder(writer io.Writer) runtime.Encoder {
+	return encoderFunc(func(value any) error {
+		data, err := marshaler.Marshal(value)
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(data)
+		return err
+	})
+}
+
+type encoderFunc func(any) error
+
+func (encoder encoderFunc) Encode(value any) error { return encoder(value) }
 
 type statusWriter struct {
 	http.ResponseWriter

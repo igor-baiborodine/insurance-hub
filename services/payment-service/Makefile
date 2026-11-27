@@ -23,15 +23,16 @@ PROTOC_GEN_GRPC_GATEWAY := $(TOOLS_BIN)/protoc-gen-grpc-gateway
 PROTOC_GEN_OPENAPIV2 := $(TOOLS_BIN)/protoc-gen-openapiv2
 GOLANGCI_LINT := $(TOOLS_BIN)/golangci-lint
 GOVULNCHECK := $(TOOLS_BIN)/govulncheck
+SQLC := $(TOOLS_BIN)/sqlc
 GOLANGCI_CONFIG := .golangci.yml
 
-PROTO_SCHEMA := api/payment/v1/example_service.proto
+PROTO_SCHEMA := api/payment/v1/payment_service.proto
 CONTRACT_BASELINE_DIR := testdata/contract-baseline
 GENERATED_PROTO_FILES := \
-	gen/payment/v1/example_service.pb.go \
-	gen/payment/v1/example_service.pb.gw.go \
-	gen/payment/v1/example_service_grpc.pb.go \
-	gen/openapiv2/payment/v1/example_service.swagger.json
+	gen/payment/v1/payment_service.pb.go \
+	gen/payment/v1/payment_service.pb.gw.go \
+	gen/payment/v1/payment_service_grpc.pb.go \
+	gen/openapiv2/payment/v1/payment_service.swagger.json
 
 GO_VERSION := 1.27.4
 BUF_VERSION := v1.73.0
@@ -40,6 +41,12 @@ PROTOC_GEN_GO_GRPC_VERSION := v1.6.2
 GRPC_GATEWAY_VERSION := v2.30.0
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION := v1.8.0
+SQLC_VERSION := v1.31.1
+
+SQL_SCHEMA := internal/administration/migrations/00001_payment.sql
+SQL_QUERIES := internal/postgres/sql/queries.sql
+GENERATED_SQL_FILES := internal/postgres/dbgen/db.go internal/postgres/dbgen/models.go \
+	internal/postgres/dbgen/queries.sql.go
 
 PROTOBUF_GO_VERSION := v1.36.12
 GRPC_GO_VERSION := v1.83.2
@@ -61,7 +68,7 @@ BUILD_EXECUTABLES := server migrate
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
-COVERAGE_EXCLUDE_PATHS := internal/testing
+COVERAGE_EXCLUDE_PATHS := internal/postgres/dbgen internal/testing
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(INSURANCE_HUB_ROOT) show -s --format=%cI HEAD 2>/dev/null)
@@ -78,10 +85,12 @@ GO_SERVICE_TOOLING_CONFIG := $(CURDIR)/go-service-tooling.json
 
 EXTRA_TOOL_PACKAGES := \
 	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(GRPC_GATEWAY_VERSION) \
-	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION)
+	github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(GRPC_GATEWAY_VERSION) \
+	github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 VERIFY_EXTRA_TOOL_SPECS := \
 	protoc-gen-grpc-gateway|$(PROTOC_GEN_GRPC_GATEWAY)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
-	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version
+	protoc-gen-openapiv2|$(PROTOC_GEN_OPENAPIV2)|Version $(GRPC_GATEWAY_VERSION), commit unknown, built at unknown|--version;\
+	sqlc|$(SQLC)|$(SQLC_VERSION)|version
 PROTO_GENERATION_TOOLS := \
 	buf protoc-gen-go protoc-gen-go-grpc protoc-gen-grpc-gateway protoc-gen-openapiv2
 GENERATED_PROTO_PATTERN := gen/*
@@ -93,7 +102,7 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 .PHONY: python-tooling-format-check python-tooling-lint-fix python-tooling-lint python-tooling-test-fast python-check \
 	bootstrap-go-tools bootstrap-tools verify-tools format format-check update-deps check-deps \
 	update-proto-deps format-proto format-proto-check lint-proto check-proto-breaking \
-	gen-proto check-proto-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
+	gen-proto check-proto-drift gen-sql check-sql-drift check-gateway-contract lint test test-race coverage coverage-validate coverage-check \
 	test-coverage-tooling test-integration build vulncheck check-go-pr check test-tooling check-servicekit check-candidate-servicekit run \
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
@@ -176,12 +185,12 @@ update-deps:
 
 check-go-pr: INTEGRATION_COVERAGE_FILE = integration-coverage.txt
 check-go-pr: verify-tools dockerfile-check format-check format-proto-check lint lint-proto coverage-check test-integration build \
-	check-deps check-proto-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
+	check-deps check-proto-drift check-sql-drift check-proto-breaking check-gateway-contract vulncheck python-check check-servicekit
 
 check-gateway-contract: python-runtime-check
 	@PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" scripts/check_gateway_contract.py \
 		--contract testdata/http-contract.json \
-		--swagger gen/openapiv2/payment/v1/example_service.swagger.json
+		--swagger gen/openapiv2/payment/v1/payment_service.swagger.json
 
 check-servicekit:
 	@case "$${GOWORK:-}" in ''|off) ;; *) echo 'check-servicekit: workspace override rejected' >&2; exit 1;; esac
@@ -202,16 +211,16 @@ check:
 		COVERAGE_FILE="$$profile_dir/coverage.txt" \
 		INTEGRATION_COVERAGE_FILE="$$profile_dir/integration-coverage.txt"
 
-# Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
+# Include the PostgreSQL smokes in the module gate so coverage measures their SQL paths.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run the service composition and disposable PostgreSQL migration and writer-access smoke tests (Docker required)
+test-integration: ## Run service composition and disposable PostgreSQL smokes (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess)$$' \
-		./internal/service ./internal/administration \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads)$$' \
+		./internal/service ./internal/administration ./internal/postgres \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:
@@ -266,7 +275,7 @@ deploy-smoke: python-toolchain-check
 
 _deploy-smoke-rpc:
 	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
-		-run '^TestDeployedDirectRPC_Echo$$' -json ./internal/service
+		-run '^TestDeployedDirectRPC_ListAccounts$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \
@@ -283,6 +292,27 @@ test-tooling: verify-tools python-toolchain-check
 run:
 	GOWORK=off $(GO) run -mod=readonly ./cmd/server
 
+.PHONY: gen-sql check-sql-drift
+
+gen-sql: ## Regenerate sqlc Payment queries with the pinned sqlc
+	@test "$$($(SQLC) version)" = "$(SQLC_VERSION)"
+	rm -f $(GENERATED_SQL_FILES)
+	$(SQLC) generate
+
+check-sql-drift: verify-tools ## Verify sqlc output matches its schema and query inputs
+	@MODULE_ROOT="$(CURDIR)" \
+		COMMON_GO_TOOLING_DIR="$(COMMON_GO_TOOLING_DIR)" \
+		MAKE_COMMAND="$(MAKE)" \
+		TOOLS_BIN="$(TOOLS_BIN)" \
+		CHECK_NAME="check-sql-drift" \
+		GENERATION_TARGET="gen-sql" \
+		GENERATION_INPUTS="Makefile sqlc.yaml $(SQL_SCHEMA) $(SQL_QUERIES)" \
+		GENERATION_TOOLS="sqlc" \
+		GENERATED_ROOT="internal/postgres/dbgen" \
+		GENERATED_PATTERN="internal/postgres/dbgen/*.go" \
+		GENERATED_FILES="$(GENERATED_SQL_FILES)" \
+		"$(COMMON_GO_TOOLING_DIR)/check-generated-drift.sh"
+
 .PHONY: help
 help: ## Show the explicit setup and validation entry points without installing tools
 	@printf '%s\n' 'Go service commands (see README.md for the full interface):' \
@@ -290,4 +320,5 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make check            Validate the module without source mutation' \
 		'  make build            Compile the server and migrator' \
 		'  make test-integration Run service composition and disposable PostgreSQL migration and access smoke tests' \
+		'  make gen-sql          Regenerate sqlc queries; check-sql-drift verifies them' \
 		'  make run              Start the service with environment configuration'

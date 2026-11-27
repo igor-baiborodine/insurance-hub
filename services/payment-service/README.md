@@ -10,7 +10,7 @@
     - [Repository onboarding](#repository-onboarding)
   - [Runtime configuration](#runtime-configuration)
   - [Run and stop the service](#run-and-stop-the-service)
-  - [Example RPC and HTTP gateway](#example-rpc-and-http-gateway)
+  - [Private account RPC and HTTP API](#private-account-rpc-and-http-api)
   - [Reusable baseline and ownership](#reusable-baseline-and-ownership)
     - [Package map and request walkthrough](#package-map-and-request-walkthrough)
 
@@ -23,8 +23,8 @@ The Go Payment service is a standalone Insurance Hub module. Its module identity
 document from `services/payment-service/` with workspace mode disabled. The module has no root
 workspace or filesystem replacements.
 
-The service provides a versioned Echo contract through direct gRPC and a generated HTTP gateway,
-generated Go and Swagger 2.0 artifacts, typed PostgreSQL/MinIO/Kafka configuration with bounded
+The service provides versioned private account reads through direct gRPC and a generated HTTP
+gateway, generated Go and Swagger 2.0 artifacts, typed PostgreSQL/MinIO/Kafka configuration with bounded
 startup checks, safe structured logging, optional trace and metric export, dependency-aware health,
 and bounded signal-driven shutdown.
 
@@ -72,17 +72,17 @@ These operations are explicit and are never hidden inside `check`:
 | `make update-deps`       | Updates only `go.mod` and `go.sum` to the Makefile's pinned runtime/generated-code dependencies, then tidies.              | Go proxy and checksum access unless cached.                                                    |
 | `make update-proto-deps` | Updates only `buf.lock` for the schema dependency declared in `buf.yaml`.                                                  | Verified pinned Buf binary and BSR access unless cached.                                       |
 | `make format`            | Rewrites only the selected eligible handwritten Go files through gofumpt, goimports, then golines at 100 columns.          | Verified pinned tools; file selection is described below.                                      |
-| `make format-proto`      | Rewrites only `api/payment/v1/example_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
+| `make format-proto`      | Rewrites only `api/payment/v1/payment_service.proto` with pinned Buf.                                                     | Verified pinned tools.                                                                         |
 | `make gen-proto`         | Removes and regenerates the exact declared Go/gateway/Swagger inventory under `gen/`.                                     | Pinned Buf and generators already installed; BSR access unless cached.                         |
 | `make run`               | Starts `./cmd/server`; it changes no repository file.                                                                      | Go 1.27.4; readonly modules; runtime settings below.                                           |
 
 Generated bindings must never be edited by hand. `gen-proto` owns only:
 
 ```text
-gen/payment/v1/example_service.pb.go
-gen/payment/v1/example_service.pb.gw.go
-gen/payment/v1/example_service_grpc.pb.go
-gen/openapiv2/payment/v1/example_service.swagger.json
+gen/payment/v1/payment_service.pb.go
+gen/payment/v1/payment_service.pb.gw.go
+gen/payment/v1/payment_service_grpc.pb.go
+gen/openapiv2/payment/v1/payment_service.swagger.json
 ```
 
 ### Non-mutating validation targets
@@ -96,7 +96,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make python-toolchain-check` | Exact CPython, pytest, Ruff, and root locked-environment identity without installing or changing packages. | uv 0.13.1 and the provisioned repository environment, or a verified `PYTHON` override containing the root-locked tools. |
 | `make python-check`         | Ruff format/lint plus fast gateway-contract pytest coverage for service-owned Python. | Passing `python-toolchain-check`; no Go tools or network mutation. |
 | `make dockerfile-check` | Exact generated Dockerfile bytes against the validated service configuration and repository-owned fixed template. | Managed Python; no container runtime or mutation. |
-| `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint and exposed ports. | Docker Buildx and access to the pinned builder and runtime images unless cached. Use `make deploy-smoke` for startup, dependency, liveness and graceful-shutdown qualification in an owned disposable Kind namespace. |
+| `make image-check` | Builds the generated Dockerfile from committed source identity, then verifies OCI labels, platform, nonroot user, entrypoint and exposed ports. | Docker Buildx and access to the pinned builder and runtime images unless cached. Use the read-only `make deploy-smoke` for focused startup, dependency, account-list, network-access, liveness and graceful-shutdown qualification in an owned disposable Kind namespace. |
 | `make format-check`         | The same ordered formatter pipeline and selected handwritten files as `format`, reported without rewriting them.                                                                                                                                                           | Verified tools; file selection below.                                                                                                                                              |
 | `make check-deps`           | Reproduces `update-deps` in a temporary standalone module and compares `go.mod` and `go.sum`.                                                                                                                                                                              | Go proxy/checksum access unless cached.                                                                                                                                            |
 | `make format-proto-check`   | Buf formatting for the one owned schema.                                                                                                                                                                                                                                   | Verified tools.                                                                                                                                                                    |
@@ -107,7 +107,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus the schema migration, status and writer-access smokes against an owned disposable TLS PostgreSQL container. `check-go-pr` writes their profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, readonly modules, a C compiler and the cached pinned PostgreSQL image or registry access. |
+| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus account list/detail, schema migration, status and writer-access checks against an owned disposable TLS PostgreSQL container. The tests do not use a configured deployment environment. `check-go-pr` writes their profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, readonly modules, a C compiler and the cached pinned PostgreSQL image or registry access. |
 | `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with the 75% coverage gate, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
@@ -171,8 +171,8 @@ ownership. Pull requests can rely on these checks:
   `shared-fast-*` and `shared-candidate-*` consumer phases.
 
 Main-branch coverage reporting and the Go service release catalog are not configured for Payment;
-each is a separate registration. The [copy procedure](COPYING.md) records how the foundation was
-derived from the committed template.
+each is a separate registration. The shared template remains under `templates/go-service`; this
+module owns only Payment-specific source and operational documentation.
 
 ## Runtime configuration
 
@@ -253,8 +253,9 @@ bounded HTTP and gRPC transport outcomes. Request instruments and their attribut
 `insurance_hub.<domain>.*` form with this module's telemetry domain. Metric labels are limited
 to `insurance_hub.payment.operation`, `insurance_hub.payment.transport`,
 `insurance_hub.payment.outcome` and the final HTTP or RPC status code. The HTTP route
-(`POST /v1/example/echo` or `unmatched`) is recorded on the span only; gRPC records the fixed Echo
-operation and final status. Request paths, queries, payloads, raw errors, headers and instance IDs
+(`GET /payment/accounts`, `GET /payment/accounts/{accountNumber}` or `unmatched`) is recorded on the
+span only; gRPC records the fixed account operation and final status. Request paths, queries,
+payloads, raw errors, headers, account identifiers, amounts and instance IDs
 are not metric labels. The same provider connects the HTTP server, gRPC client and gRPC server
 trace. Service identity stays on the resource.
 
@@ -305,26 +306,25 @@ down telemetry. HTTP, connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
-## Example RPC and HTTP gateway
+## Private account RPC and HTTP API
 
-The generated `payment.v1.ExampleService` exposes unary `Echo`. A valid request contains a UTF-8
-message from 1 through 128 bytes, and the response returns the same bytes. Protovalidate enforces
-the schema at the gRPC boundary before the Echo handler runs. Empty or oversized input returns
-`InvalidArgument`; cancellation and deadlines keep their gRPC status; unexpected handler failures
-return `Internal` with the stable message `internal error`. The generated gateway exposes the same
-operation as `POST /v1/example/echo` with an `application/json` body:
+The generated `payment.v1.PaymentService` exposes `ListAccounts` and `GetAccountBalance`.
+Protovalidate rejects an empty or oversized detail identifier at the gRPC boundary. Cancellation
+and deadlines retain their gRPC status; missing accounts use `NotFound`; unavailable storage uses
+`Unavailable`; unexpected failures return `Internal` with the stable message `internal error`.
+The generated gateway serves the private reads:
 
 ```sh
-curl --fail-with-body \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"hello"}' \
-  http://127.0.0.1:8080/v1/example/echo
+curl --fail-with-body http://127.0.0.1:8080/payment/accounts
+curl --fail-with-body http://127.0.0.1:8080/payment/accounts/payment-1
 ```
 
-The response is `{"message":"hello"}`. Malformed, duplicate or unknown JSON members, a nonempty
-query, unsupported media, an unknown route and a wrong method receive fixed JSON error envelopes.
-The generated Swagger 2.0 document is
-`gen/openapiv2/payment/v1/example_service.swagger.json`; `testdata/http-contract.json` is the
+The list is a bare JSON array with exactly `policyAccountNumber`, `policyNumber`, `created` and
+`updated`; timestamps are numeric epoch milliseconds. Detail adds an exact numeric `balance`.
+A missing account returns HTTP 500 with only `_links` and the safe `message` value
+`Internal Server Error`. A nonempty query, unsupported response media type, unknown route or wrong
+method receives a fixed JSON error envelope. The generated Swagger 2.0 document is
+`gen/openapiv2/payment/v1/payment_service.swagger.json`; `testdata/http-contract.json` is the
 independent contract fixture checked by `make check-gateway-contract`.
 
 The transports log neither request/response bodies nor underlying failure details. HTTP identity,
@@ -345,12 +345,12 @@ and use the repository's shared non-runtime Go Make tooling.
 | Typed configuration and identity | `internal/config/config.go` | Same six identity dimensions; generated fixed name, canonical non-development version, safe identity strings and Pod UID deployment input. Existing loopback ports preserved. |
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
-| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
+| Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL- and MinIO-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT` and the bounded `SELECT 1` readiness check. |
 | Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import` and idle-connection release on shutdown. |
 | Kafka | Dashboard `internal/kafka` and composition | The same TLS trust, bounded CA file and registration-topic metadata preflight without topic creation. Payment's client joins no group and neither polls nor commits offsets. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
+| Business architecture | Product application-owned catalog ports and injected adapters | Account reads are application-owned use cases over a PostgreSQL port; transport and storage remain replaceable adapters. |
 
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -363,12 +363,13 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
 | `cmd/migrate`, `internal/administration` | Operator-run `migrate`/`status` against one protected target enrollment: target identity checks, an advisory lock, the versioned schema and its history in one transaction, and exact schema inspection. |
-| `internal/postgres`, `internal/objectstore` | Verified PostgreSQL writer pool with its readiness query, the separate verified migrator connection that assumes the `payment` owner role, and the bounded `payments-import` read check. |
+| `internal/application` | Account-list and current-UTC-business-date balance use cases plus their storage port and classified failures. |
+| `internal/postgres`, `internal/objectstore` | sqlc-backed read-only account transactions on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and the bounded `payments-import` read check. |
 | `internal/kafka` | TLS registration-topic client whose preflight requests only topic metadata. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
-| `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
+| `internal/grpc` | Generated Payment registration, account projection, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply service identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and Echo signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Completion-log and bounded account-operation signal contracts; shared provider construction with local policy and metric views. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/payment/v1`, `gen/payment/v1`, `gen/openapiv2/payment/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -394,6 +395,8 @@ flowchart TD
     postgres --> config
     objectstore --> config
     grpc --> telemetry
+    grpc --> application["internal/application"]
+    application --> postgres
     grpc --> generated["gen/payment/v1"]
     gateway --> generated
     telemetry --> config
@@ -408,9 +411,10 @@ At startup, composition opens and checks PostgreSQL and MinIO, reads the Kafka C
 the topic client, binds all listeners, starts gRPC, derives the same-process client target from
 the bound address and waits for that channel, PostgreSQL, MinIO and the topic metadata to be ready.
 Each acquired client is registered for cleanup before the next is constructed, so a partial
-startup releases what it already opened. An HTTP Echo obtains a bounded
-HTTP server span, uses the generated client across the instrumented connection, obtains client and
-server spans, passes protobuf validation and calls the injected function with the shorter deadline.
+startup releases what it already opened. An HTTP account read obtains a bounded HTTP server span,
+uses the generated client across the instrumented connection, obtains client and server spans,
+passes protobuf validation, enters the application use case and executes a read-only PostgreSQL
+transaction with the shorter deadline.
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
 accepted HTTP work before connection and gRPC teardown, then closes management, MinIO idle
 connections, the PostgreSQL pool and telemetry within the shared deadline.

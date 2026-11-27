@@ -31,15 +31,15 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
+	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
 	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 )
@@ -58,24 +58,23 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	}
 	handlerStarted := make(chan struct{})
 	releaseHandler := make(chan struct{})
-	metadataSeen := make(chan metadata.MD, 8)
-	var startOnce sync.Once
-	deps.echo = func(ctx context.Context, message string) (string, error) {
-		md, _ := metadata.FromIncomingContext(ctx)
-		metadataSeen <- md.Copy()
-		if message == "failure" {
-			return "", errors.New("private-upstream-marker")
-		}
-		if message == "drain" {
-			startOnce.Do(func() { close(handlerStarted) })
-			select {
-			case <-releaseHandler:
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-		}
-		return message, nil
+	metadataSeen := make(chan metadata.MD, 4)
+	reads := &fakeAccountReads{
+		accounts: []application.Account{},
+		balance: application.AccountBalance{
+			Account: application.Account{
+				PolicyAccountNumber: "drain-account",
+				PolicyNumber:        "policy-1",
+				Created:             time.UnixMilli(1704067200000),
+				Updated:             time.UnixMilli(1704153600000),
+			},
+			Balance: "12.34",
+		},
+		metadataSeen:   metadataSeen,
+		handlerStarted: handlerStarted,
+		releaseHandler: releaseHandler,
 	}
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) { return reads, nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
 	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
@@ -87,14 +86,13 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 
 	// when
 	request, err := http.NewRequest(
-		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
+		http.MethodGet,
+		"http://"+httpAddress+"/payment/accounts",
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer private-token")
 	request.Header.Set("Grpc-Metadata-Principal", "forged-principal")
 	request.Header.Set("Forwarded", "for=203.0.113.44")
@@ -103,31 +101,9 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatal(err)
 	}
 	// then
-	assertResponse(t, response, http.StatusOK, `{"message":"hello"}`)
+	assertResponse(t, response, http.StatusOK, `[]`)
 	assertNoIdentityMetadata(t, <-metadataSeen)
 	assertOversizedHeaderRejected(t, httpAddress, settings.HTTPMaxHeaderBytes+5000)
-	maximum := strings.Repeat("a", 128)
-	assertResponse(
-		t,
-		postEcho(t, client, httpAddress, maximum),
-		http.StatusOK,
-		`{"message":"`+maximum+`"}`,
-	)
-	assertNoIdentityMetadata(t, <-metadataSeen)
-	assertResponse(
-		t,
-		postEcho(t, client, httpAddress, maximum+"a"),
-		http.StatusBadRequest,
-		`{"code":3,"message":"invalid request","details":[]}`,
-	)
-	failureResponse := postEcho(t, client, httpAddress, "failure")
-	assertResponse(
-		t,
-		failureResponse,
-		http.StatusInternalServerError,
-		`{"code":13,"message":"internal error","details":[]}`,
-	)
-	assertNoIdentityMetadata(t, <-metadataSeen)
 
 	// when
 	connection, err := grpc.NewClient(
@@ -138,43 +114,29 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close() }()
-	direct, err := paymentv1.NewExampleServiceClient(connection).Echo(
+	direct, err := paymentv1.NewPaymentServiceClient(connection).ListAccounts(
 		context.Background(),
-		&paymentv1.EchoRequest{Message: "direct"},
+		&paymentv1.ListAccountsRequest{},
 	)
 	// then
-	if err != nil || direct.GetMessage() != "direct" {
-		t.Fatalf("direct Echo = (%v, %v)", direct, err)
+	if err != nil || len(direct.GetAccounts()) != 0 {
+		t.Fatalf("direct account list = (%v, %v)", direct, err)
 	}
-	directMaximum, err := paymentv1.NewExampleServiceClient(connection).Echo(
-		context.Background(),
-		&paymentv1.EchoRequest{Message: maximum},
-	)
-	if err != nil || directMaximum.GetMessage() != maximum {
-		t.Fatalf("direct maximum Echo = (%v, %v)", directMaximum, err)
-	}
-	_, err = paymentv1.NewExampleServiceClient(connection).Echo(
-		context.Background(),
-		&paymentv1.EchoRequest{Message: maximum + "a"},
-	)
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("direct oversized status = %v, want invalid argument", status.Code(err))
-	}
+	assertNoIdentityMetadata(t, <-metadataSeen)
 
 	// when
 	drainResult := make(chan *http.Response, 1)
 	drainError := make(chan error, 1)
 	go func() {
 		req, requestErr := http.NewRequest(
-			http.MethodPost,
-			"http://"+httpAddress+"/v1/example/echo",
-			strings.NewReader(`{"message":"drain"}`),
+			http.MethodGet,
+			"http://"+httpAddress+"/payment/accounts/drain-account",
+			nil,
 		)
 		if requestErr != nil {
 			drainError <- requestErr
 			return
 		}
-		req.Header.Set("Content-Type", "application/json")
 		result, requestErr := client.Do(req)
 		if requestErr != nil {
 			drainError <- requestErr
@@ -202,7 +164,12 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	close(releaseHandler)
 	select {
 	case response := <-drainResult:
-		assertResponse(t, response, http.StatusOK, `{"message":"drain"}`)
+		assertResponse(
+			t,
+			response,
+			http.StatusOK,
+			`{"policyAccountNumber":"drain-account","policyNumber":"policy-1","balance":12.34,"created":1704067200000,"updated":1704153600000}`,
+		)
 	case err := <-drainError:
 		t.Fatalf("drained HTTP request: %v", err)
 	case <-time.After(time.Second):
@@ -397,99 +364,6 @@ func TestRun_ProductionCompositionRefusesUnverifiedDependenciesAndReleasesEarlie
 	}
 }
 
-func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) {
-	// given
-	settings := testConfig(t)
-	deps := testDependencies()
-	addresses := make(chan string, 3)
-	deps.listen = func(network, address string) (net.Listener, error) {
-		listener, err := net.Listen(network, address)
-		if err == nil {
-			addresses <- listener.Addr().String()
-		}
-		return listener, err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	runResult := make(chan error, 1)
-	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
-	grpcAddress := receiveString(t, addresses)
-	httpAddress := receiveString(t, addresses)
-	healthAddress := receiveString(t, addresses)
-	httpClient := &http.Client{Timeout: time.Second}
-	waitForHTTPStatus(t, httpClient, "http://"+healthAddress+"/readyz", http.StatusOK)
-	connection, err := grpc.NewClient(
-		grpcAddress,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = connection.Close() }()
-	directClient := paymentv1.NewExampleServiceClient(connection)
-	validMessages := make([]string, 0, 130)
-	for size := 1; size <= 128; size++ {
-		validMessages = append(validMessages, strings.Repeat("a", size))
-	}
-	validMessages = append(validMessages, "é", strings.Repeat("é", 64))
-
-	// when
-	for _, message := range validMessages {
-		response, callErr := directClient.Echo(
-			context.Background(),
-			&paymentv1.EchoRequest{Message: message},
-		)
-		// then
-		if callErr != nil || response.GetMessage() != message {
-			t.Fatalf(
-				"direct differential Echo(%d bytes) = (%q, %v)",
-				len(message),
-				response.GetMessage(),
-				callErr,
-			)
-		}
-		assertResponse(
-			t,
-			postEcho(t, httpClient, httpAddress, message),
-			http.StatusOK,
-			`{"message":"`+message+`"}`,
-		)
-	}
-	for _, message := range []string{strings.Repeat("a", 129), strings.Repeat("é", 64) + "a"} {
-		_, callErr := directClient.Echo(
-			context.Background(),
-			&paymentv1.EchoRequest{Message: message},
-		)
-		if status.Code(callErr) != codes.InvalidArgument {
-			t.Fatalf(
-				"direct oversized status = %v, want invalid argument",
-				status.Code(callErr),
-			)
-		}
-		assertResponse(
-			t,
-			postEcho(t, httpClient, httpAddress, message),
-			http.StatusBadRequest,
-			`{"code":3,"message":"invalid request","details":[]}`,
-		)
-	}
-	for _, body := range []string{`{}`, `{"message":null}`, `{"message":""}`} {
-		assertResponse(
-			t,
-			postEchoBody(t, httpClient, httpAddress, body),
-			http.StatusBadRequest,
-			`{"code":3,"message":"invalid request","details":[]}`,
-		)
-	}
-	_, err = directClient.Echo(context.Background(), &paymentv1.EchoRequest{})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("direct empty status = %v, want invalid argument", status.Code(err))
-	}
-	cancel()
-	if err := receiveError(t, runResult, "service did not stop"); err != nil {
-		t.Fatalf("run service: %v", err)
-	}
-}
-
 func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	// given
 	settings := testConfig(t)
@@ -530,7 +404,7 @@ func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return connection, nil
 	}
-	deps.newGateway = func(paymentv1.ExampleServiceClient, gateway.Settings) (http.Handler, error) {
+	deps.newGateway = func(paymentv1.PaymentServiceClient, gateway.Settings) (http.Handler, error) {
 		return http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusNoContent)
 		}), nil
@@ -647,20 +521,19 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 	// when
 	request, err := http.NewRequest(
-		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"trace"}`),
+		http.MethodGet,
+		"http://"+httpAddress+"/payment/accounts",
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Traceparent", "00-11111111111111111111111111111111-2222222222222222-01")
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertResponse(t, response, http.StatusOK, `{"message":"trace"}`)
+	assertResponse(t, response, http.StatusOK, `[]`)
 	cancel()
 	if err := receiveError(t, runResult, "traced service did not stop"); err != nil {
 		t.Fatal(err)
@@ -673,11 +546,11 @@ func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 			continue
 		}
 		switch {
-		case span.Name() == "POST /v1/example/echo":
+		case span.Name() == "GET /payment/accounts":
 			httpSpan = span
 		case span.SpanKind() == trace.SpanKindClient:
 			clientSpan = span
-		case span.SpanKind() == trace.SpanKindServer && strings.Contains(span.Name(), "ExampleService"):
+		case span.SpanKind() == trace.SpanKindServer && strings.Contains(span.Name(), "PaymentService"):
 			serverSpan = span
 		}
 	}
@@ -718,7 +591,7 @@ func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "a")
+	response := getPayment(t, client, httpAddress, "/payment/accounts/a")
 
 	// then
 	assertResponse(
@@ -748,11 +621,16 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	}
 	started := make(chan string, 2)
 	finished := make(chan error, 2)
-	deps.echo = func(ctx context.Context, message string) (string, error) {
-		started <- message
-		<-ctx.Done()
-		finished <- ctx.Err()
-		return "", ctx.Err()
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
+		return &fakeAccountReads{balanceFunc: func(
+			ctx context.Context,
+			accountNumber string,
+		) (application.AccountBalance, error) {
+			started <- accountNumber
+			<-ctx.Done()
+			finished <- ctx.Err()
+			return application.AccountBalance{}, ctx.Err()
+		}}, nil
 	}
 	ctx, cancelService := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
@@ -764,7 +642,7 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "budget")
+	response := getPayment(t, client, httpAddress, "/payment/accounts/budget")
 
 	// then
 	if receiveString(t, started) != "budget" {
@@ -789,14 +667,13 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	request, err := http.NewRequestWithContext(
 		requestCtx,
-		http.MethodPost,
-		"http://"+httpAddress+"/v1/example/echo",
-		strings.NewReader(`{"message":"caller"}`),
+		http.MethodGet,
+		"http://"+httpAddress+"/payment/accounts/caller",
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Content-Type", "application/json")
 	requestResult := make(chan error, 1)
 	go func() {
 		response, requestErr := client.Do(request)
@@ -842,6 +719,12 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	settings := testConfig(t)
 	settings.MaxSendBytes = 1
 	deps := testDependencies()
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
+		return &fakeAccountReads{accounts: []application.Account{{
+			PolicyAccountNumber: "payment-1",
+			PolicyNumber:        "policy-1",
+		}}}, nil
+	}
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -860,7 +743,7 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "a")
+	response := getPayment(t, client, httpAddress, "/payment/accounts")
 
 	// then
 	assertResponse(
@@ -869,72 +752,6 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 		http.StatusInternalServerError,
 		`{"code":13,"message":"internal error","details":[]}`,
 	)
-	cancel()
-	if err := receiveError(t, runResult, "service did not stop"); err != nil {
-		t.Fatalf("run service: %v", err)
-	}
-}
-
-func TestRun_BoundsSlowHTTPBodyWithReadTimeout(t *testing.T) {
-	// given
-	settings := testConfig(t)
-	settings.ReadTimeout = 60 * time.Millisecond
-	deps := testDependencies()
-	addresses := make(chan string, 3)
-	deps.listen = func(network, address string) (net.Listener, error) {
-		listener, err := net.Listen(network, address)
-		if err == nil {
-			addresses <- listener.Addr().String()
-		}
-		return listener, err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	runResult := make(chan error, 1)
-	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
-	_ = receiveString(t, addresses)
-	httpAddress := receiveString(t, addresses)
-	healthAddress := receiveString(t, addresses)
-	waitForHTTPStatus(
-		t,
-		&http.Client{Timeout: time.Second},
-		"http://"+healthAddress+"/readyz",
-		http.StatusOK,
-	)
-	connection, err := net.DialTimeout("tcp", httpAddress, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = connection.Close() }()
-	_ = connection.SetDeadline(time.Now().Add(time.Second))
-	started := time.Now()
-	_, err = io.WriteString(
-		connection,
-		"POST /v1/example/echo HTTP/1.1\r\nHost: example\r\n"+
-			"Content-Type: application/json\r\nContent-Length: 100\r\n\r\n{",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// when
-	response, readErr := http.ReadResponse(
-		bufio.NewReader(connection),
-		&http.Request{Method: http.MethodPost},
-	)
-
-	// then
-	if response != nil {
-		_ = response.Body.Close()
-	}
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-		t.Fatalf("slow body completed in %v, want within read-timeout bound", elapsed)
-	}
-	if readErr == nil && response.StatusCode != http.StatusInternalServerError {
-		t.Fatalf(
-			"slow body status = %d, want bounded 500 or closed connection",
-			response.StatusCode,
-		)
-	}
 	cancel()
 	if err := receiveError(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run service: %v", err)
@@ -954,7 +771,9 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	deps.newTelemetry = func(context.Context, string, config.Telemetry) (telemetryProvider, error) {
 		return provider, nil
 	}
-	deps.echo = func(context.Context, string) (string, error) { return "", errors.New(marker) }
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
+		return &fakeAccountReads{err: errors.New(marker)}, nil
+	}
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -974,7 +793,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	waitForHTTPStatus(t, client, "http://"+healthAddress+"/readyz", http.StatusOK)
 
 	// when
-	response := postEcho(t, client, httpAddress, "failure")
+	response := getPayment(t, client, httpAddress, "/payment/accounts")
 	cancel()
 	if err := receiveError(t, runResult, "service did not stop"); err != nil {
 		t.Fatalf("run service: %v", err)
@@ -998,7 +817,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	if strings.Contains(combined, marker) {
 		t.Fatalf("private marker escaped into telemetry: %s", combined)
 	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
+	if !strings.Contains(combined, "GET /payment/accounts") ||
 		!strings.Contains(combined, "insurance_hub.payment.requests") {
 		t.Errorf("missing HTTP-to-RPC completion signals: %s", combined)
 	}
@@ -1021,10 +840,15 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	}
 	started := make(chan struct{})
 	release := make(chan struct{})
-	deps.echo = func(context.Context, string) (string, error) {
-		close(started)
-		<-release
-		return "stall", nil
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
+		return &fakeAccountReads{balanceFunc: func(
+			context.Context,
+			string,
+		) (application.AccountBalance, error) {
+			close(started)
+			<-release
+			return application.AccountBalance{}, nil
+		}}, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	runResult := make(chan error, 1)
@@ -1039,11 +863,10 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	go func() {
 		defer close(requestDone)
 		request, _ := http.NewRequest(
-			http.MethodPost,
-			"http://"+httpAddress+"/v1/example/echo",
-			strings.NewReader(`{"message":"stall"}`),
+			http.MethodGet,
+			"http://"+httpAddress+"/payment/accounts/stall",
+			nil,
 		)
-		request.Header.Set("Content-Type", "application/json")
 		response, err := client.Do(request)
 		if err == nil {
 			_ = response.Body.Close()
@@ -1188,13 +1011,64 @@ func testDependencies() dependencies {
 	deps.newWorker = func(paymentkafka.Settings) (eventWorker, error) {
 		return &fakeEventWorker{}, nil
 	}
+	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
+		return &fakeAccountReads{accounts: []application.Account{}}, nil
+	}
 	return deps
+}
+
+type fakeAccountReads struct {
+	accounts       []application.Account
+	balance        application.AccountBalance
+	err            error
+	listFunc       func(context.Context) ([]application.Account, error)
+	balanceFunc    func(context.Context, string) (application.AccountBalance, error)
+	metadataSeen   chan metadata.MD
+	handlerStarted chan struct{}
+	releaseHandler chan struct{}
+	startOnce      sync.Once
+}
+
+func (reads *fakeAccountReads) List(ctx context.Context) ([]application.Account, error) {
+	if reads.metadataSeen != nil {
+		md, _ := metadata.FromIncomingContext(ctx)
+		reads.metadataSeen <- md.Copy()
+	}
+	if reads.listFunc != nil {
+		return reads.listFunc(ctx)
+	}
+	return reads.accounts, reads.err
+}
+
+func (reads *fakeAccountReads) Balance(
+	ctx context.Context,
+	accountNumber string,
+) (application.AccountBalance, error) {
+	if reads.metadataSeen != nil {
+		md, _ := metadata.FromIncomingContext(ctx)
+		reads.metadataSeen <- md.Copy()
+	}
+	if reads.balanceFunc != nil {
+		return reads.balanceFunc(ctx, accountNumber)
+	}
+	if reads.handlerStarted != nil {
+		reads.startOnce.Do(func() { close(reads.handlerStarted) })
+		select {
+		case <-reads.releaseHandler:
+		case <-ctx.Done():
+			return application.AccountBalance{}, ctx.Err()
+		}
+	}
+	return reads.balance, reads.err
 }
 
 type fakePool struct{ closed atomic.Bool }
 
 func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
-func (pool *fakePool) Close()                                      { pool.closed.Store(true) }
+func (*fakePool) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+	return nil, errors.New("fake pool does not serve account reads")
+}
+func (pool *fakePool) Close() { pool.closed.Store(true) }
 
 type fakeManagedDependency struct {
 	ready   *atomic.Bool
@@ -1262,7 +1136,7 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
 	_, err = io.WriteString(
 		connection,
-		"POST /v1/example/echo HTTP/1.1\r\nHost: example\r\nX-Large: "+
+		"GET /payment/accounts HTTP/1.1\r\nHost: example\r\nX-Large: "+
 			strings.Repeat("x", size)+"\r\nContent-Length: 0\r\n\r\n",
 	)
 	if err != nil {
@@ -1270,7 +1144,7 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 	}
 	response, err := http.ReadResponse(
 		bufio.NewReader(connection),
-		&http.Request{Method: http.MethodPost},
+		&http.Request{Method: http.MethodGet},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1281,22 +1155,16 @@ func assertOversizedHeaderRejected(t *testing.T, address string, size int) {
 	}
 }
 
-func postEcho(t *testing.T, client *http.Client, address, message string) *http.Response {
-	t.Helper()
-	return postEchoBody(t, client, address, `{"message":"`+message+`"}`)
-}
-
-func postEchoBody(t *testing.T, client *http.Client, address, body string) *http.Response {
+func getPayment(t *testing.T, client *http.Client, address, path string) *http.Response {
 	t.Helper()
 	request, err := http.NewRequest(
-		http.MethodPost,
-		"http://"+address+"/v1/example/echo",
-		strings.NewReader(body),
+		http.MethodGet,
+		"http://"+address+path,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)

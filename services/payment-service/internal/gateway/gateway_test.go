@@ -3,14 +3,12 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -30,480 +28,181 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
-func TestHandler_EnforcesIndependentHTTPContract(t *testing.T) {
-	// given
+func TestHandler_AccountReadsUseLegacyJSONShapes(t *testing.T) {
+	t.Run("empty list", func(t *testing.T) {
+		// given
+		client := &fakeClient{
+			list: &paymentv1.ListAccountsResponse{Accounts: []*paymentv1.Account{}},
+		}
+		handler := newTestHandler(t, client)
+		recorder := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(
+			recorder,
+			httptest.NewRequest(http.MethodGet, "/payment/accounts", nil),
+		)
+
+		// then
+		if recorder.Code != http.StatusOK || recorder.Body.String() != "[]" {
+			t.Fatalf(
+				"response = (%d, %q), want (200, [])",
+				recorder.Code,
+				recorder.Body.String(),
+			)
+		}
+	})
+
+	t.Run("populated list", func(t *testing.T) {
+		// given
+		client := &fakeClient{
+			list: &paymentv1.ListAccountsResponse{Accounts: []*paymentv1.Account{{
+				PolicyAccountNumber: "payment-1",
+				PolicyNumber:        "policy-1",
+				Created:             1704164645006,
+				Updated:             1704251045006,
+			}}},
+		}
+		handler := newTestHandler(t, client)
+		recorder := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(
+			recorder,
+			httptest.NewRequest(http.MethodGet, "/payment/accounts", nil),
+		)
+
+		// then
+		const want = `[{"policyAccountNumber":"payment-1","policyNumber":"policy-1","created":1704164645006,"updated":1704251045006}]`
+		if recorder.Code != http.StatusOK || recorder.Body.String() != want {
+			t.Fatalf(
+				"response = (%d, %q), want (200, %q)",
+				recorder.Code,
+				recorder.Body.String(),
+				want,
+			)
+		}
+	})
+
+	t.Run("dated balance", func(t *testing.T) {
+		// given
+		client := &fakeClient{detail: &paymentv1.GetAccountBalanceResponse{
+			Account: &paymentv1.AccountBalance{
+				PolicyAccountNumber: "payment-1",
+				PolicyNumber:        "policy-1",
+				Balance:             "12.3400",
+				Created:             1704164645006,
+				Updated:             1704251045006,
+			},
+		}}
+		handler := newTestHandler(t, client)
+		recorder := httptest.NewRecorder()
+
+		// when
+		handler.ServeHTTP(
+			recorder,
+			httptest.NewRequest(http.MethodGet, "/payment/accounts/payment-1", nil),
+		)
+
+		// then
+		const want = `{"policyAccountNumber":"payment-1","policyNumber":"policy-1","balance":12.3400,"created":1704164645006,"updated":1704251045006}`
+		if recorder.Code != http.StatusOK || recorder.Body.String() != want ||
+			client.accountNumber != "payment-1" {
+			t.Fatalf(
+				"response = (%d, %q), requested = %q, want (200, %q, payment-1)",
+				recorder.Code,
+				recorder.Body.String(),
+				client.accountNumber,
+				want,
+			)
+		}
+	})
+}
+
+func TestHandler_EnforcesAccountRouteAdmission(t *testing.T) {
 	tests := []struct {
-		name, method, path, body, contentType, accept string
-		wantStatus, wantCalls                         int
-		wantBody                                      string
+		name   string
+		method string
+		target string
+		accept string
+		status int
 	}{
 		{
-			"valid",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"hello"}`,
-			"application/json",
-			"application/json",
-			200,
-			1,
-			`{"message":"hello"}`,
+			name:   "list query",
+			method: http.MethodGet,
+			target: "/payment/accounts?x=1",
+			status: 400,
 		},
 		{
-			"valid charset",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"é"}`,
-			"application/json; charset=utf-8",
-			"*/*",
-			200,
-			1,
-			`{"message":"é"}`,
+			name:   "detail query",
+			method: http.MethodGet,
+			target: "/payment/accounts/a?x=1",
+			status: 400,
 		},
 		{
-			"missing value reaches RPC",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{}`,
-			"application/json",
-			"",
-			400,
-			1,
-			errorBody(3, "invalid request"),
+			name:   "list accept",
+			method: http.MethodGet,
+			target: "/payment/accounts",
+			accept: "text/plain",
+			status: 406,
 		},
 		{
-			"malformed",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
+			name:   "wrong list method",
+			method: http.MethodPost,
+			target: "/payment/accounts",
+			status: 405,
 		},
 		{
-			"duplicate",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","message":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
+			name:   "wrong detail method",
+			method: http.MethodPost,
+			target: "/payment/accounts/a",
+			status: 405,
 		},
 		{
-			"unknown member",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a","secret":"b"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
+			name:   "trailing slash",
+			method: http.MethodGet,
+			target: "/payment/accounts/",
+			status: 404,
 		},
 		{
-			"wrong type",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":7}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
+			name:   "nested detail",
+			method: http.MethodGet,
+			target: "/payment/accounts/a/b",
+			status: 404,
 		},
-		{
-			"query",
-			http.MethodPost,
-			"/v1/example/echo?secret=value",
-			`{"message":"a"}`,
-			"application/json",
-			"",
-			400,
-			0,
-			errorBody(3, "invalid request"),
-		},
-		{
-			"unknown route",
-			http.MethodPost,
-			"/private/value",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"trailing slash",
-			http.MethodPost,
-			"/v1/example/echo/",
-			`{}`,
-			"application/json",
-			"",
-			404,
-			0,
-			errorBody(5, "not found"),
-		},
-		{
-			"method",
-			http.MethodGet,
-			"/v1/example/echo",
-			"",
-			"",
-			"",
-			405,
-			0,
-			errorBody(12, "method not allowed"),
-		},
-		{
-			"unacceptable",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"text/plain",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"zero quality response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;q=0",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"parameterized response",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"application/json",
-			"application/json;profile=private",
-			406,
-			0,
-			errorBody(3, "not acceptable"),
-		},
-		{
-			"unsupported",
-			http.MethodPost,
-			"/v1/example/echo",
-			`{"message":"a"}`,
-			"text/plain",
-			"",
-			415,
-			0,
-			errorBody(3, "unsupported media type"),
-		},
-		{
-			"too large",
-			http.MethodPost,
-			"/v1/example/echo",
-			strings.Repeat("x", 65),
-			"application/json",
-			"",
-			413,
-			0,
-			errorBody(8, "request body too large"),
-		},
+		{name: "unknown", method: http.MethodGet, target: "/unknown", status: 404},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			client := &fakeClient{}
-			handler := newTestHandler(t, client, 64)
-			request := httptest.NewRequest(
-				test.method,
-				test.path,
-				strings.NewReader(test.body),
-			)
-			if test.contentType != "" {
-				request.Header.Set("Content-Type", test.contentType)
-			}
-			if test.accept != "" {
-				request.Header.Set("Accept", test.accept)
-			}
+			handler := newTestHandler(t, client)
+			request := httptest.NewRequest(test.method, test.target, nil)
+			request.Header.Set("Accept", test.accept)
 			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.wantStatus ||
-				recorder.Body.String() != test.wantBody {
-				t.Errorf(
-					"response = (%d, %q), want (%d, %q)",
-					recorder.Code,
-					recorder.Body.String(),
-					test.wantStatus,
-					test.wantBody,
-				)
-			}
-			if client.callCount() != test.wantCalls {
-				t.Errorf(
-					"RPC calls = %d, want %d",
-					client.callCount(),
-					test.wantCalls,
-				)
-			}
-		})
-	}
-}
 
-func TestHandler_MapsUpstreamFailuresWithoutDetails(t *testing.T) {
-	// given
-	privateMarker := "private-upstream-marker"
-	for _, test := range []struct {
-		name string
-		err  error
-		want int
-		body string
-	}{
-		{"unavailable", status.Error(codes.Unavailable, privateMarker), 503, errorBody(14, "service unavailable")},
-		{"deadline", status.Error(codes.DeadlineExceeded, privateMarker), 504, errorBody(4, "deadline exceeded")},
-		{"canceled", status.Error(codes.Canceled, privateMarker), 499, errorBody(1, "request canceled")},
-		{"resource exhausted", status.Error(codes.ResourceExhausted, privateMarker), 500, errorBody(13, "internal error")},
-		{"internal", status.Error(codes.Internal, privateMarker), 500, errorBody(13, "internal error")},
-		{"unknown", errors.New(privateMarker), 500, errorBody(13, "internal error")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{err: test.err}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"hello"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
 			// when
 			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != test.want || recorder.Body.String() != test.body ||
-				strings.Contains(recorder.Body.String(), privateMarker) {
-				t.Errorf(
-					"unsafe response = (%d, %q)",
-					recorder.Code,
-					recorder.Body.String(),
-				)
-			}
-		})
-	}
-}
 
-func TestHandler_PreservesMessageByteBoundaries(t *testing.T) {
-	// given
-	for _, test := range []struct {
-		name    string
-		message string
-		status  int
-	}{
-		{"ASCII maximum", strings.Repeat("a", 128), http.StatusOK},
-		{"ASCII over", strings.Repeat("a", 129), http.StatusBadRequest},
-		{"UTF-8 maximum", strings.Repeat("é", 64), http.StatusOK},
-		{"UTF-8 over", strings.Repeat("é", 64) + "a", http.StatusBadRequest},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{}
-			handler := newTestHandler(t, client, 4096)
-			request := httptest.NewRequest(
-				http.MethodPost,
-				"/v1/example/echo",
-				strings.NewReader(`{"message":"`+test.message+`"}`),
-			)
-			request.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-			// when
-			handler.ServeHTTP(recorder, request)
 			// then
-			if recorder.Code != test.status || client.callCount() != 1 {
-				t.Errorf(
-					"result = (status %d, calls %d), want (%d, 1)",
+			if recorder.Code != test.status {
+				t.Fatalf(
+					"status = %d, want %d: %s",
 					recorder.Code,
-					client.callCount(),
 					test.status,
+					recorder.Body.String(),
 				)
 			}
-			if test.status == http.StatusOK &&
-				recorder.Body.String() != `{"message":"`+test.message+`"}` {
-				t.Errorf("Echo changed value: %q", recorder.Body.String())
+			if client.calls != 0 {
+				t.Errorf("client calls = %d, want zero", client.calls)
 			}
 		})
 	}
 }
 
-func TestHandler_UsesShorterOfCallerAndServiceDeadline(t *testing.T) {
+func TestHandler_MissingAccountUsesSafeLegacyEnvelopeAndStableTelemetry(t *testing.T) {
 	// given
-	for _, test := range []struct {
-		name          string
-		callerTimeout time.Duration
-		maximum       time.Duration
-	}{
-		{"service deadline ignores Grpc-Timeout", 0, 150 * time.Millisecond},
-		{"shorter caller deadline", 10 * time.Millisecond, 100 * time.Millisecond},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &fakeClient{waitForContext: true}
-			handler := newTestHandlerWithTimeout(t, client, 40*time.Millisecond)
-			ctx := context.Background()
-			var cancel context.CancelFunc
-			if test.callerTimeout > 0 {
-				ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
-				defer cancel()
-			}
-			request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-				WithContext(ctx)
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("Grpc-Timeout", "999H")
-			recorder := httptest.NewRecorder()
-			started := time.Now()
-			// when
-			handler.ServeHTTP(recorder, request)
-			// then
-			if recorder.Code != http.StatusGatewayTimeout {
-				t.Errorf("status = %d, want 504", recorder.Code)
-			}
-			if elapsed := time.Since(started); elapsed > test.maximum {
-				t.Errorf(
-					"deadline completed in %v, want within %v",
-					elapsed,
-					test.maximum,
-				)
-			}
-		})
-	}
-}
-
-func TestHandler_PropagatesCallerCancellation(t *testing.T) {
-	// given
-	started := make(chan struct{})
-	client := &fakeClient{waitForContext: true, started: started}
-	handler := newTestHandlerWithTimeout(t, client, time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/example/echo", strings.NewReader(`{"message":"hello"}`)).
-		WithContext(ctx)
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-	done := make(chan struct{})
-	// when
-	go func() {
-		handler.ServeHTTP(recorder, request)
-		close(done)
-	}()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("RPC did not start")
-	}
-	cancel()
-	// then
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("canceled request did not finish")
-	}
-	if recorder.Code != 499 || recorder.Body.String() != errorBody(1, "request canceled") {
-		t.Errorf("canceled response = (%d, %q)", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandler_StripsIdentityAndTimeoutHeaders(t *testing.T) {
-	// given
-	client := &fakeClient{}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer private")
-	request.Header.Set("Grpc-Timeout", "999H")
-	request.Header.Set("Grpc-Metadata-Principal", "forged")
-	request.Header.Set("Forwarded", "for=203.0.113.44")
-	request.Header.Set("X-Forwarded-For", "203.0.113.44")
-	request.Header.Set("X-Forwarded-Host", "private.example")
-	request.Header.Set("X-Real-IP", "203.0.113.44")
-	recorder := httptest.NewRecorder()
-	// when
-	handler.ServeHTTP(recorder, request)
-	// then
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	for _, marker := range []string{"private", "forged", "203.0.113.44", "private.example", "999H"} {
-		if strings.Contains(fmt.Sprint(client.lastMetadata()), marker) {
-			t.Errorf(
-				"injected marker %q escaped in metadata: %v",
-				marker,
-				client.lastMetadata(),
-			)
-		}
-	}
-}
-
-func TestClearApplicationMetadata_DropsAllApplicationValues(t *testing.T) {
-	// given
-	ctx := metadata.NewOutgoingContext(
-		context.Background(),
-		metadata.Pairs("authorization", "private", "principal", "forged"),
-	)
-	called := false
-	// when
-	err := ClearApplicationMetadata(
-		ctx,
-		"/example",
-		nil,
-		nil,
-		nil,
-		func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
-			called = true
-			md, _ := metadata.FromOutgoingContext(ctx)
-			if len(md) != 0 {
-				t.Errorf("outgoing metadata = %v, want empty", md)
-			}
-			return nil
-		},
-	)
-	// then
-	if err != nil || !called {
-		t.Fatalf("interceptor = (%t, %v)", called, err)
-	}
-}
-
-func TestHandler_DeniesUpstreamHeadersAndTrailers(t *testing.T) {
-	// given
-	client := &fakeClient{responseMetadata: metadata.Pairs("private-header", "private-value")}
-	handler := newTestHandler(t, client, 4096)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"hello"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("TE", "trailers")
-	recorder := httptest.NewRecorder()
-	// when
-	handler.ServeHTTP(recorder, request)
-	// then
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d", recorder.Code)
-	}
-	for name, values := range recorder.Header() {
-		if strings.Contains(strings.ToLower(name), "private") ||
-			strings.Contains(fmt.Sprint(values), "private-value") {
-			t.Errorf("response metadata escaped: %s=%v", name, values)
-		}
-	}
-}
-
-func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *testing.T) {
-	// given
-	const marker = "private-sensitive-marker"
+	const marker = "private-account-marker"
 	var logs bytes.Buffer
 	reader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
@@ -515,7 +214,8 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(&fakeClient{}, Settings{
+	client := &fakeClient{detailErr: status.Error(codes.NotFound, marker)}
+	handler, err := NewHandler(client, Settings{
 		RequestTimeout: time.Second, MaxBodyBytes: 4096,
 		TracerProvider: tracerProvider, MeterProvider: meterProvider,
 		Propagator: propagation.TraceContext{}, Observer: observer,
@@ -523,19 +223,24 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknown := httptest.NewRequest(http.MethodGet, "/"+marker+"?value="+marker, nil)
-	unknown.Header.Set("X-Custom", marker)
+	recorder := httptest.NewRecorder()
+
 	// when
-	handler.ServeHTTP(httptest.NewRecorder(), unknown)
-	malformed := httptest.NewRequest(
-		http.MethodPost,
-		"/v1/example/echo",
-		strings.NewReader(`{"message":"`+marker),
+	handler.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/payment/accounts/"+marker, nil),
 	)
-	malformed.Header.Set("Content-Type", "application/json")
-	handler.ServeHTTP(httptest.NewRecorder(), malformed)
 
 	// then
+	const want = `{"_links":{"self":{"href":"/payment/accounts/private-account-marker","templated":false}},"message":"Internal Server Error"}`
+	if recorder.Code != http.StatusInternalServerError || recorder.Body.String() != want {
+		t.Fatalf(
+			"response = (%d, %q), want (500, %q)",
+			recorder.Code,
+			recorder.Body.String(),
+			want,
+		)
+	}
 	var metrics metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &metrics); err != nil {
 		t.Fatal(err)
@@ -545,91 +250,90 @@ func TestHandler_HTTPOnlyFailuresUseBoundedSignalsWithoutSensitiveValues(t *test
 		combined += span.Name() + fmt.Sprint(span.Attributes(), span.Events())
 	}
 	if strings.Contains(combined, marker) {
-		t.Fatalf("sensitive marker escaped into telemetry: %s", combined)
+		t.Fatalf("account identifier escaped into telemetry: %s", combined)
 	}
-	if !strings.Contains(combined, "POST /v1/example/echo") ||
-		!strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.payment.requests") {
-		t.Errorf("missing bounded HTTP failure signals: %s", combined)
-	}
-	if strings.Contains(fmt.Sprint(metrics), "insurance_hub.payment.route") {
-		t.Errorf("route escaped into request metric labels: %v", metrics)
+	if !strings.Contains(combined, accountDetailRoute) ||
+		!strings.Contains(combined, "get_account_balance") {
+		t.Errorf("missing stable account signals: %s", combined)
 	}
 }
 
-func TestUnavailableHandler_WritesFixedEnvelopeAndTelemetry(t *testing.T) {
+func TestClearApplicationMetadata_DropsCallerValues(t *testing.T) {
 	// given
-	var logs bytes.Buffer
-	reader := sdkmetric.NewManualReader()
-	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	spanRecorder := tracetest.NewSpanRecorder()
-	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spanRecorder))
-	observer, err := telemetry.NewRequestObserver(
-		slog.New(slog.NewJSONHandler(&logs, nil)), meterProvider,
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.Pairs("authorization", "private-token", "principal", "forged"),
 	)
+	var seen metadata.MD
+	invoker := func(
+		ctx context.Context,
+		_ string,
+		_, _ any,
+		_ *grpc.ClientConn,
+		_ ...grpc.CallOption,
+	) error {
+		seen, _ = metadata.FromOutgoingContext(ctx)
+		return nil
+	}
+
+	// when
+	err := ClearApplicationMetadata(
+		ctx,
+		"/payment.v1.PaymentService/ListAccounts",
+		nil,
+		nil,
+		nil,
+		invoker,
+	)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewUnavailableHandler(Settings{
-		RequestTimeout: time.Second, MaxBodyBytes: 4096,
-		TracerProvider: tracerProvider, MeterProvider: meterProvider,
-		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if len(seen) != 0 {
+		t.Errorf("metadata = %v, want empty", seen)
 	}
+}
+
+func TestUnavailableHandler_WritesFixedEnvelope(t *testing.T) {
+	// given
+	handler := newUnavailableTestHandler(t)
 	recorder := httptest.NewRecorder()
 
 	// when
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/example/echo", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/payment/accounts", nil))
 
 	// then
-	if recorder.Code != http.StatusServiceUnavailable ||
-		recorder.Header().Get("Content-Type") != "application/json" ||
-		recorder.Body.String() != errorBody(int(codes.Unavailable), "service unavailable") {
+	const want = `{"code":14,"message":"service unavailable","details":[]}`
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Body.String() != want {
 		t.Fatalf(
-			"unavailable response = (%d, %q, %q)",
+			"response = (%d, %q), want (503, %q)",
 			recorder.Code,
-			recorder.Header().Get("Content-Type"),
 			recorder.Body.String(),
+			want,
 		)
 	}
-	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
+}
+
+func newTestHandler(t *testing.T, client paymentv1.PaymentServiceClient) http.Handler {
+	t.Helper()
+	settings := testSettings(t)
+	handler, err := NewHandler(client, settings)
+	if err != nil {
 		t.Fatal(err)
 	}
-	combined := logs.String() + fmt.Sprint(metrics)
-	for _, span := range spanRecorder.Ended() {
-		combined += span.Name() + fmt.Sprint(span.Attributes())
+	return handler
+}
+
+func newUnavailableTestHandler(t *testing.T) http.Handler {
+	t.Helper()
+	handler, err := NewUnavailableHandler(testSettings(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(combined, "unmatched") ||
-		!strings.Contains(combined, "insurance_hub.payment.requests") {
-		t.Errorf("missing drain-rejection telemetry: %s", combined)
-	}
+	return handler
 }
 
-func newTestHandler(
-	t *testing.T,
-	client paymentv1.ExampleServiceClient,
-	maxBody int,
-) http.Handler {
-	return newTestHandlerWithSettings(t, client, maxBody, time.Second)
-}
-
-func newTestHandlerWithTimeout(
-	t *testing.T,
-	client paymentv1.ExampleServiceClient,
-	timeout time.Duration,
-) http.Handler {
-	return newTestHandlerWithSettings(t, client, 4096, timeout)
-}
-
-func newTestHandlerWithSettings(
-	t *testing.T,
-	client paymentv1.ExampleServiceClient,
-	maxBody int,
-	timeout time.Duration,
-) http.Handler {
+func testSettings(t *testing.T) Settings {
 	t.Helper()
 	meter := metricnoop.NewMeterProvider()
 	observer, err := telemetry.NewRequestObserver(
@@ -638,72 +342,40 @@ func newTestHandlerWithSettings(
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(client, Settings{
-		RequestTimeout: timeout, MaxBodyBytes: maxBody,
+	return Settings{
+		RequestTimeout: time.Second, MaxBodyBytes: 4096,
 		TracerProvider: noop.NewTracerProvider(), MeterProvider: meter,
 		Propagator: propagation.TraceContext{}, Observer: observer,
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	return handler
 }
 
 type fakeClient struct {
-	mu               sync.Mutex
-	calls            int
-	metadata         metadata.MD
-	err              error
-	responseMetadata metadata.MD
-	waitForContext   bool
-	started          chan struct{}
+	list          *paymentv1.ListAccountsResponse
+	listErr       error
+	detail        *paymentv1.GetAccountBalanceResponse
+	detailErr     error
+	accountNumber string
+	calls         int
 }
 
-func (client *fakeClient) Echo(
-	ctx context.Context,
-	request *paymentv1.EchoRequest,
-	options ...grpc.CallOption,
-) (*paymentv1.EchoResponse, error) {
-	client.mu.Lock()
-	defer client.mu.Unlock()
+func (client *fakeClient) ListAccounts(
+	context.Context,
+	*paymentv1.ListAccountsRequest,
+	...grpc.CallOption,
+) (*paymentv1.ListAccountsResponse, error) {
 	client.calls++
-	client.metadata, _ = metadata.FromOutgoingContext(ctx)
-	for _, option := range options {
-		switch selected := option.(type) {
-		case grpc.HeaderCallOption:
-			*selected.HeaderAddr = client.responseMetadata.Copy()
-		case grpc.TrailerCallOption:
-			*selected.TrailerAddr = client.responseMetadata.Copy()
-		}
+	if client.list == nil && client.listErr == nil {
+		return &paymentv1.ListAccountsResponse{Accounts: []*paymentv1.Account{}}, nil
 	}
-	if client.err != nil {
-		return nil, client.err
-	}
-	if client.waitForContext {
-		if client.started != nil {
-			close(client.started)
-		}
-		<-ctx.Done()
-		return nil, status.FromContextError(ctx.Err()).Err()
-	}
-	if request.GetMessage() == "" || len([]byte(request.GetMessage())) > 128 {
-		return nil, status.Error(codes.InvalidArgument, "invalid request")
-	}
-	return &paymentv1.EchoResponse{Message: request.GetMessage()}, nil
+	return client.list, client.listErr
 }
 
-func (client *fakeClient) callCount() int {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.calls
-}
-
-func (client *fakeClient) lastMetadata() metadata.MD {
-	client.mu.Lock()
-	defer client.mu.Unlock()
-	return client.metadata.Copy()
-}
-
-func errorBody(code int, message string) string {
-	return fmt.Sprintf(`{"code":%d,"message":"%s","details":[]}`, code, message)
+func (client *fakeClient) GetAccountBalance(
+	_ context.Context,
+	request *paymentv1.GetAccountBalanceRequest,
+	_ ...grpc.CallOption,
+) (*paymentv1.GetAccountBalanceResponse, error) {
+	client.calls++
+	client.accountNumber = request.GetAccountNumber()
+	return client.detail, client.detailErr
 }
