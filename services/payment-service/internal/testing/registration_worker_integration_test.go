@@ -80,10 +80,11 @@ func TestRun_PaymentRegistrationWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	var diagnostics bytes.Buffer
-	observer, err := telemetry.NewRegistrationObserver(
+	observer, err := telemetry.NewEventObserver(
 		slog.New(slog.NewTextHandler(&diagnostics, nil)),
 		metricnoop.NewMeterProvider(),
 		tracenoop.NewTracerProvider(),
+		true,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -336,7 +337,7 @@ func qualificationWorker(
 	t *testing.T,
 	kafka *kafkaFixture,
 	registrations registrationOperation,
-	observer *telemetry.RegistrationObserver,
+	observer *telemetry.EventObserver,
 ) *paymentkafka.RegistrationWorker {
 	t.Helper()
 	handler, err := paymentkafka.NewRegistrationHandler(registrations)
@@ -350,7 +351,7 @@ func newQualificationWorker(
 	t *testing.T,
 	kafka *kafkaFixture,
 	handler *paymentkafka.RegistrationHandler,
-	observer *telemetry.RegistrationObserver,
+	observer *telemetry.EventObserver,
 ) *paymentkafka.RegistrationWorker {
 	t.Helper()
 	worker, err := paymentkafka.NewRegistrationWorker(

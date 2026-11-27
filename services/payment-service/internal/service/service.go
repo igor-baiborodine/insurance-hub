@@ -465,6 +465,15 @@ func (runtime *runningService) configureWorker(
 		Brokers: settings.Brokers, Topic: settings.RegisteredTopic,
 		ClientID: "payment-service", CACert: caCertificate,
 	}
+	observer, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Consume,
+	)
+	if err != nil {
+		return err
+	}
 	if !settings.Consume {
 		runtime.kafka, err = deps.newWorker(trusted)
 		return err
@@ -478,14 +487,6 @@ func (runtime *runningService) configureWorker(
 		return err
 	}
 	handler, err := paymentkafka.NewRegistrationHandler(registrations)
-	if err != nil {
-		return err
-	}
-	observer, err := telemetry.NewRegistrationObserver(
-		logger,
-		provider.MeterProvider(),
-		provider.TracerProvider(),
-	)
 	if err != nil {
 		return err
 	}
