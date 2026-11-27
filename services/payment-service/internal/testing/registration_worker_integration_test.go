@@ -438,6 +438,7 @@ func groupConsumer(t *testing.T, fixture *kafkaFixture) *kgo.Client {
 	options = append(options,
 		kgo.ConsumerGroup(kafkaGroup),
 		kgo.ConsumeTopics(kafkaTopic),
+		kgo.DisableAutoCommit(),
 		kgo.ConsumeResetOffset(kgo.NoResetOffset()),
 	)
 	client, err := kgo.NewClient(options...)
