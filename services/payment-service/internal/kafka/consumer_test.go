@@ -439,6 +439,133 @@ func TestRegistrationWorker_PreflightNeverConstructsConsumerWhenGuardFails(t *te
 	}
 }
 
+func TestRegistrationWorker_PreflightFailsClosedWithoutUsableClients(t *testing.T) {
+	tests := []struct {
+		name      string
+		factory   *fakeClientFactory
+		wantError string
+	}{
+		{
+			name: "inspector construction failure",
+			factory: &fakeClientFactory{
+				inspectorErr: errors.New("synthetic inspector failure"),
+			},
+			wantError: "create Kafka inspector",
+		},
+		{
+			name:      "missing inspector",
+			factory:   &fakeClientFactory{},
+			wantError: "Kafka inspector is required",
+		},
+		{
+			name: "consumer construction failure",
+			factory: &fakeClientFactory{
+				inspector:   &progressRequestClient{start: 0, committed: 4, end: 4},
+				consumerErr: errors.New("synthetic consumer failure"),
+			},
+			wantError: "create Kafka consumer",
+		},
+		{
+			name: "missing consumer",
+			factory: &fakeClientFactory{
+				inspector: &progressRequestClient{start: 0, committed: 4, end: 4},
+			},
+			wantError: "consumer is required",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			worker, err := newRegistrationWorker(
+				registrationSettings(t),
+				&fakeRecordHandler{},
+				test.factory,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// when
+			err = worker.Preflight(t.Context())
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), test.wantError) ||
+				worker.client != nil {
+				t.Fatalf(
+					"Preflight() = error:%v client:%v, want %q without client",
+					err,
+					worker.client,
+					test.wantError,
+				)
+			}
+		})
+	}
+}
+
+func TestRegistrationWorker_RunFailsClosed(t *testing.T) {
+	t.Run("preflight required", func(t *testing.T) {
+		var missing *RegistrationWorker
+		if err := missing.Run(t.Context()); err == nil ||
+			!strings.Contains(err.Error(), "preflight is required") {
+			t.Fatalf("Run() error = %v, want preflight failure", err)
+		}
+	})
+	t.Run("fetch failure", func(t *testing.T) {
+		consumer := &fakeConsumer{polls: []pollResult{{
+			errors: []error{errors.New("synthetic fetch failure")},
+		}}}
+		worker := &RegistrationWorker{
+			client: consumer, handler: &fakeRecordHandler{}, topic: topic,
+		}
+		if err := worker.Run(t.Context()); err == nil ||
+			!strings.Contains(err.Error(), "Kafka fetch failed") ||
+			consumer.allowCount() != 1 {
+			t.Fatalf(
+				"Run() = %v, rebalance releases = %d",
+				err,
+				consumer.allowCount(),
+			)
+		}
+	})
+	t.Run("unexpected topic held", func(t *testing.T) {
+		consumer := &fakeConsumer{polls: []pollResult{{records: []*kgo.Record{{
+			Topic: "other-topic", Partition: 0, Offset: 4,
+		}}}}}
+		handler := &fakeRecordHandler{}
+		worker := &RegistrationWorker{client: consumer, handler: handler, topic: topic}
+		if err := worker.Run(t.Context()); !errors.Is(err, ErrRegistrationHeld) ||
+			handler.callCount() != 0 || consumer.commitCount() != 0 {
+			t.Fatalf(
+				"Run() = %v, handler calls = %d, commits = %d",
+				err,
+				handler.callCount(),
+				consumer.commitCount(),
+			)
+		}
+	})
+	t.Run("cancelled before poll", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		worker := &RegistrationWorker{client: &fakeConsumer{}}
+		if err := worker.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("cancelled while polling", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		consumer := &fakeConsumer{
+			polls: []pollResult{{}}, pollHook: cancel,
+		}
+		worker := &RegistrationWorker{client: consumer}
+		if err := worker.Run(ctx); err != nil || consumer.allowCount() != 1 {
+			t.Fatalf(
+				"Run() = %v, rebalance releases = %d",
+				err,
+				consumer.allowCount(),
+			)
+		}
+	})
+}
+
 func TestRegistrationWorker_CommitsHandledRecordBeforeContinuing(t *testing.T) {
 	// given
 	ctx, cancel := context.WithCancel(context.Background())
@@ -646,6 +773,7 @@ func (factory *fakeClientFactory) newConsumer(...kgo.Opt) (consumerClient, error
 type fakeConsumer struct {
 	mu           sync.Mutex
 	polls        []pollResult
+	pollHook     func()
 	commits      []*kgo.Record
 	commitErr    error
 	commitHook   func()
@@ -660,7 +788,11 @@ func (client *fakeConsumer) Poll(ctx context.Context, _ int) pollResult {
 	if len(client.polls) > 0 {
 		result := client.polls[0]
 		client.polls = client.polls[1:]
+		hook := client.pollHook
 		client.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return result
 	}
 	client.mu.Unlock()
