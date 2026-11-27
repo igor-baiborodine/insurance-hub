@@ -68,6 +68,19 @@ func TestAccountReads_BalanceUsesOneUTCBusinessDate(t *testing.T) {
 	}
 }
 
+func TestAccountReads_ListReturnsAccounts(t *testing.T) {
+	want := []Account{{PolicyAccountNumber: "SYN-ACCOUNT-A"}}
+	reads, err := NewAccountReads(&fakeAccountStore{accounts: want}, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := reads.List(t.Context())
+	if err != nil || len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("List() = (%+v, %v), want %+v", got, err, want)
+	}
+}
+
 func TestAccountReads_PreservesFailures(t *testing.T) {
 	// given
 	storeErr := errors.New("storage marker")

@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres/dbgen"
 )
 
@@ -113,6 +116,63 @@ func TestStoreReadOnly_PreservesFailures(t *testing.T) {
 	}
 }
 
+func TestStoreListAccounts_PreservesQueryFailure(t *testing.T) {
+	queryErr := errors.New("query marker")
+	store, err := NewStore(&fakeTxBeginner{tx: &fakeTx{
+		queryErr:    queryErr,
+		rollbackErr: pgx.ErrTxClosed,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ListAccounts(t.Context())
+	if !errors.Is(err, queryErr) {
+		t.Fatalf("ListAccounts() error = %v, want query marker", err)
+	}
+}
+
+func TestStoreReadAccountBalance_ValidatesDatabaseValues(t *testing.T) {
+	queryErr := errors.New("query marker")
+	validTime := pgtype.Timestamp{Time: time.Now(), Valid: true}
+	for _, test := range []struct {
+		name string
+		row  pgx.Row
+		want string
+	}{
+		{
+			name: "query failure",
+			row:  scanRow(func(...any) error { return queryErr }),
+			want: "query marker",
+		},
+		{
+			name: "missing timestamp",
+			row:  accountBalanceRow(pgtype.Timestamp{}, validTime, validNumeric(-750, -2)),
+			want: "timestamp is missing",
+		},
+		{
+			name: "invalid balance",
+			row:  accountBalanceRow(validTime, validTime, pgtype.Numeric{}),
+			want: "invalid numeric representation",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := NewStore(&fakeTxBeginner{tx: &fakeTx{
+				row:         test.row,
+				rollbackErr: pgx.ErrTxClosed,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = store.ReadAccountBalance(t.Context(), "SYN-ACCOUNT-A", time.Now())
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ReadAccountBalance() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestBeginError_PrefersContextFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -120,6 +180,30 @@ func TestBeginError_PrefersContextFailure(t *testing.T) {
 	err := beginError(ctx, errors.New("begin marker"))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("beginError() = %v, want context canceled", err)
+	}
+}
+
+func TestBeginError_ClassifiesConnectionFailure(t *testing.T) {
+	config, err := pgconn.ParseConfig("postgres://payment@127.0.0.1/payment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialErr := errors.New("dial marker")
+	config.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+		return nil, dialErr
+	}
+	connection, connectErr := pgconn.ConnectConfig(t.Context(), config)
+	if connection != nil {
+		t.Cleanup(func() { _ = connection.Close(t.Context()) })
+	}
+	if connectErr == nil {
+		t.Fatal("ConnectConfig() error = nil")
+	}
+
+	err = beginError(t.Context(), connectErr)
+	if !errors.Is(err, application.ErrStorageUnavailable) ||
+		!errors.Is(err, dialErr) {
+		t.Fatalf("beginError() = %v, want storage unavailable and dial marker", err)
 	}
 }
 
@@ -184,6 +268,25 @@ func TestDecimalValue_FormatsExactSignedAmounts(t *testing.T) {
 	}
 }
 
+func accountBalanceRow(
+	created pgtype.Timestamp,
+	updated pgtype.Timestamp,
+	balance pgtype.Numeric,
+) pgx.Row {
+	return scanRow(func(destinations ...any) error {
+		*destinations[0].(*string) = "SYN-ACCOUNT-A"
+		*destinations[1].(*string) = "SYN-POLICY-B"
+		*destinations[2].(*pgtype.Timestamp) = created
+		*destinations[3].(*pgtype.Timestamp) = updated
+		*destinations[4].(*pgtype.Numeric) = balance
+		return nil
+	})
+}
+
+func validNumeric(coefficient int64, exponent int32) pgtype.Numeric {
+	return pgtype.Numeric{Int: big.NewInt(coefficient), Exp: exponent, Valid: true}
+}
+
 func TestDecimalValue_RejectsInvalidRepresentations(t *testing.T) {
 	for _, value := range []pgtype.Numeric{
 		{},
@@ -213,10 +316,24 @@ func (beginner *fakeTxBeginner) BeginTx(
 
 type fakeTx struct {
 	pgx.Tx
+	row           pgx.Row
+	queryErr      error
 	commitErr     error
 	rollbackErr   error
 	commitCalls   int
 	rollbackCalls int
+}
+
+func (tx *fakeTx) Query(
+	context.Context,
+	string,
+	...any,
+) (pgx.Rows, error) {
+	return nil, tx.queryErr
+}
+
+func (tx *fakeTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return tx.row
 }
 
 func (tx *fakeTx) Commit(context.Context) error {
@@ -227,4 +344,10 @@ func (tx *fakeTx) Commit(context.Context) error {
 func (tx *fakeTx) Rollback(context.Context) error {
 	tx.rollbackCalls++
 	return tx.rollbackErr
+}
+
+type scanRow func(...any) error
+
+func (row scanRow) Scan(destinations ...any) error {
+	return row(destinations...)
 }
