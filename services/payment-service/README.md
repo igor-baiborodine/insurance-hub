@@ -21,11 +21,12 @@
 The Go Payment service is a standalone Insurance Hub module. Its module identity is
 `github.com/igor-baiborodine/insurance-hub/services/payment-service`. Run every command in this
 document from `services/payment-service/` with workspace mode disabled. The module has no root
-workspace, filesystem replacements, database, broker, or collector.
+workspace or filesystem replacements.
 
 The service provides a versioned Echo contract through direct gRPC and a generated HTTP gateway,
-generated Go and Swagger 2.0 artifacts, typed configuration, safe structured logging, optional
-trace and metric export, dependency-aware health, and bounded signal-driven shutdown.
+generated Go and Swagger 2.0 artifacts, typed PostgreSQL/MinIO/Kafka configuration with bounded
+startup checks, safe structured logging, optional trace and metric export, dependency-aware health,
+and bounded signal-driven shutdown.
 
 ## Prerequisites
 
@@ -195,6 +196,18 @@ do not repeat its supplied value.
 | `PROBE_TIMEOUT` | `2s` | Positive duration bounding initial gateway connection and readiness checks. |
 | `GRPC_MAX_RECV_BYTES` | `1048576` | Integer from 1 through 16777216; server receive and gateway-client send limit. |
 | `GRPC_MAX_SEND_BYTES` | `8388608` | Integer from 1 through 67108864; server send and gateway-client receive limit. |
+| `PAYMENT_DATABASE_URL` | required | A `postgres`/`postgresql` URL for database `payment` with a password and exactly `sslmode=verify-full` and `sslrootcert`; retained in a redacting value. The pool accepts only login `go_payment_writer`. |
+| `DB_MAX_CONNS` | `4` | Integer from 1 through 16; writer pool size. |
+| `DB_CONNECT_TIMEOUT` | `3s` | Positive duration bounding each connection attempt and the startup ping. |
+| `DB_QUERY_TIMEOUT` | `1s` | Positive duration bounding the `SELECT 1` readiness query. |
+| `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | required | Fixed HTTP(S) origin and redacted credentials. |
+| `MINIO_BUCKET` | `payments-import` | Must select the fixed `payments-import` bucket. |
+| `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
+| `MINIO_FETCH_TIMEOUT` | `3s` | Positive duration bounding each object-store connection attempt. |
+| `KAFKA_BROKERS` | required | Comma-separated TLS `host:port` bootstrap addresses. |
+| `KAFKA_REGISTERED_TOPIC` | `policy-registered` | Must select the registration topic exactly. |
+| `KAFKA_CA_FILE` | required | Bounded CA bundle for TLS 1.2+ with hostname verification; plaintext is unavailable. |
+| `STARTUP_TIMEOUT` | `10s` | Positive bound covering dependency construction and readiness. |
 | `DEPLOYMENT_ENVIRONMENT` | `development` when disabled | General identity string; an explicit non-development value is required when telemetry is enabled. |
 | `SERVICE_VERSION` | `development` when disabled | General identity string in `development`; otherwise exactly `git-` plus 12 lowercase hexadecimal characters with at least one nonzero suffix character, even when telemetry is disabled. |
 | `SERVICE_INSTANCE_ID` | `local-<pid>` when disabled | General identity string; enabled telemetry requires an explicit value without the `local-` prefix. Kubernetes injects Pod `metadata.uid`. |
@@ -272,16 +285,22 @@ settings in the environment when needed; for example, this selects ephemeral loo
 HTTP_ADDR=127.0.0.1:0 GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 ```
 
+Startup also requires the PostgreSQL, MinIO and Kafka settings above and reachable dependencies.
+A failed check stops startup before readiness with an error that names PostgreSQL, MinIO or Kafka.
+
 The business HTTP, gRPC and management defaults are `127.0.0.1:8080`, `127.0.0.1:9090` and
 `127.0.0.1:8081`. Management exposes only `GET /livez` and `GET /readyz`. Startup marks readiness
 only after the actual gRPC server is accepting the owned gateway connection and all listeners are
-serving. The owned same-process connection disables grpc-go channel idleness so an inactive but
-healthy gateway cannot become permanently unready. Each readiness request rechecks that the
-connection remains `READY` within `PROBE_TIMEOUT`; liveness stays independent of that dependency.
+serving and one bounded PostgreSQL query, MinIO list and Kafka topic metadata request succeed.
+The owned same-process connection disables grpc-go channel idleness so an inactive but healthy
+gateway cannot become permanently unready. Each readiness request rechecks that the connection
+remains `READY`, then reruns the PostgreSQL query and MinIO list within `PROBE_TIMEOUT`; liveness
+stays independent of these dependencies.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
 HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops
-gRPC, stops management HTTP and shuts down telemetry. HTTP, connection, gRPC and management cleanup
+gRPC, stops management HTTP, releases idle MinIO connections, closes the PostgreSQL pool and shuts
+down telemetry. HTTP, connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
@@ -326,7 +345,10 @@ and use the repository's shared non-runtime Go Make tooling.
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated real-RPC gateway, strict HTTP contract, fixed Echo operation, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup, with no database dependency. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL- and MinIO-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
+| PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT` and the bounded `SELECT 1` readiness check. |
+| Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import` and idle-connection release on shutdown. |
+| Kafka | Dashboard `internal/kafka` and composition | The same TLS trust, bounded CA file and registration-topic metadata preflight without topic creation. Payment's client joins no group and neither polls nor commits offsets. |
 | Business architecture | Product application-owned catalog ports and injected adapters | Echo remains a small injected function. Add domain/application/repository packages when a real migration requires them. |
 
 
@@ -338,7 +360,9 @@ fixes with behavior tests and update intentional differences explicitly through 
 | Package | Responsibility |
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
-| `internal/service` | Construct the one provider, three listeners, owned gateway connection and servers; own channel readiness, partial-start rollback and ordered drain. |
+| `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
+| `internal/postgres`, `internal/objectstore` | Verified PostgreSQL writer pool with its readiness query, and the bounded `payments-import` read check. |
+| `internal/kafka` | TLS registration-topic client whose preflight requests only topic metadata. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply service identity and cross-setting policy. |
@@ -360,6 +384,11 @@ flowchart TD
     composition --> health["servicekit/health"]
     composition --> telemetry["internal/telemetry"]
     composition --> config
+    composition --> postgres["internal/postgres"]
+    composition --> objectstore["internal/objectstore"]
+    composition --> kafka["internal/kafka"]
+    postgres --> config
+    objectstore --> config
     grpc --> telemetry
     grpc --> generated["gen/payment/v1"]
     gateway --> generated
@@ -371,10 +400,13 @@ flowchart TD
     config --> sharedIdentity["servicekit/identity"]
 ```
 
-At startup, composition binds all listeners, starts gRPC, derives the same-process client target
-from the bound address and waits for that channel to become ready. An HTTP Echo obtains a bounded
+At startup, composition opens and checks PostgreSQL and MinIO, reads the Kafka CA and configures
+the topic client, binds all listeners, starts gRPC, derives the same-process client target from
+the bound address and waits for that channel, PostgreSQL, MinIO and the topic metadata to be ready.
+Each acquired client is registered for cleanup before the next is constructed, so a partial
+startup releases what it already opened. An HTTP Echo obtains a bounded
 HTTP server span, uses the generated client across the instrumented connection, obtains client and
 server spans, passes protobuf validation and calls the injected function with the shorter deadline.
 HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
-accepted HTTP work before connection and gRPC teardown, then closes management and telemetry within
-the shared deadline.
+accepted HTTP work before connection and gRPC teardown, then closes management, MinIO idle
+connections, the PostgreSQL pool and telemetry within the shared deadline.

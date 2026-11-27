@@ -2,12 +2,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -25,6 +28,9 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
+	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/objectstore"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
 )
 
@@ -63,7 +69,26 @@ type gatewayConnection interface {
 	Close() error
 }
 
+// databasePool is the process-owned Payment writer pool.
+type databasePool interface {
+	postgres.QueryRower
+	Close()
+}
+
+type managedDependency interface {
+	Check(context.Context) error
+	Close()
+}
+
+type eventWorker interface {
+	Preflight(context.Context) error
+}
+
 type dependencies struct {
+	openPool       func(context.Context, config.Database) (databasePool, error)
+	checkDatabase  func(context.Context, postgres.QueryRower, time.Duration) error
+	newObjectStore func(config.ObjectStore) (managedDependency, error)
+	newWorker      func(paymentkafka.Settings) (eventWorker, error)
 	listen         func(string, string) (net.Listener, error)
 	newTelemetry   func(context.Context, string, config.Telemetry) (telemetryProvider, error)
 	newGRPCServer  func(*slog.Logger, trace.TracerProvider, propagation.TextMapPropagator, transport.Settings, transport.Echo) (grpcServer, error)
@@ -77,6 +102,14 @@ type dependencies struct {
 
 func productionDependencies() dependencies {
 	return dependencies{
+		openPool: func(ctx context.Context, settings config.Database) (databasePool, error) {
+			return postgres.OpenPool(ctx, settings)
+		},
+		checkDatabase:  postgres.CheckReadiness,
+		newObjectStore: newObjectStoreDependency,
+		newWorker: func(settings paymentkafka.Settings) (eventWorker, error) {
+			return paymentkafka.NewWorker(settings)
+		},
 		listen: net.Listen,
 		newTelemetry: func(ctx context.Context, name string, settings config.Telemetry) (telemetryProvider, error) {
 			return telemetry.New(ctx, name, settings)
@@ -100,6 +133,35 @@ func productionDependencies() dependencies {
 		newManagement: func(state *health.State) httpServer { return health.NewManagementServer(state) },
 		echo:          transport.IdentityEcho,
 	}
+}
+
+func readBoundedFile(path string, maximum int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
+	if err != nil || int64(len(data)) > maximum {
+		return nil, errors.New("file exceeds accepted certificate size")
+	}
+	return data, nil
+}
+
+type objectStoreDependency struct{ reader *objectstore.Reader }
+
+func (dependency *objectStoreDependency) Check(ctx context.Context) error {
+	return dependency.reader.CheckReadAccess(ctx)
+}
+
+func (dependency *objectStoreDependency) Close() { dependency.reader.Close() }
+
+func newObjectStoreDependency(settings config.ObjectStore) (managedDependency, error) {
+	reader, err := objectstore.NewReader(settings)
+	if err != nil {
+		return nil, err
+	}
+	return &objectStoreDependency{reader: reader}, nil
 }
 
 func newGatewayConnection(
@@ -129,6 +191,9 @@ func newGatewayConnection(
 }
 
 type runningService struct {
+	pool               databasePool
+	objectStore        managedDependency
+	worker             eventWorker
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -154,9 +219,14 @@ func run(
 		settings.ExporterTimeout >= settings.ShutdownTimeout {
 		return errors.New("run service: shutdown budgets must be positive and reserved")
 	}
+	if settings.StartupTimeout <= 0 {
+		return errors.New("run service: startup timeout must be positive")
+	}
+	startupCtx, cancelStartup := context.WithTimeout(ctx, settings.StartupTimeout)
+	defer cancelStartup()
 
 	runtime := &runningService{}
-	provider, err := deps.newTelemetry(ctx, settings.ServiceName, settings.Telemetry)
+	provider, err := deps.newTelemetry(startupCtx, settings.ServiceName, settings.Telemetry)
 	if err != nil {
 		return fmt.Errorf("run service: %w", err)
 	}
@@ -166,6 +236,29 @@ func run(
 			failure,
 			runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 		)
+	}
+	checkDatabase := func(ctx context.Context) error {
+		return deps.checkDatabase(ctx, runtime.pool, settings.Database.QueryTimeout)
+	}
+	pool, err := deps.openPool(startupCtx, settings.Database)
+	if err != nil {
+		return fail(fmt.Errorf("run service: open PostgreSQL: %w", err))
+	}
+	runtime.pool = pool
+	if err := checkDatabase(startupCtx); err != nil {
+		return fail(fmt.Errorf("run service: verify PostgreSQL: %w", err))
+	}
+	logger.InfoContext(ctx, "payment database ready",
+		slog.String("database_role", postgres.WriterRole))
+	runtime.objectStore, err = deps.newObjectStore(settings.ObjectStore)
+	if err != nil {
+		return fail(fmt.Errorf("run service: initialize MinIO: %w", err))
+	}
+	if err := runtime.objectStore.Check(startupCtx); err != nil {
+		return fail(fmt.Errorf("run service: verify MinIO: %w", err))
+	}
+	if err := runtime.configureWorker(settings.Kafka, deps); err != nil {
+		return fail(fmt.Errorf("run service: configure Kafka: %w", err))
 	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
 	if err != nil {
@@ -213,17 +306,39 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	readyContext, cancelReady := context.WithTimeout(ctx, settings.ProbeTimeout)
+	readyContext, cancelReady := context.WithTimeout(startupCtx, settings.ProbeTimeout)
 	err = waitForConnection(readyContext, runtime.connection)
+	if err != nil {
+		err = fmt.Errorf("gateway connection not ready: %w", err)
+	}
+	if err == nil {
+		if checkErr := checkDatabase(readyContext); checkErr != nil {
+			err = fmt.Errorf("verify PostgreSQL: %w", checkErr)
+		}
+	}
+	if err == nil {
+		if checkErr := runtime.objectStore.Check(readyContext); checkErr != nil {
+			err = fmt.Errorf("verify MinIO: %w", checkErr)
+		}
+	}
+	if err == nil {
+		if checkErr := runtime.worker.Preflight(readyContext); checkErr != nil {
+			err = fmt.Errorf("verify Kafka: %w", checkErr)
+		}
+	}
 	cancelReady()
 	if err != nil {
-		return fail(fmt.Errorf("run service: gateway connection not ready: %w", err))
+		return fail(fmt.Errorf("run service: %w", err))
 	}
-	state, err := health.NewState(settings.ProbeTimeout, func(context.Context) error {
+	// Readiness includes PostgreSQL and MinIO; liveness stays independent of them.
+	state, err := health.NewState(settings.ProbeTimeout, func(probeCtx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
 		}
-		return nil
+		if err := checkDatabase(probeCtx); err != nil {
+			return err
+		}
+		return runtime.objectStore.Check(probeCtx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -285,6 +400,21 @@ func run(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configureWorker(settings config.Kafka, deps dependencies) error {
+	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
+	if err != nil {
+		return errors.New("read Kafka CA file")
+	}
+	if len(bytes.TrimSpace(caCertificate)) == 0 {
+		return errors.New("read Kafka CA file: empty certificate")
+	}
+	runtime.worker, err = deps.newWorker(paymentkafka.Settings{
+		Brokers: settings.Brokers, Topic: settings.RegisteredTopic,
+		ClientID: "payment-service", CACert: caCertificate,
+	})
+	return err
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -424,6 +554,12 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 		); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
 		}
+	}
+	if runtime.objectStore != nil {
+		runtime.objectStore.Close()
+	}
+	if runtime.pool != nil {
+		runtime.pool.Close()
 	}
 	if runtime.provider != nil {
 		if err := runtime.provider.Shutdown(overall); err != nil {

@@ -69,12 +69,19 @@ func NewWorker(settings Settings) (*Worker, error) {
 	}}, nil
 }
 
-// Preflight verifies the existing registration topic and its partition leaders.
+// Preflight verifies the existing registration topic and its partition leaders once.
 func (worker *Worker) Preflight(ctx context.Context) error {
-	if worker == nil || worker.preflight == nil {
+	if worker == nil {
 		return errors.New("preflight Payment registration worker: worker is required")
 	}
-	return worker.preflight(ctx)
+	if worker.preflight == nil {
+		return nil
+	}
+	if err := worker.preflight(ctx); err != nil {
+		return err
+	}
+	worker.preflight = nil
+	return nil
 }
 
 func readTopicPartitions(

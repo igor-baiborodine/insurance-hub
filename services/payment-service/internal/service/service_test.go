@@ -11,13 +11,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	kitconfig "github.com/igor-baiborodine/insurance-hub/libs/servicekit/config"
 	"github.com/igor-baiborodine/insurance-hub/libs/servicekit/health"
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/metric"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
@@ -36,12 +40,14 @@ import (
 	paymentv1 "github.com/igor-baiborodine/insurance-hub/services/payment-service/gen/payment/v1"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
+	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 )
 
 func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -207,10 +213,194 @@ func TestRun_ProductionCompositionServesBothTransportsAndDrainsHTTPFirst(t *test
 	}
 }
 
+func TestRun_ProductionCompositionJoinsDependenciesToReadinessButNotLiveness(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	pool := &fakePool{}
+	var databaseAvailable, objectStoreAvailable atomic.Bool
+	databaseAvailable.Store(true)
+	objectStoreAvailable.Store(true)
+	objectStore := &fakeManagedDependency{
+		ready:   &objectStoreAvailable,
+		failure: errors.New("object storage unavailable"),
+	}
+	worker := &fakeEventWorker{}
+	deps := testDependencies()
+	deps.openPool = func(context.Context, config.Database) (databasePool, error) {
+		return pool, nil
+	}
+	deps.checkDatabase = func(_ context.Context, database postgres.QueryRower, timeout time.Duration) error {
+		if database != pool || timeout != settings.Database.QueryTimeout ||
+			!databaseAvailable.Load() {
+			return errors.New("database unavailable")
+		}
+		return nil
+	}
+	deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+		return objectStore, nil
+	}
+	var workerSettings paymentkafka.Settings
+	deps.newWorker = func(settings paymentkafka.Settings) (eventWorker, error) {
+		workerSettings = settings
+		return worker, nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_, _ = receiveString(t, addresses), receiveString(t, addresses)
+	health := "http://" + receiveString(t, addresses)
+	client := &http.Client{Timeout: time.Second}
+	waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	if !worker.preflighted.Load() || workerSettings.ClientID != "payment-service" ||
+		workerSettings.Topic != "policy-registered" ||
+		strings.Join(workerSettings.Brokers, ",") != "kafka.example:9093" ||
+		string(workerSettings.CACert) != "synthetic CA" {
+		t.Fatalf("Kafka worker composed with unexpected settings or no preflight")
+	}
+
+	for _, dependency := range []*atomic.Bool{&databaseAvailable, &objectStoreAvailable} {
+		// when
+		dependency.Store(false)
+
+		// then
+		waitForHTTPStatus(t, client, health+"/readyz", http.StatusServiceUnavailable)
+		waitForHTTPStatus(t, client, health+"/livez", http.StatusOK)
+		dependency.Store(true)
+		waitForHTTPStatus(t, client, health+"/readyz", http.StatusOK)
+	}
+	cancel()
+	if err := receiveError(t, runResult, "service did not stop"); err != nil {
+		t.Fatalf("run service: %v", err)
+	}
+	if !pool.closed.Load() || !objectStore.closed.Load() {
+		t.Fatal("database pool or object storage was not closed during shutdown")
+	}
+}
+
+func TestRun_ProductionCompositionRefusesUnverifiedDependenciesAndReleasesEarlierOnes(
+	t *testing.T,
+) {
+	failure := errors.New("synthetic dependency failure")
+	for _, test := range []struct {
+		name             string
+		openErr          error
+		checkErr         error
+		objectStoreErr   error
+		objectCheckErr   error
+		missingKafkaCA   bool
+		preflightErr     error
+		want             string
+		wantListened     bool
+		wantPoolClosed   bool
+		wantObjectClosed bool
+	}{
+		{name: "PostgreSQL unreachable", openErr: failure, want: "open PostgreSQL"},
+		{
+			name: "PostgreSQL check fails", checkErr: failure,
+			want: "verify PostgreSQL", wantPoolClosed: true,
+		},
+		{
+			name: "MinIO client fails", objectStoreErr: failure,
+			want: "initialize MinIO", wantPoolClosed: true,
+		},
+		{
+			name: "MinIO check fails", objectCheckErr: failure,
+			want: "verify MinIO", wantPoolClosed: true, wantObjectClosed: true,
+		},
+		{
+			name: "Kafka CA unreadable", missingKafkaCA: true,
+			want: "configure Kafka", wantPoolClosed: true, wantObjectClosed: true,
+		},
+		{
+			name: "Kafka metadata fails", preflightErr: failure, want: "verify Kafka",
+			wantListened: true, wantPoolClosed: true, wantObjectClosed: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// given
+			settings := testConfig(t)
+			if test.missingKafkaCA {
+				settings.Kafka.CAFile = filepath.Join(t.TempDir(), "missing-ca.crt")
+			}
+			pool := &fakePool{}
+			var objectStoreReady atomic.Bool
+			objectStoreReady.Store(test.objectCheckErr == nil)
+			objectStore := &fakeManagedDependency{
+				ready:   &objectStoreReady,
+				failure: test.objectCheckErr,
+			}
+			deps := testDependencies()
+			deps.openPool = func(context.Context, config.Database) (databasePool, error) {
+				if test.openErr != nil {
+					return nil, test.openErr
+				}
+				return pool, nil
+			}
+			deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
+				return test.checkErr
+			}
+			deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+				if test.objectStoreErr != nil {
+					return nil, test.objectStoreErr
+				}
+				return objectStore, nil
+			}
+			deps.newWorker = func(paymentkafka.Settings) (eventWorker, error) {
+				return &fakeEventWorker{failure: test.preflightErr}, nil
+			}
+			listened := false
+			deps.listen = func(network, address string) (net.Listener, error) {
+				listened = true
+				return net.Listen(network, address)
+			}
+			managementCreated := false
+			originalManagement := deps.newManagement
+			deps.newManagement = func(state *health.State) httpServer {
+				managementCreated = true
+				return originalManagement(state)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// when
+			err := run(ctx, settings, discardLogger(), deps)
+
+			// then
+			if err == nil || !strings.Contains(err.Error(), "run service: "+test.want) {
+				t.Fatalf("run error = %v, want %q", err, test.want)
+			}
+			if listened != test.wantListened || managementCreated {
+				t.Errorf(
+					"listened = %v, management created = %v",
+					listened,
+					managementCreated,
+				)
+			}
+			if pool.closed.Load() != test.wantPoolClosed ||
+				objectStore.closed.Load() != test.wantObjectClosed {
+				t.Errorf(
+					"pool closed = %v, object storage closed = %v",
+					pool.closed.Load(),
+					objectStore.closed.Load(),
+				)
+			}
+		})
+	}
+}
+
 func TestRun_ProductionCompositionEnforcesByteAndPresenceContract(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -310,7 +500,7 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 	}
 	unavailable := closed.Addr().String()
 	_ = closed.Close()
-	deps := productionDependencies()
+	deps := testDependencies()
 	deps.newConnection = func(_ string, provider telemetryProvider, settings config.Config) (gatewayConnection, error) {
 		return newGatewayConnection(unavailable, provider, settings)
 	}
@@ -335,7 +525,7 @@ func TestRun_UnavailableGatewayNeverBecomesReadyAndCleansUp(t *testing.T) {
 func TestRun_ReportsDynamicGatewayReadinessLossAndRecovery(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	connection := newStatefulGatewayConnection(connectivity.Ready)
 	deps.newConnection = func(string, telemetryProvider, config.Config) (gatewayConnection, error) {
 		return connection, nil
@@ -429,7 +619,7 @@ func TestHandlerTracker_UsesUnavailableHandlerAfterDrain(t *testing.T) {
 func TestRun_CorrelatesHTTPClientAndServerSpans(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	recorder := tracetest.NewSpanRecorder()
 	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 	provider := &recordingProvider{
@@ -509,7 +699,7 @@ func TestRun_MapsGatewayClientResourceExhaustionToInternalError(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.MaxReceiveBytes = 1
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -547,7 +737,7 @@ func TestRun_PropagatesServiceDeadlineAndCallerCancellationThroughRPC(t *testing
 	// given
 	settings := testConfig(t)
 	settings.RequestTimeout = 80 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -651,7 +841,7 @@ func TestRun_EnforcesGatewayClientReceiveLimit(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.MaxSendBytes = 1
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -689,7 +879,7 @@ func TestRun_BoundsSlowHTTPBodyWithReadTimeout(t *testing.T) {
 	// given
 	settings := testConfig(t)
 	settings.ReadTimeout = 60 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -755,7 +945,7 @@ func TestRun_HTTPToRPCFailureTelemetryExcludesPrivateMarker(t *testing.T) {
 	// given
 	const marker = "private-http-rpc-marker"
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	reader := sdkmetric.NewManualReader()
 	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	spanRecorder := tracetest.NewSpanRecorder()
@@ -820,7 +1010,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 	settings.RequestTimeout = 50 * time.Millisecond
 	settings.ShutdownTimeout = 200 * time.Millisecond
 	settings.ExporterTimeout = 50 * time.Millisecond
-	deps := productionDependencies()
+	deps := testDependencies()
 	addresses := make(chan string, 3)
 	deps.listen = func(network, address string) (net.Listener, error) {
 		listener, err := net.Listen(network, address)
@@ -882,7 +1072,7 @@ func TestRun_ForcesStalledRPCWithinShutdownBudget(t *testing.T) {
 func TestRun_PartialBindFailureClosesEarlierListeners(t *testing.T) {
 	// given
 	settings := testConfig(t)
-	deps := productionDependencies()
+	deps := testDependencies()
 	bindFailure := errors.New("management bind failed")
 	var listeners []net.Listener
 	deps.listen = func(network, address string) (net.Listener, error) {
@@ -932,6 +1122,10 @@ func TestInternalDialTarget_NormalizesWildcardFamilies(t *testing.T) {
 
 func testConfig(t *testing.T) config.Config {
 	t.Helper()
+	caPath := filepath.Join(t.TempDir(), "kafka-ca.crt")
+	if err := os.WriteFile(caPath, []byte("synthetic CA"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	parse := func(name string) config.Address {
 		address, err := kitconfig.ParseAddress(name, "127.0.0.1:0")
 		if err != nil {
@@ -957,7 +1151,74 @@ func testConfig(t *testing.T) config.Config {
 		HealthAddress:      parse(kitconfig.EnvHealthAddress),
 		HTTPMaxHeaderBytes: 1024,
 		HTTPMaxBodyBytes:   4096,
+		Database: config.Database{
+			MaxConnections: 1,
+			ConnectTimeout: time.Second,
+			QueryTimeout:   100 * time.Millisecond,
+		},
+		ObjectStore: config.ObjectStore{
+			Bucket:       "payments-import",
+			FetchTimeout: time.Second,
+		},
+		Kafka: config.Kafka{
+			Brokers: []string{
+				"kafka.example:9093",
+			},
+			RegisteredTopic: "policy-registered",
+			CAFile:          caPath,
+		},
+		StartupTimeout: 5 * time.Second,
 	}
+}
+
+// testDependencies replaces PostgreSQL, MinIO and Kafka with healthy fakes.
+func testDependencies() dependencies {
+	deps := productionDependencies()
+	deps.openPool = func(context.Context, config.Database) (databasePool, error) {
+		return &fakePool{}, nil
+	}
+	deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
+		return nil
+	}
+	deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+		ready := &atomic.Bool{}
+		ready.Store(true)
+		return &fakeManagedDependency{ready: ready}, nil
+	}
+	deps.newWorker = func(paymentkafka.Settings) (eventWorker, error) {
+		return &fakeEventWorker{}, nil
+	}
+	return deps
+}
+
+type fakePool struct{ closed atomic.Bool }
+
+func (*fakePool) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
+func (pool *fakePool) Close()                                      { pool.closed.Store(true) }
+
+type fakeManagedDependency struct {
+	ready   *atomic.Bool
+	failure error
+	closed  atomic.Bool
+}
+
+func (dependency *fakeManagedDependency) Check(context.Context) error {
+	if !dependency.ready.Load() {
+		return dependency.failure
+	}
+	return nil
+}
+
+func (dependency *fakeManagedDependency) Close() { dependency.closed.Store(true) }
+
+type fakeEventWorker struct {
+	preflighted atomic.Bool
+	failure     error
+}
+
+func (worker *fakeEventWorker) Preflight(context.Context) error {
+	worker.preflighted.Store(true)
+	return worker.failure
 }
 
 func discardLogger() *slog.Logger {

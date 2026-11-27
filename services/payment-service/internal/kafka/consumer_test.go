@@ -157,6 +157,24 @@ func TestReadTopicPartitions_ValidatesBrokerResponseShape(t *testing.T) {
 	}
 }
 
+func TestWorker_PreflightChecksTopicOnlyOnce(t *testing.T) {
+	// given
+	calls := 0
+	worker := &Worker{preflight: func(context.Context) error {
+		calls++
+		return nil
+	}}
+
+	// when
+	first := worker.Preflight(context.Background())
+	second := worker.Preflight(context.Background())
+
+	// then
+	if first != nil || second != nil || calls != 1 {
+		t.Fatalf("Preflight() = (%v, %v), calls = %d", first, second, calls)
+	}
+}
+
 func TestWorker_PreflightFailsClosed(t *testing.T) {
 	// given
 	guardFailure := errors.New("guard failed")
