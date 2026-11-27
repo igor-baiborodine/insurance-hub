@@ -103,7 +103,7 @@ func TestRun_PaymentRegistrationWorker(t *testing.T) {
 	}
 	assertPrivateReads(t, ctx, store, first.accountNumber)
 
-	t.Run("database rollback retains progress for retry", func(t *testing.T) {
+	t.Run("database rollback retains progress before acknowledgement", func(t *testing.T) {
 		// given
 		rollback := changedPolicyNumber(registration, "SYN-442-ROLLBACK")
 		database.Exec(
@@ -116,6 +116,7 @@ func TestRun_PaymentRegistrationWorker(t *testing.T) {
 
 		// when
 		runErr := runWorker(t, ctx, worker)
+		committed := readOffset(t, ctx, kafka.client)
 		database.Exec(
 			t,
 			ctx,
@@ -126,7 +127,9 @@ func TestRun_PaymentRegistrationWorker(t *testing.T) {
 		if !errors.Is(runErr, paymentkafka.ErrRegistrationHeld) {
 			t.Fatalf("rollback worker error = %v", runErr)
 		}
-		assertOffset(t, ctx, kafka.client, 1)
+		if committed != 1 {
+			t.Fatalf("rollback committed offset = %d, want 1", committed)
+		}
 		assertRegistrationCounts(t, ctx, database, rollback.Key, 0, 0)
 		retry := qualificationWorker(t, kafka, registrations, observer)
 		runWorkerUntilOffset(t, ctx, retry, kafka.client, 2)
