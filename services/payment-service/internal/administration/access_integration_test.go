@@ -62,6 +62,15 @@ func TestRun_PaymentWriterAccess(t *testing.T) {
 			requireViolation(t, err, "23505", test.constraint)
 		}
 	})
+	t.Run("registration replay facts are required", func(t *testing.T) {
+		// when
+		_, missingPremium := writer.Exec(ctx, insertWriterAccountWithoutPremiumQuery)
+		_, missingCover := writer.Exec(ctx, insertWriterAccountWithoutCoverQuery)
+
+		// then
+		requireNotNullColumn(t, missingPremium, "registered_premium")
+		requireNotNullColumn(t, missingCover, "registered_cover_from")
+	})
 	t.Run("entries need an account and a supported kind", func(t *testing.T) {
 		// when
 		_, orphan := writer.Exec(
@@ -316,5 +325,13 @@ func requireViolation(t *testing.T, err error, code, constraint string) {
 	if !errors.As(err, &pgErr) || pgErr.Code != code ||
 		(constraint != "" && pgErr.ConstraintName != constraint) {
 		t.Fatalf("expected SQLSTATE %s %s, got %v", code, constraint, err)
+	}
+}
+
+func requireNotNullColumn(t *testing.T, err error, column string) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23502" || pgErr.ColumnName != column {
+		t.Fatalf("expected NOT NULL violation on %s, got %v", column, err)
 	}
 }

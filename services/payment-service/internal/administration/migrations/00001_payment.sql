@@ -5,11 +5,10 @@ CREATE TABLE public.policy_account (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     policy_number varchar(255) NOT NULL UNIQUE,
     policy_account_number varchar(255) NOT NULL UNIQUE,
-    registered_premium numeric(19, 2),
-    registered_cover_from date,
+    registered_premium numeric(19, 2) NOT NULL,
+    registered_cover_from date NOT NULL,
     created timestamp NOT NULL,
-    updated timestamp NOT NULL,
-    CHECK ((registered_premium IS NULL) = (registered_cover_from IS NULL))
+    updated timestamp NOT NULL
 );
 
 -- One accepted bank statement file, identified by its logical name and content digest. A changed

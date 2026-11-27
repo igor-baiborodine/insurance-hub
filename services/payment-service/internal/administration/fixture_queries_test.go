@@ -37,6 +37,12 @@ var restoreEntryForeignKeyActionQuery string
 //go:embed testdata/sql/insert-writer-registration.sql
 var insertWriterRegistrationQuery string
 
+//go:embed testdata/sql/insert-writer-account-without-premium.sql
+var insertWriterAccountWithoutPremiumQuery string
+
+//go:embed testdata/sql/insert-writer-account-without-cover.sql
+var insertWriterAccountWithoutCoverQuery string
+
 //go:embed testdata/sql/read-writer-registration-match.sql
 var readWriterRegistrationMatchQuery string
 
