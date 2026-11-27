@@ -6,6 +6,7 @@
   - [Direct local-dev](#direct-local-dev)
   - [Flux-owned QA](#flux-owned-qa)
   - [Private verification and recovery](#private-verification-and-recovery)
+    - [Registration worker activation and held records](#registration-worker-activation-and-held-records)
   - [Dependency access](#dependency-access)
     - [PostgreSQL login](#postgresql-login)
     - [MinIO reader](#minio-reader)
@@ -54,9 +55,10 @@ read-only checks: startup dependencies, account lists, probes, identity, Pod den
 admission and scale-to-zero. It does not migrate, seed or reset environment data. Cleanup verifies
 ownership before removing the disposable namespace.
 
-Run `make -C services/payment-service test-integration` for account-list and account-detail
-integration coverage. Those tests provision their own TLS PostgreSQL container, apply their own
-schema and fixture, and remove the container afterward; they do not use local-dev or QA data.
+Run `make -C services/payment-service test-integration` for account-list, account-detail,
+registration transaction and worker-recovery coverage. Those tests provision their own TLS
+PostgreSQL and Kafka containers, apply their own schema and fixtures, and remove the containers
+afterward; they do not use local-dev or QA data or the serving Kafka group.
 
 ## Direct local-dev
 
@@ -175,6 +177,35 @@ same scoped data-plane access and additionally permits OTLP/gRPC to the selected
 startup failure names the dependency (`open/verify PostgreSQL`, `initialize/verify MinIO`,
 `configure/verify Kafka`); check its Secret, the access checks below and the NetworkPolicy before
 anything else.
+
+### Registration worker activation and held records
+
+Current local-dev and QA manifests intentionally leave `EVENT_WORKERS_ENABLED=false`; the Go
+workload performs metadata-only Kafka checks while the Java Payment service owns serving group
+`payment-service`. Issue 486 does not transfer that ownership or retire Java. Do not enable both
+consumers: the Go preflight rejects an active serving group, and changing `KAFKA_GROUP` is not
+supported.
+
+Enable the Go worker only as part of a separately reviewed and authorized direct cutover after the
+Java service has stopped consuming and the serving group's committed positions have been
+preserved. Set `EVENT_WORKERS_ENABLED=true`; leave `KAFKA_GROUP` unset to select its fixed
+`payment-service` default. Do not initialize or reset group progress. The disposable qualification
+below proves recovery with group `payment-service-issue-486` and never touches local-dev or QA:
+
+```bash
+make -C services/payment-service test-integration
+```
+
+A held registration or uncertain Kafka acknowledgement withdraws readiness and terminates the
+serving process. Diagnose it from the fixed `policy registration completed` outcome (`held` or
+`commit_uncertain`), `policy registration offset commit failed`, the three bounded registration
+metrics documented in the service README, the group's committed next offset and the corresponding
+Payment database state. Diagnostics intentionally contain no event body, policy/account identifier,
+premium, broker detail or underlying error. Do not print the record, credentials or database URL;
+do not delete, edit, skip or manually commit the held offset. Resolve the source or storage
+condition through a reviewed change, leave the committed position unchanged, and restart so the
+same record is retried. Escalate an uncertain commit for broker/database comparison before any
+operator action because the database write may already be durable.
 
 For source, image, Flux and transport problems, start with
 `make go-svc-deploy-status SVC_NAME=payment` and compare the Flux source and applied revisions,

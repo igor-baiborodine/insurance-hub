@@ -207,7 +207,7 @@ func TestRun_ProductionCompositionJoinsDependenciesToReadinessButNotLiveness(t *
 		return objectStore, nil
 	}
 	var workerSettings paymentkafka.Settings
-	deps.newWorker = func(settings paymentkafka.Settings) (eventWorker, error) {
+	deps.newWorker = func(settings paymentkafka.Settings) (kafkaDependency, error) {
 		workerSettings = settings
 		return worker, nil
 	}
@@ -249,6 +249,83 @@ func TestRun_ProductionCompositionJoinsDependenciesToReadinessButNotLiveness(t *
 	}
 	if !pool.closed.Load() || !objectStore.closed.Load() {
 		t.Fatal("database pool or object storage was not closed during shutdown")
+	}
+}
+
+func TestRun_ConsumingModeStartsAndStopsRegistrationWorkerBeforePool(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.Kafka.Consume = true
+	settings.Kafka.Group = "payment-service"
+	pool := &fakePool{}
+	worker := &fakeEventWorker{shutdownCheck: func() error {
+		if pool.closed.Load() {
+			return errors.New("database pool closed before registration worker")
+		}
+		return nil
+	}}
+	deps := testDependencies()
+	deps.openPool = func(context.Context, config.Database) (databasePool, error) {
+		return pool, nil
+	}
+	var workerSettings paymentkafka.RegistrationSettings
+	deps.newWorker = func(paymentkafka.Settings) (kafkaDependency, error) {
+		t.Fatal("consuming mode constructed the metadata-only worker")
+		return nil, nil
+	}
+	deps.newRegistrationWorker = func(
+		settings paymentkafka.RegistrationSettings,
+		handler *paymentkafka.RegistrationHandler,
+	) (eventWorker, error) {
+		workerSettings = settings
+		if handler == nil {
+			t.Fatal("consuming mode omitted the registration handler")
+		}
+		return worker, nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runResult := make(chan error, 1)
+	go func() { runResult <- run(ctx, settings, discardLogger(), deps) }()
+	_, _ = receiveString(t, addresses), receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	waitForHTTPStatus(
+		t,
+		&http.Client{Timeout: time.Second},
+		"http://"+healthAddress+"/readyz",
+		http.StatusOK,
+	)
+
+	// when
+	cancel()
+	err := receiveError(t, runResult, "consuming service did not stop")
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !worker.preflighted.Load() || worker.running.Load() || !worker.shutdown.Load() {
+		t.Fatalf(
+			"worker lifecycle = preflight:%t running:%t shutdown:%t",
+			worker.preflighted.Load(),
+			worker.running.Load(),
+			worker.shutdown.Load(),
+		)
+	}
+	if !pool.closed.Load() {
+		t.Fatal("database pool remained open after registration worker shutdown")
+	}
+	if workerSettings.Group != "payment-service" ||
+		workerSettings.ClientID != "payment-service" ||
+		workerSettings.Topic != "policy-registered" || workerSettings.Observe == nil ||
+		workerSettings.CommitFailure == nil {
+		t.Fatalf("registration worker settings = %+v", workerSettings)
 	}
 }
 
@@ -320,7 +397,7 @@ func TestRun_ProductionCompositionRefusesUnverifiedDependenciesAndReleasesEarlie
 				}
 				return objectStore, nil
 			}
-			deps.newWorker = func(paymentkafka.Settings) (eventWorker, error) {
+			deps.newWorker = func(paymentkafka.Settings) (kafkaDependency, error) {
 				return &fakeEventWorker{failure: test.preflightErr}, nil
 			}
 			listened := false
@@ -1008,7 +1085,13 @@ func testDependencies() dependencies {
 		ready.Store(true)
 		return &fakeManagedDependency{ready: ready}, nil
 	}
-	deps.newWorker = func(paymentkafka.Settings) (eventWorker, error) {
+	deps.newWorker = func(paymentkafka.Settings) (kafkaDependency, error) {
+		return &fakeEventWorker{}, nil
+	}
+	deps.newRegistrationWorker = func(
+		paymentkafka.RegistrationSettings,
+		*paymentkafka.RegistrationHandler,
+	) (eventWorker, error) {
 		return &fakeEventWorker{}, nil
 	}
 	deps.newAccountReads = func(databasePool) (transport.AccountReads, error) {
@@ -1086,13 +1169,38 @@ func (dependency *fakeManagedDependency) Check(context.Context) error {
 func (dependency *fakeManagedDependency) Close() { dependency.closed.Store(true) }
 
 type fakeEventWorker struct {
-	preflighted atomic.Bool
-	failure     error
+	preflighted   atomic.Bool
+	running       atomic.Bool
+	shutdown      atomic.Bool
+	failure       error
+	shutdownCheck func() error
 }
 
 func (worker *fakeEventWorker) Preflight(context.Context) error {
 	worker.preflighted.Store(true)
 	return worker.failure
+}
+
+func (worker *fakeEventWorker) Check(context.Context) error {
+	if worker.failure != nil {
+		return worker.failure
+	}
+	return nil
+}
+
+func (worker *fakeEventWorker) Run(ctx context.Context) error {
+	worker.running.Store(true)
+	<-ctx.Done()
+	worker.running.Store(false)
+	return nil
+}
+
+func (worker *fakeEventWorker) Shutdown(context.Context) error {
+	worker.shutdown.Store(true)
+	if worker.shutdownCheck != nil {
+		return worker.shutdownCheck()
+	}
+	return nil
 }
 
 func discardLogger() *slog.Logger {

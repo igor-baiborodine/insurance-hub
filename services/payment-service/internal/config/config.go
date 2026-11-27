@@ -30,10 +30,13 @@ const (
 	objectBucketSetting     = "MINIO_BUCKET"
 	objectFetchTimeout      = "MINIO_FETCH_TIMEOUT"
 	kafkaBrokersSetting     = "KAFKA_BROKERS"
+	eventWorkersSetting     = "EVENT_WORKERS_ENABLED"
+	kafkaGroupSetting       = "KAFKA_GROUP"
 	kafkaRegisteredSetting  = "KAFKA_REGISTERED_TOPIC"
 	kafkaCAFileSetting      = "KAFKA_CA_FILE"
 	defaultBucket           = "payments-import"
 	defaultRegisteredTopic  = "policy-registered"
+	defaultKafkaGroup       = "payment-service"
 )
 
 // Database holds the Payment runtime connection and pool limits.
@@ -74,7 +77,9 @@ type ObjectStore struct {
 
 // Kafka holds the broker discovery and trust for the registration topic.
 type Kafka struct {
+	Consume         bool
 	Brokers         []string
+	Group           string
 	RegisteredTopic string
 	CAFile          string
 }
@@ -468,6 +473,14 @@ func loadObjectStore(lookup lookupEnv) (ObjectStore, error) {
 }
 
 func loadKafka(lookup lookupEnv) (Kafka, error) {
+	consumeValue, err := kitconfig.ValueOrDefault(lookup, eventWorkersSetting, "false")
+	if err != nil {
+		return Kafka{}, err
+	}
+	consume, err := kitconfig.ParseBool(eventWorkersSetting, consumeValue)
+	if err != nil {
+		return Kafka{}, err
+	}
 	brokersValue, err := required(lookup, kafkaBrokersSetting)
 	if err != nil {
 		return Kafka{}, err
@@ -496,11 +509,32 @@ func loadKafka(lookup lookupEnv) (Kafka, error) {
 			"must select the Policy registration topic",
 		)
 	}
+	group := ""
+	if consume {
+		group, err = kitconfig.ValueOrDefault(lookup, kafkaGroupSetting, defaultKafkaGroup)
+		if err != nil {
+			return Kafka{}, err
+		}
+		if group != defaultKafkaGroup {
+			return Kafka{}, kitconfig.Invalid(
+				kafkaGroupSetting,
+				"must select the serving Payment consumer group",
+			)
+		}
+	} else if _, present := lookup(kafkaGroupSetting); present {
+		return Kafka{}, kitconfig.Invalid(
+			kafkaGroupSetting,
+			"must be unset when event processing is disabled",
+		)
+	}
 	caFile, err := required(lookup, kafkaCAFileSetting)
 	if err != nil {
 		return Kafka{}, err
 	}
-	return Kafka{Brokers: brokers, RegisteredTopic: registered, CAFile: caFile}, nil
+	return Kafka{
+		Consume: consume, Brokers: brokers, Group: group,
+		RegisteredTopic: registered, CAFile: caFile,
+	}, nil
 }
 
 func required(lookup lookupEnv, name string) (string, error) {

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -17,6 +18,11 @@ const (
 	policyRegistrationTopic = "policy-registered"
 	pollTimeout             = 100 * time.Millisecond
 	maxPollRecords          = 1
+	workerReady             = int32(1)
+	workerRunning           = int32(2)
+	workerFailed            = int32(3)
+	workerDraining          = int32(4)
+	workerStopped           = int32(5)
 )
 
 var (
@@ -37,7 +43,9 @@ type Settings struct {
 // RegistrationSettings adds the isolated consumer-group identity to the trusted client settings.
 type RegistrationSettings struct {
 	Settings
-	Group string
+	Group         string
+	Observe       func(context.Context) (context.Context, func(context.Context, string, error))
+	CommitFailure func(context.Context)
 }
 
 type requestClient interface {
@@ -109,10 +117,13 @@ type Worker struct {
 
 // RegistrationWorker consumes one registration at a time and commits only handled records.
 type RegistrationWorker struct {
-	client    consumerClient
-	preflight func(context.Context) (consumerClient, error)
-	handler   recordHandler
-	topic     string
+	client        consumerClient
+	preflight     func(context.Context) (consumerClient, error)
+	handler       recordHandler
+	topic         string
+	observe       func(context.Context) (context.Context, func(context.Context, string, error))
+	commitFailure func(context.Context)
+	state         atomic.Int32
 }
 
 // NewWorker constructs the registration topic client without contacting Kafka.
@@ -215,7 +226,10 @@ func newRegistrationWorker(
 		kgo.DialTLSConfig(tlsSettings),
 		kgo.ConsumeResetOffset(kgo.NoResetOffset()),
 	}
-	worker := &RegistrationWorker{handler: handler, topic: settings.Topic}
+	worker := &RegistrationWorker{
+		handler: handler, topic: settings.Topic,
+		observe: settings.Observe, commitFailure: settings.CommitFailure,
+	}
 	worker.preflight = func(ctx context.Context) (consumerClient, error) {
 		inspector, err := factory.newInspector(baseOptions...)
 		if err != nil {
@@ -285,7 +299,21 @@ func (worker *RegistrationWorker) Preflight(ctx context.Context) error {
 	}
 	worker.client = client
 	worker.preflight = nil
+	worker.state.Store(workerReady)
 	return nil
+}
+
+// Check reports whether the consuming worker can accept or is processing registrations.
+func (worker *RegistrationWorker) Check(context.Context) error {
+	if worker == nil {
+		return errors.New("check Payment registration consumer: worker is required")
+	}
+	switch worker.state.Load() {
+	case workerReady, workerRunning:
+		return nil
+	default:
+		return errors.New("check Payment registration consumer: worker is unavailable")
+	}
 }
 
 // Run handles records in fetch order and acknowledges each durable result synchronously.
@@ -293,6 +321,12 @@ func (worker *RegistrationWorker) Run(ctx context.Context) error {
 	if worker == nil || worker.client == nil {
 		return errors.New("run Payment registration consumer: preflight is required")
 	}
+	worker.state.Store(workerRunning)
+	defer func() {
+		if worker.state.Load() == workerRunning {
+			worker.state.Store(workerStopped)
+		}
+	}()
 	for ctx.Err() == nil {
 		pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
 		result := worker.client.Poll(pollCtx, maxPollRecords)
@@ -307,24 +341,50 @@ func (worker *RegistrationWorker) Run(ctx context.Context) error {
 				continue
 			}
 			worker.client.AllowRebalance()
+			worker.state.Store(workerFailed)
 			return errors.New("run Payment registration consumer: Kafka fetch failed")
 		}
 		for _, record := range result.records {
-			if record.Topic != worker.topic ||
-				worker.handler.Handle(ctx, record.Key, record.Value) != nil {
+			recordCtx := ctx
+			finish := func(context.Context, string, error) {}
+			if worker.observe != nil {
+				recordCtx, finish = worker.observe(ctx)
+			}
+			if record.Topic != worker.topic {
+				worker.client.AllowRebalance()
+				worker.state.Store(workerFailed)
+				failure := ErrRegistrationHeld
+				finish(recordCtx, "held", failure)
+				return failure
+			}
+			if err := worker.handler.Handle(
+				recordCtx,
+				record.Key,
+				record.Value,
+			); err != nil {
 				worker.client.AllowRebalance()
 				if ctx.Err() != nil {
+					finish(recordCtx, "cancelled", ctx.Err())
 					return nil
 				}
+				worker.state.Store(workerFailed)
+				finish(recordCtx, "held", err)
 				return ErrRegistrationHeld
 			}
-			if err := worker.client.CommitRecords(ctx, record); err != nil {
+			if err := worker.client.CommitRecords(recordCtx, record); err != nil {
 				worker.client.AllowRebalance()
 				if ctx.Err() != nil {
+					finish(recordCtx, "cancelled", ctx.Err())
 					return nil
 				}
+				worker.state.Store(workerFailed)
+				if worker.commitFailure != nil {
+					worker.commitFailure(recordCtx)
+				}
+				finish(recordCtx, "commit_uncertain", err)
 				return ErrRegistrationCommitUncertain
 			}
+			finish(recordCtx, "success", nil)
 		}
 		worker.client.AllowRebalance()
 	}
@@ -336,6 +396,7 @@ func (worker *RegistrationWorker) Shutdown(ctx context.Context) error {
 	if worker == nil || worker.client == nil {
 		return nil
 	}
+	worker.state.Store(workerDraining)
 	worker.client.AllowRebalance()
 	closed := make(chan struct{})
 	go func() {
@@ -344,6 +405,7 @@ func (worker *RegistrationWorker) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-closed:
+		worker.state.Store(workerStopped)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

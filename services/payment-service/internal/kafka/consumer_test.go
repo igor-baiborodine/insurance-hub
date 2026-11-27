@@ -579,6 +579,17 @@ func TestRegistrationWorker_CommitsHandledRecordBeforeContinuing(t *testing.T) {
 	}
 	handler := &fakeRecordHandler{}
 	worker := &RegistrationWorker{client: consumer, handler: handler, topic: topic}
+	worker.state.Store(workerReady)
+	var outcome string
+	worker.observe = func(ctx context.Context) (
+		context.Context,
+		func(context.Context, string, error),
+	) {
+		return ctx, func(_ context.Context, got string, _ error) { outcome = got }
+	}
+	if err := worker.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 
 	// when
 	err := worker.Run(ctx)
@@ -598,6 +609,9 @@ func TestRegistrationWorker_CommitsHandledRecordBeforeContinuing(t *testing.T) {
 	}
 	if consumer.allowCount() == 0 {
 		t.Fatal("worker did not release the blocked rebalance after commit")
+	}
+	if outcome != "success" {
+		t.Fatalf("registration outcome = %q, want success", outcome)
 	}
 }
 
@@ -671,6 +685,15 @@ func TestRegistrationWorker_CommitFailureStopsLaterRecord(t *testing.T) {
 	}
 	handler := &fakeRecordHandler{}
 	worker := &RegistrationWorker{client: consumer, handler: handler, topic: topic}
+	var outcome string
+	commitFailures := 0
+	worker.observe = func(ctx context.Context) (
+		context.Context,
+		func(context.Context, string, error),
+	) {
+		return ctx, func(_ context.Context, got string, _ error) { outcome = got }
+	}
+	worker.commitFailure = func(context.Context) { commitFailures++ }
 
 	// when
 	err := worker.Run(t.Context())
@@ -685,6 +708,16 @@ func TestRegistrationWorker_CommitFailureStopsLaterRecord(t *testing.T) {
 			handler.callCount(),
 			consumer.commitCount(),
 		)
+	}
+	if outcome != "commit_uncertain" || commitFailures != 1 {
+		t.Fatalf(
+			"commit telemetry = outcome:%q failures:%d",
+			outcome,
+			commitFailures,
+		)
+	}
+	if err := worker.Check(t.Context()); err == nil {
+		t.Fatal("uncertain worker remained ready")
 	}
 }
 

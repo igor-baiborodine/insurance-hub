@@ -651,7 +651,8 @@ func TestLoad_DependencySettings(t *testing.T) {
 	}
 	wantBrokers := []string{"kafka-bootstrap.data.svc:9093", "kafka-1.data.svc:9093"}
 	if fmt.Sprint(got.Kafka.Brokers) != fmt.Sprint(wantBrokers) ||
-		got.Kafka.RegisteredTopic != "policy-registered" {
+		got.Kafka.RegisteredTopic != "policy-registered" || got.Kafka.Consume ||
+		got.Kafka.Group != "" {
 		t.Errorf("kafka = %+v", got.Kafka)
 	}
 	for _, format := range []string{"%v", "%+v", "%#v"} {
@@ -664,6 +665,53 @@ func TestLoad_DependencySettings(t *testing.T) {
 		) {
 			t.Errorf("formatting with %s exposes a credential", format)
 		}
+	}
+}
+
+func TestLoad_EventWorkerMode(t *testing.T) {
+	t.Run("explicit consumption uses serving identity", func(t *testing.T) {
+		// given
+		lookup := mapLookup(map[string]string{eventWorkersSetting: "true"})
+
+		// when
+		got, err := load(lookup)
+		// then
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.Kafka.Consume || got.Kafka.Group != "payment-service" {
+			t.Fatalf("Kafka mode = %+v", got.Kafka)
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		values map[string]string
+	}{
+		{
+			name: "foreign serving group",
+			values: map[string]string{
+				eventWorkersSetting: "true", kafkaGroupSetting: "qualification-group",
+			},
+		},
+		{
+			name:   "disabled mode group",
+			values: map[string]string{kafkaGroupSetting: "payment-service"},
+		},
+		{
+			name:   "invalid mode",
+			values: map[string]string{eventWorkersSetting: "sometimes"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := load(mapLookup(test.values))
+
+			// then
+			if err == nil {
+				t.Fatal("invalid event worker mode accepted")
+			}
+		})
 	}
 }
 

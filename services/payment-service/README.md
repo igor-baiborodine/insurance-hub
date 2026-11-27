@@ -107,7 +107,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus account list/detail, registration transaction/replay, schema migration, status and writer-access checks against an owned disposable TLS PostgreSQL container. The tests do not use a configured deployment environment. `check-go-pr` writes their profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, readonly modules, a C compiler and the cached pinned PostgreSQL image or registry access. |
+| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus account list/detail, registration transaction/replay and worker recovery, schema migration, status and writer-access checks against owned disposable TLS PostgreSQL and Kafka containers. The worker smoke uses group `payment-service-issue-486`; it never uses a configured deployment environment or the serving group. `check-go-pr` writes the profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, OpenSSL, readonly modules, a C compiler and the cached pinned PostgreSQL/Kafka images or registry access. |
 | `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with the 75% coverage gate, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
@@ -206,6 +206,8 @@ do not repeat its supplied value.
 | `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
 | `MINIO_FETCH_TIMEOUT` | `3s` | Positive duration bounding each object-store connection attempt. |
 | `KAFKA_BROKERS` | required | Comma-separated TLS `host:port` bootstrap addresses. |
+| `EVENT_WORKERS_ENABLED` | `false` | Boolean. The default performs metadata-only Kafka checks and joins no group. `true` explicitly enables registration consumption. |
+| `KAFKA_GROUP` | `payment-service` when event workers are enabled; otherwise unset | Consuming mode accepts only the serving group `payment-service`. Supplying this setting while workers are disabled is rejected. |
 | `KAFKA_REGISTERED_TOPIC` | `policy-registered` | Must select the registration topic exactly. |
 | `KAFKA_CA_FILE` | required | Bounded CA bundle for TLS 1.2+ with hostname verification; plaintext is unavailable. |
 | `STARTUP_TIMEOUT` | `10s` | Positive bound covering dependency construction and readiness. |
@@ -289,11 +291,16 @@ HTTP_ADDR=127.0.0.1:0 GRPC_ADDR=127.0.0.1:0 HEALTH_ADDR=127.0.0.1:0 make run
 
 Startup also requires the PostgreSQL, MinIO and Kafka settings above and reachable dependencies.
 A failed check stops startup before readiness with an error that names PostgreSQL, MinIO or Kafka.
+The deployed default remains metadata-only while Java owns group `payment-service`. Explicit
+consuming mode first verifies inactive, stable committed positions, constructs the registration
+use case and starts its worker before readiness; it never initializes, resets or skips progress.
 
 The business HTTP, gRPC and management defaults are `127.0.0.1:8080`, `127.0.0.1:9090` and
 `127.0.0.1:8081`. Management exposes only `GET /livez` and `GET /readyz`. Startup marks readiness
 only after the actual gRPC server is accepting the owned gateway connection and all listeners are
-serving and one bounded PostgreSQL query, MinIO list and Kafka topic metadata request succeed.
+serving and one bounded PostgreSQL query, MinIO list and Kafka check succeed. In consuming mode,
+the check includes the worker's ready/running state. A held record, uncertain offset commit or
+worker drain withdraws readiness and stops the process for operator resolution.
 The owned same-process connection disables grpc-go channel idleness so an inactive but healthy
 gateway cannot become permanently unready. Each readiness request rechecks that the connection
 remains `READY`, then reruns the PostgreSQL query and MinIO list within `PROBE_TIMEOUT`; liveness
@@ -301,8 +308,9 @@ stays independent of these dependencies.
 
 An interrupt or `SIGTERM` withdraws readiness, stops new business HTTP admission and lets accepted
 HTTP handlers finish before closing the gateway connection. It then gracefully or forcibly stops
-gRPC, stops management HTTP, releases idle MinIO connections, closes the PostgreSQL pool and shuts
-down telemetry. HTTP, connection, gRPC and management cleanup
+gRPC, stops management HTTP, releases idle MinIO connections, then stops the registration worker
+before closing the PostgreSQL pool and telemetry. The worker releases blocked rebalances without
+a final commit. HTTP, connection, gRPC and management cleanup
 share the cutoff at `SHUTDOWN_TIMEOUT - OTEL_EXPORTER_OTLP_TIMEOUT`; telemetry receives the final
 reserved interval within the one overall deadline.
 
@@ -346,11 +354,11 @@ and use the repository's shared non-runtime Go Make tooling.
 | Safe structured logs | `servicekit/logger`, `internal/logger/logger.go` | Shared UTC, recursive redaction, redacted error objects and trace correlation; local completion message. |
 | Trace/metric lifecycle | `servicekit/telemetry`, `internal/telemetry/telemetry.go` | Shared provider resources, bounded queue/export/cleanup, diagnostics and process instruments; local identity policy and metric views. |
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
-| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL- and MinIO-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
+| Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL-, MinIO- and worker-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT` and the bounded `SELECT 1` readiness check. |
 | Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import` and idle-connection release on shutdown. |
-| Kafka | Dashboard `internal/kafka` and composition | The same TLS trust, bounded CA file and registration-topic metadata preflight without topic creation. Payment's client joins no group and neither polls nor commits offsets. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Account reads are application-owned use cases over a PostgreSQL port; transport and storage remain replaceable adapters. |
+| Kafka | Dashboard `internal/kafka` and composition | The same TLS trust and bounded CA file. Metadata-only mode joins no group. Explicit consuming mode validates stable committed positions for group `payment-service`, handles one registration at a time and commits only after durable success. |
+| Business architecture | Product application-owned catalog ports and injected adapters | Account reads and policy registration are application-owned use cases over PostgreSQL ports; transport and storage remain replaceable adapters. |
 
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -363,13 +371,13 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
 | `cmd/migrate`, `internal/administration` | Operator-run `migrate`/`status` against one protected target enrollment: target identity checks, an advisory lock, the versioned schema and its history in one transaction, and exact schema inspection. |
-| `internal/application` | Account-list and current-UTC-business-date balance use cases plus their storage port and classified failures. |
-| `internal/postgres`, `internal/objectstore` | sqlc-backed read-only account transactions on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and the bounded `payments-import` read check. |
-| `internal/kafka` | TLS registration-topic client whose preflight requests only topic metadata. |
+| `internal/application` | Account-list, current-UTC-business-date balance and idempotent policy-registration use cases plus their storage ports and classified failures. |
+| `internal/postgres`, `internal/objectstore` | sqlc-backed account reads and atomic registration/debit writes on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and the bounded `payments-import` read check. |
+| `internal/kafka` | TLS registration-topic metadata client and opt-in group worker with stable-progress preflight, strict event decoding and commit-after-storage ordering. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Payment registration, account projection, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply service identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and bounded account-operation signal contracts; shared provider construction with local policy and metric views. |
+| `internal/logger`, `internal/telemetry` | Completion-log and bounded account/registration signal contracts; shared provider construction with local policy and metric views. Registration signals expose only event type, bounded outcome and duration through `insurance_hub.payment.registrations`, `insurance_hub.payment.registration.duration` and `insurance_hub.payment.registration.commit.failures`. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/payment/v1`, `gen/payment/v1`, `gen/openapiv2/payment/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -408,13 +416,16 @@ flowchart TD
 ```
 
 At startup, composition opens and checks PostgreSQL and MinIO, reads the Kafka CA and configures
-the topic client, binds all listeners, starts gRPC, derives the same-process client target from
-the bound address and waits for that channel, PostgreSQL, MinIO and the topic metadata to be ready.
+either the metadata client or the explicitly enabled registration worker, binds all listeners,
+starts gRPC, derives the same-process client target from the bound address and waits for that
+channel, PostgreSQL, MinIO and Kafka to be ready. Consuming mode starts only after its committed
+positions pass preflight.
 Each acquired client is registered for cleanup before the next is constructed, so a partial
 startup releases what it already opened. An HTTP account read obtains a bounded HTTP server span,
 uses the generated client across the instrumented connection, obtains client and server spans,
 passes protobuf validation, enters the application use case and executes a read-only PostgreSQL
 transaction with the shorter deadline.
-HTTP and gRPC record separate bounded completion signals. Shutdown withdraws readiness and drains
-accepted HTTP work before connection and gRPC teardown, then closes management, MinIO idle
-connections, the PostgreSQL pool and telemetry within the shared deadline.
+HTTP, gRPC and registration work record separate bounded completion signals. Shutdown withdraws
+readiness and drains accepted HTTP work before connection and gRPC teardown, then closes
+management and MinIO idle connections, stops the worker without a final commit, closes the
+PostgreSQL pool and finally telemetry within the shared deadline.
