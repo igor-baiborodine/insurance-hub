@@ -40,6 +40,16 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default) AS (
         ('accounting_entry', 'c', '{kind}', NULL, NULL, NULL, NULL, NULL, true)
 ), expected_table AS (
     SELECT DISTINCT tbl FROM expected_column
+), expected_check (tbl, cols, definition) AS (
+    VALUES
+        ('statement_receipt', '{sha256}',
+            'CHECK (sha256::text ~ ''^[0-9a-f]{64}$''::text)'),
+        ('statement_receipt', '{state}',
+            'CHECK (state::text = ANY (ARRAY[''review''::character varying, '
+            || '''posted''::character varying, ''archived''::character varying]::text[]))'),
+        ('accounting_entry', '{kind}',
+            'CHECK (kind::text = ANY (ARRAY[''expected_payment''::character varying, '
+            || '''in_payment''::character varying, ''out_payment''::character varying]::text[]))')
 ), relation AS (
     SELECT c.oid, c.relname::text AS tbl
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -66,6 +76,14 @@ WITH expected_column (tbl, col, typ, not_null, identity_id, has_default) AS (
     LEFT JOIN pg_class referenced ON referenced.oid = con.confrelid
     LEFT JOIN pg_namespace referenced_namespace ON referenced_namespace.oid = referenced.relnamespace
     WHERE con.contype <> 'n'
+), actual_check AS (
+    SELECT r.tbl,
+        (SELECT array_agg(a.attname::text ORDER BY k.ord)
+         FROM unnest(con.conkey) WITH ORDINALITY AS k (attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum)::text,
+        pg_get_constraintdef(con.oid, true)
+    FROM relation r JOIN pg_constraint con ON con.conrelid = r.oid
+    WHERE con.contype = 'c'
 )
 SELECT (SELECT count(*) FROM relation) = (SELECT count(*) FROM expected_table)
     AND NOT EXISTS (
@@ -84,4 +102,9 @@ SELECT (SELECT count(*) FROM relation) = (SELECT count(*) FROM expected_table)
         (SELECT * FROM expected_constraint EXCEPT SELECT * FROM actual_constraint)
         UNION ALL
         (SELECT * FROM actual_constraint EXCEPT SELECT * FROM expected_constraint)
+    )
+    AND NOT EXISTS (
+        (SELECT * FROM expected_check EXCEPT SELECT * FROM actual_check)
+        UNION ALL
+        (SELECT * FROM actual_check EXCEPT SELECT * FROM expected_check)
     )

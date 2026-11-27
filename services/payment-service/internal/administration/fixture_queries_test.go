@@ -34,6 +34,12 @@ var changeEntryForeignKeyActionQuery string
 //go:embed testdata/sql/restore-entry-foreign-key-action.sql
 var restoreEntryForeignKeyActionQuery string
 
+//go:embed testdata/sql/change-receipt-state-check.sql
+var changeReceiptStateCheckQuery string
+
+//go:embed testdata/sql/restore-receipt-state-check.sql
+var restoreReceiptStateCheckQuery string
+
 //go:embed testdata/sql/insert-writer-registration.sql
 var insertWriterRegistrationQuery string
 

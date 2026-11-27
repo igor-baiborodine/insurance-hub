@@ -112,6 +112,15 @@ func TestRun_PaymentMigrationFreshTarget(t *testing.T) {
 		refuse(t, ctx, fixture, "status", "incompatible Payment schema or owner")
 		refuse(t, ctx, fixture, "migrate", "incompatible Payment schema or owner")
 	})
+
+	t.Run("business check drift", func(t *testing.T) {
+		// given
+		t.Cleanup(func() { fixture.Exec(t, ctx, restoreReceiptStateCheckQuery) })
+		fixture.Exec(t, ctx, changeReceiptStateCheckQuery)
+
+		refuse(t, ctx, fixture, "status", "incompatible Payment schema or owner")
+		refuse(t, ctx, fixture, "migrate", "incompatible Payment schema or owner")
+	})
 }
 
 // refuse requires a redacted refusal that leaves schema, history and business rows unchanged.
