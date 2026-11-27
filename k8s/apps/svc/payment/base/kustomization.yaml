@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: payment-api
+      app.kubernetes.io/part-of: insurance-hub
+      app.kubernetes.io/managed-by: kustomize
+resources:
+  - deployment.yaml
+  - service.yaml
+  - network-policy.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: payment-config
+    literals:
+      - SERVICE_NAME=payment-service
+      - HTTP_ADDR=0.0.0.0:8080
+      - GRPC_ADDR=127.0.0.1:9090
+      - HEALTH_ADDR=0.0.0.0:8081
+      - OTEL_ENABLED=false

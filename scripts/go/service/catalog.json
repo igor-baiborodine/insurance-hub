@@ -579,6 +579,68 @@
           }
         }
       }
+    },
+    "payment": {
+      "repositoryRoot": "services",
+      "modulePath": "services/payment-service",
+      "localImage": "insurance-hub-payment-api",
+      "registryImage": "ghcr.io/igor-baiborodine/insurance-hub/payment-api",
+      "kustomizeBase": "k8s/apps/svc/payment/base",
+      "overlays": {
+        "local-dev": "k8s/overlays/local-dev/svc/payment",
+        "qa": "k8s/overlays/qa/svc/payment"
+      },
+      "environments": [
+        "local-dev",
+        "qa"
+      ],
+      "capabilities": [
+        "image-build",
+        "image-check",
+        "deploy-render",
+        "deploy-check",
+        "deploy-preflight",
+        "deploy-status",
+        "image-load",
+        "deploy",
+        "deploy-verify",
+        "stop",
+        "deploy-test-tooling",
+        "deploy-smoke"
+      ],
+      "releaseTargets": [
+        "qa"
+      ],
+      "deploymentTargets": {
+        "local-dev": {
+          "mode": "direct",
+          "context": "kind-local-dev-insurance-hub",
+          "namespace": "local-dev-all",
+          "dataNamespace": "local-dev-all",
+          "overlay": "k8s/overlays/local-dev/svc/payment",
+          "kindCluster": "local-dev-insurance-hub"
+        },
+        "qa": {
+          "mode": "flux",
+          "context": "qa-insurance-hub",
+          "namespace": "qa-svc",
+          "dataNamespace": "qa-data",
+          "overlay": "k8s/overlays/qa/svc/payment",
+          "flux": {
+            "namespace": "flux-system",
+            "sourcePrefix": "qa-payment-release",
+            "apiName": "qa-payment-api",
+            "bundle": "k8s/flux/qa/releases/payment/release.yaml",
+            "sharedSource": "insurance-hub",
+            "sharedOwner": "qa-svc",
+            "sharedPath": "./k8s/overlays/qa/svc",
+            "branch": "main",
+            "activationKustomization": "k8s/overlays/qa/svc/kustomization.yaml",
+            "activationResource": "./payment",
+            "pinDigest": true
+          }
+        }
+      }
     }
   }
 }

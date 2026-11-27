@@ -119,9 +119,8 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-Database/broker integration, mock generation, migrations, deployment, workspace
-validation, and live infrastructure are not applicable to this standalone service. It has no such
-dependencies or placeholder targets.
+The service has no generated mocks, migrations, or Go workspace.
+Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
 
