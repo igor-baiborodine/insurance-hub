@@ -5,7 +5,7 @@ WITH login AS (
 ), managed (relation, granted) AS (
     VALUES ('public.policy_account', ARRAY['SELECT', 'INSERT']),
         ('public.accounting_entry', ARRAY['SELECT', 'INSERT']),
-        ('public.statement_receipt', ARRAY['SELECT', 'INSERT', 'UPDATE'])
+        ('public.statement_receipt', ARRAY['SELECT', 'INSERT'])
 ), privilege (name) AS (
     SELECT unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES',
         'TRIGGER', 'MAINTAIN'])
@@ -45,6 +45,13 @@ SELECT (SELECT count(*) = 2 AND bool_and(
             has_table_privilege('go_payment_writer', relation, name) = (name = ANY (granted))
             AND NOT has_table_privilege('go_payment_migrator', relation, name))
         FROM managed CROSS JOIN privilege))
+    AND (to_regclass('public.statement_receipt') IS NULL OR (
+        SELECT bool_and(has_column_privilege(
+            'go_payment_writer', 'public.statement_receipt', column_name, 'UPDATE'
+        ) = (column_name = ANY (ARRAY['state', 'updated_at'])))
+        FROM unnest(ARRAY[
+            'id', 'source_name', 'sha256', 'state', 'created_at', 'updated_at'
+        ]) AS receipt_column (column_name)))
     AND (to_regclass('public.payment_schema_version') IS NULL OR NOT EXISTS (
         SELECT FROM login WHERE has_table_privilege(oid, 'public.payment_schema_version',
             'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')))

@@ -60,3 +60,6 @@ var grantWriterDeleteQuery string
 
 //go:embed testdata/sql/revoke-writer-delete.sql
 var revokeWriterDeleteQuery string
+
+//go:embed testdata/sql/grant-writer-receipt-update.sql
+var grantWriterReceiptUpdateQuery string

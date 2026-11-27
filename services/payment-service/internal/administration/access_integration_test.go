@@ -30,6 +30,11 @@ func TestRun_PaymentWriterAccess(t *testing.T) {
 		t.Fatal("provisioned access before migration differs from the contract")
 	}
 	fixture.Call(t, ctx, "migrate", "version=1")
+	fixture.Exec(t, ctx, grantWriterReceiptUpdateQuery)
+	if accessMatches(t, ctx, fixture) {
+		t.Fatal("former table-wide receipt UPDATE grant passed access verification")
+	}
+	fixture.Call(t, ctx, "migrate", "version=1")
 
 	// when
 	writer := writerConnection(t, ctx, fixture.WriterURL("payment"))
@@ -214,6 +219,8 @@ func TestRun_PaymentWriterAccess(t *testing.T) {
 		{"alter table", "ALTER TABLE public.policy_account ADD COLUMN denied integer"},
 		{"update account", "UPDATE public.policy_account SET updated = updated"},
 		{"update entry", "UPDATE public.accounting_entry SET amount = 0"},
+		{"change receipt source name", "UPDATE public.statement_receipt SET source_name = source_name"},
+		{"change receipt digest", "UPDATE public.statement_receipt SET sha256 = sha256"},
 		{"delete entries", "DELETE FROM public.accounting_entry"},
 		{"delete receipts", "DELETE FROM public.statement_receipt"},
 		{"truncate entries", "TRUNCATE public.accounting_entry"},
