@@ -9,22 +9,13 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
-	"net"
-	"net/netip"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	dockercontainer "github.com/moby/moby/api/types/container"
-	dockernetwork "github.com/moby/moby/api/types/network"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
@@ -35,11 +26,11 @@ import (
 	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/telemetry"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/testing/kafkafixture"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/testing/postgresfixture"
 )
 
 const (
-	kafkaImage = "apache/kafka:4.1.0@sha256:bff074a5d0051dbc0bbbcd25b045bb1fe84833ec0d3c7c965d1797dd289ec88f"
 	kafkaTopic = "policy-registered"
 	kafkaGroup = "payment-service-qualification"
 )
@@ -61,8 +52,7 @@ type compatibilityFixture struct {
 }
 
 type kafkaFixture struct {
-	broker string
-	ca     []byte
+	*kafkafixture.Fixture
 	client *kgo.Client
 }
 
@@ -72,7 +62,6 @@ func TestRun_PaymentRegistrationWorker(t *testing.T) {
 	defer cancel()
 	kafka := newKafkaFixture(t, ctx)
 	registration := loadCompatibilityRegistration(t)
-	createTopic(t, ctx, kafka.client)
 	commitOffset(t, ctx, kafka.client, 0)
 
 	database := postgresfixture.New(t, ctx)
@@ -367,8 +356,10 @@ func newQualificationWorker(
 	worker, err := paymentkafka.NewRegistrationWorker(
 		paymentkafka.RegistrationSettings{
 			Settings: paymentkafka.Settings{
-				Brokers: []string{kafka.broker}, Topic: kafkaTopic,
-				ClientID: "payment-registration-qualification", CACert: kafka.ca,
+				Brokers:  []string{kafka.Address},
+				Topic:    kafkaTopic,
+				ClientID: "payment-registration-qualification",
+				CACert:   kafka.CACert,
 			},
 			Group: kafkaGroup, Observe: observer.Start,
 			CommitFailure: observer.RecordCommitFailure,
@@ -454,242 +445,25 @@ func groupConsumer(t *testing.T, fixture *kafkaFixture) *kgo.Client {
 
 func newKafkaFixture(t *testing.T, ctx context.Context) *kafkaFixture {
 	t.Helper()
-	port := reserveLoopbackPort(t)
-	directory := t.TempDir()
-	caPath, keystorePath, keyPassword, storePassword := kafkaCertificates(t, ctx, directory)
-	request := testcontainers.ContainerRequest{
-		Image: kafkaImage,
-		Env: map[string]string{
-			"CLUSTER_ID":          "MkU3OEVBNTcwNTJENDM2Qk",
-			"KAFKA_NODE_ID":       "1",
-			"KAFKA_PROCESS_ROLES": "broker,controller",
-			"KAFKA_LISTENERS":     "SSL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:9094",
-			"KAFKA_ADVERTISED_LISTENERS": fmt.Sprintf(
-				"SSL://127.0.0.1:%d,INTERNAL://127.0.0.1:9094",
-				port,
-			),
-			"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":           "SSL:SSL,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT",
-			"KAFKA_CONTROLLER_LISTENER_NAMES":                "CONTROLLER",
-			"KAFKA_CONTROLLER_QUORUM_VOTERS":                 "1@127.0.0.1:9093",
-			"KAFKA_INTER_BROKER_LISTENER_NAME":               "INTERNAL",
-			"KAFKA_SSL_KEYSTORE_FILENAME":                    "server.p12",
-			"KAFKA_SSL_KEYSTORE_TYPE":                        "PKCS12",
-			"KAFKA_SSL_KEYSTORE_CREDENTIALS":                 "keystore-password",
-			"KAFKA_SSL_KEY_CREDENTIALS":                      "key-password",
-			"KAFKA_SSL_CLIENT_AUTH":                          "none",
-			"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR":         "1",
-			"KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
-			"KAFKA_TRANSACTION_STATE_LOG_MIN_ISR":            "1",
-			"KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS":         "0",
-		},
-		ExposedPorts: []string{"9092/tcp"},
-		Files: []testcontainers.ContainerFile{
-			{
-				HostFilePath:      keystorePath,
-				ContainerFilePath: "/etc/kafka/secrets/server.p12",
-				FileMode:          0o600,
-			},
-			{
-				HostFilePath:      keyPassword,
-				ContainerFilePath: "/etc/kafka/secrets/key-password",
-				FileMode:          0o600,
-			},
-			{
-				HostFilePath:      storePassword,
-				ContainerFilePath: "/etc/kafka/secrets/keystore-password",
-				FileMode:          0o600,
-			},
-		},
-		User: "root",
-		HostConfigModifier: func(config *dockercontainer.HostConfig) {
-			config.PortBindings = dockernetwork.PortMap{
-				dockernetwork.MustParsePort("9092/tcp"): {
-					{
-						HostIP:   netip.MustParseAddr("127.0.0.1"),
-						HostPort: fmt.Sprint(port),
-					},
-				},
-			}
-		},
-		WaitingFor: wait.ForListeningPort("9092/tcp").WithStartupTimeout(2 * time.Minute),
-	}
-	container, err := testcontainers.GenericContainer(
-		ctx,
-		testcontainers.GenericContainerRequest{
-			ContainerRequest: request,
-			Started:          true,
-		},
-	)
-	if err != nil {
-		t.Fatal("start disposable Kafka:", err)
-	}
-	testcontainers.CleanupContainer(t, container, testcontainers.StopTimeout(3*time.Second))
-	ca, err := os.ReadFile(caPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture := &kafkaFixture{broker: fmt.Sprintf("127.0.0.1:%d", port), ca: ca}
+	fixture := &kafkaFixture{Fixture: kafkafixture.New(t, ctx)}
 	client, err := kgo.NewClient(kafkaOptions(t, fixture)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.client = client
 	t.Cleanup(client.Close)
-	waitForKafka(t, ctx, client)
 	return fixture
 }
 
 func kafkaOptions(t *testing.T, fixture *kafkaFixture) []kgo.Opt {
 	t.Helper()
 	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(fixture.ca) {
+	if !roots.AppendCertsFromPEM(fixture.CACert) {
 		t.Fatal("append disposable Kafka CA")
 	}
 	return []kgo.Opt{
-		kgo.SeedBrokers(fixture.broker),
+		kgo.SeedBrokers(fixture.Address),
 		kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}),
-	}
-}
-
-func kafkaCertificates(
-	t *testing.T,
-	ctx context.Context,
-	directory string,
-) (string, string, string, string) {
-	t.Helper()
-	openssl, err := exec.LookPath("openssl")
-	if err != nil {
-		t.Fatal("openssl is required for disposable Kafka TLS")
-	}
-	paths := map[string]string{}
-	for _, name := range []string{
-		"ca.key", "ca.crt", "server.key", "server.csr", "server.crt", "server.ext",
-		"server.p12", "openssl-password", "key-password", "keystore-password",
-	} {
-		paths[name] = filepath.Join(directory, name)
-	}
-	if err := os.WriteFile(
-		paths["server.ext"],
-		[]byte("subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"openssl-password", "key-password", "keystore-password"} {
-		if err := os.WriteFile(paths[name], []byte("changeit\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	commands := [][]string{
-		{
-			"req",
-			"-x509",
-			"-newkey",
-			"rsa:2048",
-			"-nodes",
-			"-days",
-			"1",
-			"-subj",
-			"/CN=payment-disposable-ca",
-			"-keyout",
-			paths["ca.key"],
-			"-out",
-			paths["ca.crt"],
-		},
-		{
-			"req",
-			"-newkey",
-			"rsa:2048",
-			"-nodes",
-			"-subj",
-			"/CN=127.0.0.1",
-			"-keyout",
-			paths["server.key"],
-			"-out",
-			paths["server.csr"],
-		},
-		{
-			"x509",
-			"-req",
-			"-days",
-			"1",
-			"-in",
-			paths["server.csr"],
-			"-CA",
-			paths["ca.crt"],
-			"-CAkey",
-			paths["ca.key"],
-			"-CAcreateserial",
-			"-extfile",
-			paths["server.ext"],
-			"-out",
-			paths["server.crt"],
-		},
-		{
-			"pkcs12",
-			"-export",
-			"-name",
-			"kafka",
-			"-in",
-			paths["server.crt"],
-			"-inkey",
-			paths["server.key"],
-			"-certfile",
-			paths["ca.crt"],
-			"-passout",
-			"file:" + paths["openssl-password"],
-			"-out",
-			paths["server.p12"],
-		},
-	}
-	for _, arguments := range commands {
-		command := exec.CommandContext(ctx, openssl, arguments...)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("create disposable Kafka TLS identity: %v (%s)", err, output)
-		}
-	}
-	return paths["ca.crt"], paths["server.p12"], paths["key-password"], paths["keystore-password"]
-}
-
-func reserveLoopbackPort(t *testing.T) int {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return port
-}
-
-func waitForKafka(t *testing.T, ctx context.Context, client *kgo.Client) {
-	t.Helper()
-	deadline := time.Now().Add(time.Minute)
-	for time.Now().Before(deadline) && ctx.Err() == nil {
-		attemptCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := client.Ping(attemptCtx)
-		cancel()
-		if err == nil {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("disposable Kafka did not become ready")
-}
-
-func createTopic(t *testing.T, ctx context.Context, client *kgo.Client) {
-	t.Helper()
-	request := kmsg.NewPtrCreateTopicsRequest()
-	request.TimeoutMillis = 30_000
-	request.Topics = []kmsg.CreateTopicsRequestTopic{{
-		Topic: kafkaTopic, NumPartitions: 1, ReplicationFactor: 1,
-	}}
-	response, err := client.Request(ctx, request)
-	created, ok := response.(*kmsg.CreateTopicsResponse)
-	if err != nil || !ok || len(created.Topics) != 1 || created.Topics[0].ErrorCode != 0 {
-		t.Fatalf("create disposable Kafka topic: %v", err)
 	}
 }
 
