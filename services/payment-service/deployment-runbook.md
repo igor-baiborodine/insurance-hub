@@ -49,9 +49,14 @@ release without a digest, a missing caller label or a selector that reaches anot
 workload fails the check. Local-dev requires an explicit, source-matched image to perform
 operations. For disposable qualification, build a local image as below, then run
 `make go-svc-deploy-smoke SVC_NAME=payment` with the selected image and source revision exported.
-The smoke copies the three local-dev workload Secrets into one labeled Kind namespace, runs the
-private workload checks (startup dependency checks, account reads, probes, identity, Pod denial, caller
-admission and scale-to-zero) and removes that namespace afterward.
+The smoke copies the three workload Secrets into one labeled Kind namespace and performs only
+read-only checks: startup dependencies, account lists, probes, identity, Pod denial, caller
+admission and scale-to-zero. It does not migrate, seed or reset environment data. Cleanup verifies
+ownership before removing the disposable namespace.
+
+Run `make -C services/payment-service test-integration` for account-list and account-detail
+integration coverage. Those tests provision their own TLS PostgreSQL container, apply their own
+schema and fixture, and remove the container afterward; they do not use local-dev or QA data.
 
 ## Direct local-dev
 
