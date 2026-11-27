@@ -2,13 +2,15 @@
 
 GO ?= go
 DOCKER ?= docker
+KUBECTL ?= kubectl
 INSURANCE_HUB_ROOT ?= ../..
 INSURANCE_HUB_ROOT := $(abspath $(INSURANCE_HUB_ROOT))
 export INSURANCE_HUB_ROOT
 TOOLING_REPOSITORY_ROOT ?= $(abspath $(CURDIR)/../..)
 PYTHON_TOOLING_FILES := $(wildcard scripts/check_gateway_contract.py \
-	scripts/test_check_gateway_contract.py scripts/test_tooling.py)
-PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py)
+	scripts/test_check_gateway_contract.py scripts/test_tooling.py \
+	scripts/deployment.py scripts/test_deployment.py)
+PYTHON_FAST_TEST_FILES := $(wildcard scripts/test_check_gateway_contract.py scripts/test_deployment.py)
 
 include $(INSURANCE_HUB_ROOT)/scripts/python/toolchain.mk
 
@@ -49,6 +51,10 @@ OTEL_HTTP_VERSION := v0.70.0
 X_NET_VERSION := v0.60.0
 SERVICEKIT_VERSION := v1.1.0
 GENPROTO_GOOGLEAPIS_API_VERSION := v0.0.0-20260928230214-8a89bd6388cc
+PGX_VERSION := v5.11.0
+MINIO_GO_VERSION := v7.4.1
+FRANZ_GO_VERSION := v1.22.2
+KMSG_VERSION := v1.15.0
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
@@ -88,7 +94,9 @@ include $(COMMON_GO_TOOLING_DIR)/common.mk
 	dockerfile-generate dockerfile-check image-build image-check _image-check-existing \
 	shared-fast-build shared-fast-unit shared-candidate-format shared-candidate-lint \
 	shared-candidate-race shared-candidate-dependency shared-candidate-vulnerability \
-	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image
+	shared-candidate-generated shared-candidate-breaking shared-candidate-integration shared-candidate-image \
+	deploy-render deploy-check deploy-preflight deploy-status image-load deploy deploy-verify stop \
+	deploy-test-tooling deploy-smoke _deploy-smoke-rpc
 
 export IMAGE_NAME IMAGE_TAG IMAGE_REF SOURCE_CREATED SOURCE_REPOSITORY SOURCE_REVISION SOURCE_VERSION TARGET_PLATFORM
 
@@ -111,7 +119,7 @@ image-check: image-build
 
 _image-check-existing: dockerfile-check python-runtime-check
 	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 DOCKER="$(DOCKER)" \
-		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" check
+		"$(PYTHON)" -m scripts.go.service.image --config "$(GO_SERVICE_TOOLING_CONFIG)" inspect
 
 python-tooling-format-check: python-toolchain-check
 	@cd "$(CURDIR)" && RUFF_CACHE_DIR="$(TOOLS_DIR)/ruff-cache" \
@@ -139,6 +147,10 @@ bootstrap-go-tools bootstrap-tools: python-toolchain-setup
 
 update-deps:
 	GOWORK=off $(GO) get \
+		github.com/jackc/pgx/v5@$(PGX_VERSION) \
+		github.com/minio/minio-go/v7@$(MINIO_GO_VERSION) \
+		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
+		github.com/twmb/franz-go/pkg/kmsg@$(KMSG_VERSION) \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
 		buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go@$(PROTOVALIDATE_SCHEMA_GO_VERSION) \
 		github.com/grpc-ecosystem/grpc-gateway/v2@$(GRPC_GATEWAY_VERSION) \
@@ -224,6 +236,27 @@ shared-candidate-generated shared-candidate-breaking shared-candidate-integratio
 		PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m scripts.go.service.shared_phase --config "$(GO_SERVICE_TOOLING_CONFIG)" "$$phase"; \
 	else case "$$phase" in generated) target=check-proto-drift;; breaking) target=check-proto-breaking;; integration) target=test-integration;; image) target=image-check;; esac; \
 		$(MAKE) --no-print-directory "$$target"; fi
+
+deploy-render deploy-check: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" scripts/deployment.py '$(@:deploy-%=%)'
+
+deploy-preflight deploy-status image-load deploy deploy-verify stop: python-runtime-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		DOCKER="$(DOCKER)" GO="$(GO)" MAKE_COMMAND="$(MAKE)" "$(PYTHON)" scripts/deployment.py '$@'
+
+deploy-test-tooling: python-toolchain-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		"$(PYTHON)" -m pytest -q -p no:cacheprovider -m 'not integration' scripts/test_deployment.py
+
+deploy-smoke: python-toolchain-check
+	@PYTHONPATH="$(INSURANCE_HUB_ROOT)" PYTHONDONTWRITEBYTECODE=1 KUBECTL="$(KUBECTL)" \
+		DOCKER="$(DOCKER)" GO="$(GO)" MAKE_COMMAND="$(MAKE)" \
+		"$(PYTHON)" -m pytest -q -s -p no:cacheprovider -m integration scripts/test_deployment.py
+
+_deploy-smoke-rpc:
+	GOWORK=off $(GO) test -mod=readonly -count=1 -tags=deployment \
+		-run '^TestDeployedDirectRPC_Echo$$' -json ./internal/service
 
 test-tooling: verify-tools python-toolchain-check
 	@MODULE_ROOT="$(CURDIR)" INSURANCE_HUB_ROOT="$(INSURANCE_HUB_ROOT)" \

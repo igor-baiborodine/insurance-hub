@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: payment-api
+          env:
+            - name: PAYMENT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-postgres-payment-writer-creds
+                  key: database-url
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-payment-reader-creds
+                  key: endpoint
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-payment-reader-creds
+                  key: access-key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: local-dev-minio-payment-reader-creds
+                  key: secret-key
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/payment-service/postgres
+              readOnly: true
+            - name: minio-ca
+              mountPath: /etc/payment-service/minio
+              readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/payment-service/kafka
+              readOnly: true
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: local-dev-postgres-payment-writer-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: minio-ca
+          secret:
+            secretName: local-dev-minio-payment-reader-creds
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 420
+        - name: kafka-ca
+          secret:
+            secretName: local-dev-payment-kafka-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 292

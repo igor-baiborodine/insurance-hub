@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: local-dev-all
+namePrefix: local-dev-
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      environment: local-dev
+resources:
+  - ../../../../apps/svc/payment/base
+images:
+  - name: insurance-hub-payment-api
+    newName: insurance-hub-payment-api
+    newTag: 1.0.0-local.000000000000
+configMapGenerator:
+  - name: payment-config
+    behavior: merge
+    literals:
+      - DEPLOYMENT_ENVIRONMENT=local-dev
+      - SERVICE_VERSION=git-000000000000
+      - DB_MAX_CONNS=4
+      - DB_CONNECT_TIMEOUT=3s
+      - DB_QUERY_TIMEOUT=1s
+      - MINIO_BUCKET=payments-import
+      - MINIO_FETCH_TIMEOUT=3s
+      - KAFKA_BROKERS=local-dev-kafka-kafka-bootstrap:9093
+      - KAFKA_REGISTERED_TOPIC=policy-registered
+      - KAFKA_CA_FILE=/etc/payment-service/kafka/ca.crt
+patches:
+  - path: deployment-patch.yaml
+    target:
+      kind: Deployment
+      name: payment-api
+  - path: network-policy-patch.yaml
+    target:
+      kind: NetworkPolicy
+      name: payment-api
+replacements:
+  - source:
+      kind: ConfigMap
+      name: payment-config
+      fieldPath: data.SERVICE_VERSION
+    targets:
+      - select:
+          kind: Deployment
+          name: payment-api
+        fieldPaths:
+          - metadata.labels.app\.kubernetes\.io/version
+          - spec.template.metadata.labels.app\.kubernetes\.io/version
+        options:
+          create: true

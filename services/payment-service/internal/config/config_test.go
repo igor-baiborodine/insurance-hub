@@ -497,9 +497,14 @@ func TestLoad_AllowsEmptyEndpointWhenTelemetryIsDisabled(t *testing.T) {
 	}
 }
 
+// mapLookup overlays test values on valid dependency settings so that each test varies only
+// the settings it names.
 func mapLookup(values map[string]string) lookupEnv {
 	return func(name string) (string, bool) {
-		value, exists := values[name]
+		if value, exists := values[name]; exists {
+			return value, true
+		}
+		value, exists := validDependencySettings()[name]
 		return value, exists
 	}
 }
@@ -596,6 +601,197 @@ func TestErrorDetails_UsesOnlyValidatorOwnedFields(t *testing.T) {
 					test.setting,
 					test.reason,
 				)
+			}
+		})
+	}
+}
+
+const sensitiveMarker = "sensitive-marker-7f3a"
+
+func validDependencySettings() map[string]string {
+	return map[string]string{
+		databaseURLSetting: "postgres://go_payment_writer:" + sensitiveMarker +
+			"@postgres-rw.payment.svc:5432/payment?sslmode=verify-full" +
+			"&sslrootcert=/etc/payment-service/postgres/ca.crt",
+		objectEndpointSetting:  "https://minio.payment.svc:9000",
+		objectAccessKeySetting: "payment-access-" + sensitiveMarker,
+		objectSecretKeySetting: "payment-secret-" + sensitiveMarker,
+		objectCAFileSetting:    "/etc/payment-service/minio/ca.crt",
+		kafkaBrokersSetting:    "kafka-bootstrap.data.svc:9093, kafka-1.data.svc:9093",
+		kafkaCAFileSetting:     "/etc/payment-service/kafka/ca.crt",
+	}
+}
+
+func TestLoad_DependencySettings(t *testing.T) {
+	// given
+	lookup := mapLookup(nil)
+
+	// when
+	got, err := load(lookup)
+	// then
+	if err != nil {
+		t.Fatalf("load dependency settings: %v", err)
+	}
+	if got.StartupTimeout != 10*time.Second {
+		t.Errorf("StartupTimeout = %v, want 10s", got.StartupTimeout)
+	}
+	if got.Database.MaxConnections != 4 || got.Database.ConnectTimeout != 3*time.Second ||
+		got.Database.QueryTimeout != time.Second {
+		t.Errorf("database limits = %+v", got.Database)
+	}
+	if got.ObjectStore.Endpoint.String() != "https://minio.payment.svc:9000" ||
+		got.ObjectStore.Bucket != "payments-import" ||
+		got.ObjectStore.FetchTimeout != 3*time.Second {
+		t.Errorf(
+			"object store = (%s, %q, %v)",
+			got.ObjectStore.Endpoint,
+			got.ObjectStore.Bucket,
+			got.ObjectStore.FetchTimeout,
+		)
+	}
+	wantBrokers := []string{"kafka-bootstrap.data.svc:9093", "kafka-1.data.svc:9093"}
+	if fmt.Sprint(got.Kafka.Brokers) != fmt.Sprint(wantBrokers) ||
+		got.Kafka.RegisteredTopic != "policy-registered" {
+		t.Errorf("kafka = %+v", got.Kafka)
+	}
+	for _, format := range []string{"%v", "%+v", "%#v"} {
+		if formatted := fmt.Sprintf(
+			format,
+			got,
+		); strings.Contains(
+			formatted,
+			sensitiveMarker,
+		) {
+			t.Errorf("formatting with %s exposes a credential", format)
+		}
+	}
+}
+
+func TestLoad_AllowsPlainHTTPObjectStoreWithoutCA(t *testing.T) {
+	// given
+	lookup := mapLookup(map[string]string{
+		objectEndpointSetting: "http://minio.payment.svc:9000",
+		objectCAFileSetting:   "",
+	})
+
+	// when
+	got, err := load(lookup)
+	// then
+	if err != nil {
+		t.Fatalf("load HTTP object store: %v", err)
+	}
+	if got.ObjectStore.Endpoint.Scheme != "http" {
+		t.Errorf("scheme = %q, want http", got.ObjectStore.Endpoint.Scheme)
+	}
+}
+
+func TestLoad_RejectsInvalidDependencySettingsWithoutEchoingValues(t *testing.T) {
+	// given
+	validURL := validDependencySettings()[databaseURLSetting]
+	tests := []struct {
+		name    string
+		values  map[string]string
+		setting string
+		reason  string
+	}{
+		{
+			"missing database URL",
+			map[string]string{databaseURLSetting: ""},
+			databaseURLSetting, "is required",
+		},
+		{
+			"unverified database TLS",
+			map[string]string{
+				databaseURLSetting: strings.Replace(
+					validURL,
+					"verify-full",
+					"require",
+					1,
+				),
+			},
+			databaseURLSetting,
+			"must require TLS hostname and CA verification",
+		},
+		{
+			"foreign database",
+			map[string]string{
+				databaseURLSetting: strings.Replace(
+					validURL,
+					"/payment?",
+					"/policy?",
+					1,
+				),
+			},
+			databaseURLSetting,
+			"must identify the Payment database",
+		},
+		{
+			"missing object secret key",
+			map[string]string{objectSecretKeySetting: ""},
+			objectSecretKeySetting, "is required",
+		},
+		{
+			"object endpoint with credentials",
+			map[string]string{
+				objectEndpointSetting: "https://user:" + sensitiveMarker + "@minio:9000",
+			},
+			objectEndpointSetting,
+			"must be an HTTP or HTTPS origin URL",
+		},
+		{
+			"HTTPS object store without CA",
+			map[string]string{objectCAFileSetting: ""},
+			objectCAFileSetting, "is required for HTTPS object storage",
+		},
+		{
+			"foreign bucket",
+			map[string]string{objectBucketSetting: "policies"},
+			objectBucketSetting, "must match the fixed payments-import bucket",
+		},
+		{
+			"missing brokers",
+			map[string]string{kafkaBrokersSetting: ""},
+			kafkaBrokersSetting, "is required",
+		},
+		{
+			"broker without port",
+			map[string]string{kafkaBrokersSetting: "kafka-bootstrap.data.svc"},
+			kafkaBrokersSetting, "must contain comma-separated host:port brokers",
+		},
+		{
+			"foreign topic",
+			map[string]string{kafkaRegisteredSetting: "policy-terminated"},
+			kafkaRegisteredSetting, "must select the Policy registration topic",
+		},
+		{
+			"missing Kafka CA",
+			map[string]string{kafkaCAFileSetting: ""},
+			kafkaCAFileSetting, "is required",
+		},
+		{
+			"zero startup timeout",
+			map[string]string{startupTimeoutSetting: "0s"},
+			startupTimeoutSetting, "must be a positive duration",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := load(mapLookup(test.values))
+
+			// then
+			if err == nil {
+				t.Fatal("invalid dependency setting accepted")
+			}
+			setting, reason := kitconfig.ErrorDetails(err)
+			if setting != test.setting || reason != test.reason {
+				t.Errorf(
+					"safe details = (%q, %q), want (%q, %q)",
+					setting, reason, test.setting, test.reason,
+				)
+			}
+			if strings.Contains(fmt.Sprintf("%v %+v", err, err), sensitiveMarker) {
+				t.Error("error exposes a sensitive value")
 			}
 		})
 	}

@@ -10,17 +10,7 @@
     ],
     "user": "65532:65532",
     "platform": "linux/amd64",
-    "lifecycle": {
-      "containerPort": 8081,
-      "path": "/livez",
-      "expectedBody": "live\n",
-      "environment": {
-        "HTTP_ADDR": "0.0.0.0:8080",
-        "GRPC_ADDR": "0.0.0.0:9090",
-        "HEALTH_ADDR": "0.0.0.0:8081"
-      },
-      "stopSeconds": 10
-    }
+    "lifecycle": null
   },
   "candidate": {
     "copyPaths": [
