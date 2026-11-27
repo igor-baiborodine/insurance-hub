@@ -107,8 +107,8 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration`     | Race-enabled production-composition tests on loopback listeners; `check-go-pr` writes their profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, readonly modules, and a C compiler. |
-| `make build`                | Every package under `./...` and an executable `server`, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
+| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus the schema migration, status and writer-access smokes against an owned disposable TLS PostgreSQL container. `check-go-pr` writes their profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, readonly modules, a C compiler and the cached pinned PostgreSQL image or registry access. |
+| `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with the 75% coverage gate, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
 | `make test-tooling`         | Pytest-managed Git-free disposable copies containing controlled Go-format, lint, test, dependency, schema, compatibility, and generated-output defects; each intended gate must reject its defect without mutation. Child commands have 20-minute phase deadlines inside a 60-minute suite deadline, 30-second activity heartbeats, and bounded process-group cleanup. | Verified Python and Go tools; temporary storage and the network/cache prerequisites of nested checks. |
@@ -119,7 +119,9 @@ returns 130 or 143 when invoked through `scripts/test-tooling.sh`. GNU Make repo
 the runner's numeric status. The runner disables pytest temporary-path retention, so its disposable
 tooling fixtures are removed after successful, failed, and interrupted sessions.
 
-The service has no generated mocks, migrations, or Go workspace.
+The service has no generated mocks or Go workspace. Its schema migrations run only from the
+operator command `./cmd/migrate`, never from the serving image or during startup; the server does
+not migrate the schema.
 Use the [deployment runbook](deployment-runbook.md) for deployment validation and operator commands.
 
 ### Go file selection
@@ -360,7 +362,8 @@ fixes with behavior tests and update intentional differences explicitly through 
 | --- | --- |
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
-| `internal/postgres`, `internal/objectstore` | Verified PostgreSQL writer pool with its readiness query, and the bounded `payments-import` read check. |
+| `cmd/migrate`, `internal/administration` | Operator-run `migrate`/`status` against one protected target enrollment: target identity checks, an advisory lock, the versioned schema and its history in one transaction, and exact schema inspection. |
+| `internal/postgres`, `internal/objectstore` | Verified PostgreSQL writer pool with its readiness query, the separate verified migrator connection that assumes the `payment` owner role, and the bounded `payments-import` read check. |
 | `internal/kafka` | TLS registration-topic client whose preflight requests only topic metadata. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Echo registration, request validation, deadlines, size limits, safe status mapping and final-status observation. |
@@ -375,6 +378,8 @@ below it.
 ```mermaid
 flowchart TD
     entry["cmd/server"] --> composition["internal/service"]
+    migrate["cmd/migrate"] --> composition
+    composition --> administration["internal/administration"]
     entry --> config["internal/config"]
     entry --> sharedLogger["servicekit/logger"]
     entry --> sharedTelemetry["servicekit/telemetry"]

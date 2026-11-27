@@ -190,7 +190,14 @@ def test_qa_refuses_placeholder_activation_and_runtime(
 ) -> None:
     # given
     items = payment.validate_render("qa", payment.render("qa"))
-    assert items["ConfigMap"]["data"]["SERVICE_VERSION"] == payment.PLACEHOLDER
+    items["ConfigMap"]["data"]["SERVICE_VERSION"] = payment.PLACEHOLDER
+    deployment = items["Deployment"]
+    template = deployment["spec"]["template"]
+    for metadata in (deployment["metadata"], template["metadata"]):
+        metadata["labels"][payment.VERSION_LABEL] = payment.PLACEHOLDER
+    template["spec"]["containers"][0]["image"] = (
+        "ghcr.io/igor-baiborodine/insurance-hub/payment-api:0.0.0-unpublished"
+    )
     monkeypatch.setattr(payment, "render", lambda _environment: yaml.safe_dump_all(items.values()))
     monkeypatch.setenv("DEPLOY_ENV", "qa")
     monkeypatch.setenv("DEPLOY_CONTEXT", "qa-insurance-hub")
@@ -325,7 +332,11 @@ def test_release_prepares_published_version_and_activation(
     repository = "igor-baiborodine/insurance-hub"
     sha = "0123456789ab" + "c" * 28
     parent = tmp_path / QA / "kustomization.yaml"
-    assert "./payment" not in yaml.safe_load(parent.read_text())["resources"]
+    aggregate = yaml.safe_load(parent.read_text())
+    aggregate["resources"] = [
+        resource for resource in aggregate["resources"] if resource != "./payment"
+    ]
+    parent.write_text(yaml.safe_dump(aggregate))
     previous = parent.read_bytes()
 
     def inventory() -> dict:

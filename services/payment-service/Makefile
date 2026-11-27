@@ -55,9 +55,13 @@ PGX_VERSION := v5.11.0
 MINIO_GO_VERSION := v7.4.1
 FRANZ_GO_VERSION := v1.22.2
 KMSG_VERSION := v1.15.0
+GOOSE_VERSION := v3.27.0
+TESTCONTAINERS_VERSION := v0.44.0
+BUILD_EXECUTABLES := server migrate
 TEST_PACKAGES ?= ./...
 COVERAGE_PACKAGES := ./cmd/... ./internal/...
 INTEGRATION_COVERAGE_FILE ?=
+COVERAGE_EXCLUDE_PATHS := internal/testing
 HEAD_REVISION := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --verify HEAD 2>/dev/null)
 HEAD_SHORT := $(shell git -C $(INSURANCE_HUB_ROOT) rev-parse --short=12 HEAD 2>/dev/null)
 HEAD_CREATED := $(shell git -C $(INSURANCE_HUB_ROOT) show -s --format=%cI HEAD 2>/dev/null)
@@ -149,6 +153,8 @@ update-deps:
 	GOWORK=off $(GO) get \
 		github.com/jackc/pgx/v5@$(PGX_VERSION) \
 		github.com/minio/minio-go/v7@$(MINIO_GO_VERSION) \
+		github.com/pressly/goose/v3@$(GOOSE_VERSION) \
+		github.com/testcontainers/testcontainers-go/modules/postgres@$(TESTCONTAINERS_VERSION) \
 		github.com/twmb/franz-go@$(FRANZ_GO_VERSION) \
 		github.com/twmb/franz-go/pkg/kmsg@$(KMSG_VERSION) \
 		buf.build/go/protovalidate@$(PROTOVALIDATE_GO_VERSION) \
@@ -196,12 +202,16 @@ check:
 		COVERAGE_FILE="$$profile_dir/coverage.txt" \
 		INTEGRATION_COVERAGE_FILE="$$profile_dir/integration-coverage.txt"
 
-test-integration:
+# Include the migration smoke in the module gate so the coverage threshold measures its SQL path.
+coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
+
+test-integration: ## Run the service composition and disposable PostgreSQL migration and writer-access smoke tests (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
-	GOWORK=off $(GO) test -mod=readonly -count=1 -race \
-		-run TestRun_ProductionComposition ./internal/service \
+	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess)$$' \
+		./internal/service ./internal/administration \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:
@@ -278,4 +288,6 @@ help: ## Show the explicit setup and validation entry points without installing 
 	@printf '%s\n' 'Go service commands (see README.md for the full interface):' \
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
+		'  make build            Compile the server and migrator' \
+		'  make test-integration Run service composition and disposable PostgreSQL migration and access smoke tests' \
 		'  make run              Start the service with environment configuration'
