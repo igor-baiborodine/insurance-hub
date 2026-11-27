@@ -18,7 +18,10 @@ import (
 )
 
 func TestNewStore_RequiresPool(t *testing.T) {
+	// when
 	store, err := NewStore(nil)
+
+	// then
 	if store != nil || err == nil {
 		t.Fatalf("NewStore(nil) = (%v, %v), want error", store, err)
 	}
@@ -33,12 +36,13 @@ func TestStoreReadOnly_UsesBoundedReadTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	workCalls := 0
-
-	// when
-	err = store.readOnly(t.Context(), func(*dbgen.Queries) error {
+	work := func(*dbgen.Queries) error {
 		workCalls++
 		return nil
-	})
+	}
+
+	// when
+	err = store.readOnly(t.Context(), work)
 	// then
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +62,7 @@ func TestStoreReadOnly_UsesBoundedReadTransaction(t *testing.T) {
 }
 
 func TestStoreReadOnly_PreservesFailures(t *testing.T) {
+	// given
 	workErr := errors.New("work marker")
 	commitErr := errors.New("commit marker")
 	rollbackErr := errors.New("rollback marker")
@@ -97,11 +102,10 @@ func TestStoreReadOnly_PreservesFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			work := func(*dbgen.Queries) error { return test.workErr }
 
 			// when
-			err = store.readOnly(t.Context(), func(*dbgen.Queries) error {
-				return test.workErr
-			})
+			err = store.readOnly(t.Context(), work)
 
 			// then
 			if err == nil {
@@ -117,6 +121,7 @@ func TestStoreReadOnly_PreservesFailures(t *testing.T) {
 }
 
 func TestStoreListAccounts_PreservesQueryFailure(t *testing.T) {
+	// given
 	queryErr := errors.New("query marker")
 	store, err := NewStore(&fakeTxBeginner{tx: &fakeTx{
 		queryErr:    queryErr,
@@ -126,15 +131,20 @@ func TestStoreListAccounts_PreservesQueryFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// when
 	_, err = store.ListAccounts(t.Context())
+
+	// then
 	if !errors.Is(err, queryErr) {
 		t.Fatalf("ListAccounts() error = %v, want query marker", err)
 	}
 }
 
 func TestStoreReadAccountBalance_ValidatesDatabaseValues(t *testing.T) {
+	// given
 	queryErr := errors.New("query marker")
 	validTime := pgtype.Timestamp{Time: time.Now(), Valid: true}
+	businessDate := time.Date(2026, time.January, 8, 0, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
 		name string
 		row  pgx.Row
@@ -157,6 +167,7 @@ func TestStoreReadAccountBalance_ValidatesDatabaseValues(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			store, err := NewStore(&fakeTxBeginner{tx: &fakeTx{
 				row:         test.row,
 				rollbackErr: pgx.ErrTxClosed,
@@ -165,7 +176,14 @@ func TestStoreReadAccountBalance_ValidatesDatabaseValues(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err = store.ReadAccountBalance(t.Context(), "SYN-ACCOUNT-A", time.Now())
+			// when
+			_, err = store.ReadAccountBalance(
+				t.Context(),
+				"SYN-ACCOUNT-A",
+				businessDate,
+			)
+
+			// then
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("ReadAccountBalance() error = %v, want %q", err, test.want)
 			}
@@ -174,16 +192,21 @@ func TestStoreReadAccountBalance_ValidatesDatabaseValues(t *testing.T) {
 }
 
 func TestBeginError_PrefersContextFailure(t *testing.T) {
+	// given
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
+	// when
 	err := beginError(ctx, errors.New("begin marker"))
+
+	// then
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("beginError() = %v, want context canceled", err)
 	}
 }
 
 func TestBeginError_ClassifiesConnectionFailure(t *testing.T) {
+	// given
 	config, err := pgconn.ParseConfig("postgres://payment@127.0.0.1/payment")
 	if err != nil {
 		t.Fatal(err)
@@ -200,24 +223,30 @@ func TestBeginError_ClassifiesConnectionFailure(t *testing.T) {
 		t.Fatal("ConnectConfig() error = nil")
 	}
 
+	// when
 	err = beginError(t.Context(), connectErr)
+
+	// then
 	if !errors.Is(err, application.ErrStorageUnavailable) ||
 		!errors.Is(err, dialErr) {
 		t.Fatalf("beginError() = %v, want storage unavailable and dial marker", err)
 	}
 }
 
-func TestAccountProjection_ValidatesAndNormalizesTimestamps(t *testing.T) {
+func TestAccountProjection_NormalizesTimestamps(t *testing.T) {
+	// given
 	west := time.FixedZone("west", -5*60*60)
 	created := time.Date(2026, 1, 1, 1, 2, 3, 0, west)
 	updated := created.Add(time.Hour)
 
+	// when
 	account, err := accountProjection(
 		"SYN-ACCOUNT-A",
 		"SYN-POLICY-B",
 		pgtype.Timestamp{Time: created, Valid: true},
 		pgtype.Timestamp{Time: updated, Valid: true},
 	)
+	// then
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,18 +256,28 @@ func TestAccountProjection_ValidatesAndNormalizesTimestamps(t *testing.T) {
 		account.Updated.Location() != time.UTC {
 		t.Fatalf("accountProjection() = %+v", account)
 	}
+}
 
-	if _, err := accountProjection(
+func TestAccountProjection_RejectsMissingTimestamp(t *testing.T) {
+	// given
+	updated := pgtype.Timestamp{Time: time.Now(), Valid: true}
+
+	// when
+	_, err := accountProjection(
 		"SYN-ACCOUNT-A",
 		"SYN-POLICY-B",
 		pgtype.Timestamp{},
-		pgtype.Timestamp{Time: updated, Valid: true},
-	); err == nil {
+		updated,
+	)
+
+	// then
+	if err == nil {
 		t.Fatal("accountProjection() accepted a missing timestamp")
 	}
 }
 
 func TestDecimalValue_FormatsExactSignedAmounts(t *testing.T) {
+	// given
 	for _, test := range []struct {
 		name  string
 		value pgtype.Numeric
@@ -260,7 +299,10 @@ func TestDecimalValue_FormatsExactSignedAmounts(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// when
 			got, err := decimalValue(test.value)
+
+			// then
 			if err != nil || got != test.want {
 				t.Fatalf("decimalValue() = (%q, %v), want %q", got, err, test.want)
 			}
@@ -288,15 +330,30 @@ func validNumeric(coefficient int64, exponent int32) pgtype.Numeric {
 }
 
 func TestDecimalValue_RejectsInvalidRepresentations(t *testing.T) {
-	for _, value := range []pgtype.Numeric{
-		{},
-		{Valid: true, NaN: true},
-		{Valid: true, InfinityModifier: pgtype.Infinity},
+	// given
+	for _, test := range []struct {
+		name  string
+		value pgtype.Numeric
+	}{
+		{name: "missing", value: pgtype.Numeric{}},
+		{name: "not a number", value: pgtype.Numeric{Valid: true, NaN: true}},
+		{
+			name: "infinite",
+			value: pgtype.Numeric{
+				Valid: true, InfinityModifier: pgtype.Infinity,
+			},
+		},
 	} {
-		if _, err := decimalValue(value); err == nil ||
-			!strings.Contains(err.Error(), "invalid numeric") {
-			t.Fatalf("decimalValue(%+v) error = %v", value, err)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			_, err := decimalValue(test.value)
+
+			// then
+			if err == nil ||
+				!strings.Contains(err.Error(), "invalid numeric") {
+				t.Fatalf("decimalValue(%+v) error = %v", test.value, err)
+			}
+		})
 	}
 }
 

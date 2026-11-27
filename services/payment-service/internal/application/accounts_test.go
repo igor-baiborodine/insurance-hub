@@ -8,6 +8,7 @@ import (
 )
 
 func TestNewAccountReads_RequiresDependencies(t *testing.T) {
+	// given
 	store := &fakeAccountStore{}
 	for _, test := range []struct {
 		name  string
@@ -18,7 +19,10 @@ func TestNewAccountReads_RequiresDependencies(t *testing.T) {
 		{"missing clock", store, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// when
 			reads, err := NewAccountReads(test.store, test.now)
+
+			// then
 			if reads != nil || err == nil {
 				t.Fatalf("NewAccountReads() = (%v, %v)", reads, err)
 			}
@@ -69,13 +73,17 @@ func TestAccountReads_BalanceUsesOneUTCBusinessDate(t *testing.T) {
 }
 
 func TestAccountReads_ListReturnsAccounts(t *testing.T) {
+	// given
 	want := []Account{{PolicyAccountNumber: "SYN-ACCOUNT-A"}}
 	reads, err := NewAccountReads(&fakeAccountStore{accounts: want}, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// when
 	got, err := reads.List(t.Context())
+
+	// then
 	if err != nil || len(got) != 1 || got[0] != want[0] {
 		t.Fatalf("List() = (%+v, %v), want %+v", got, err, want)
 	}
@@ -90,13 +98,34 @@ func TestAccountReads_PreservesFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// when
-	_, listErr := reads.List(t.Context())
-	_, balanceErr := reads.Balance(t.Context(), "missing")
+	for _, test := range []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "list",
+			call: func() error {
+				_, err := reads.List(t.Context())
+				return err
+			},
+		},
+		{
+			name: "balance",
+			call: func() error {
+				_, err := reads.Balance(t.Context(), "missing")
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// when
+			err := test.call()
 
-	// then
-	if !errors.Is(listErr, storeErr) || !errors.Is(balanceErr, storeErr) {
-		t.Fatalf("failures = (%v, %v), want storage marker", listErr, balanceErr)
+			// then
+			if !errors.Is(err, storeErr) {
+				t.Fatalf("error = %v, want storage marker", err)
+			}
+		})
 	}
 }
 

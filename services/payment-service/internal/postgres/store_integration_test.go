@@ -66,8 +66,13 @@ func TestRun_PaymentAccountReads(t *testing.T) {
 		{"outgoing debit effective date", time.Date(2026, 6, 2, 23, 0, 0, 0, time.UTC), "-7.50"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// given
 			businessTime = test.date
+
+			// when
 			got, err := reads.Balance(ctx, "SYN-ACCOUNT-A")
+
+			// then
 			if err != nil || got.Balance != test.balance {
 				t.Fatalf("Balance() = (%+v, %v), want %s", got, err, test.balance)
 			}
@@ -81,16 +86,21 @@ func TestRun_PaymentAccountReads(t *testing.T) {
 			}
 		})
 	}
-	if _, err := reads.Balance(
-		ctx,
-		"SYN-ACCOUNT-MISSING",
-	); !errors.Is(
-		err,
-		application.ErrAccountNotFound,
-	) {
-		t.Fatalf("missing Balance() error = %v, want account not found", err)
-	}
-	if after := businessCounts(t, ctx, fixture); after != before {
+	t.Run("missing account", func(t *testing.T) {
+		// when
+		_, err := reads.Balance(ctx, "SYN-ACCOUNT-MISSING")
+
+		// then
+		if !errors.Is(err, application.ErrAccountNotFound) {
+			t.Fatalf("missing Balance() error = %v, want account not found", err)
+		}
+	})
+
+	// when
+	after := businessCounts(t, ctx, fixture)
+
+	// then
+	if after != before {
 		t.Fatalf("account reads changed rows: before %q, after %q", before, after)
 	}
 }
