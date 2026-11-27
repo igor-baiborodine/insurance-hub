@@ -84,13 +84,24 @@ type managedDependency interface {
 
 type eventWorker interface {
 	Preflight(context.Context) error
+	Check(context.Context) error
+	Run(context.Context) error
+	Shutdown(context.Context) error
+}
+
+type kafkaDependency interface {
+	Preflight(context.Context) error
 }
 
 type dependencies struct {
-	openPool        func(context.Context, config.Database) (databasePool, error)
-	checkDatabase   func(context.Context, postgres.QueryRower, time.Duration) error
-	newObjectStore  func(config.ObjectStore) (managedDependency, error)
-	newWorker       func(paymentkafka.Settings) (eventWorker, error)
+	openPool              func(context.Context, config.Database) (databasePool, error)
+	checkDatabase         func(context.Context, postgres.QueryRower, time.Duration) error
+	newObjectStore        func(config.ObjectStore) (managedDependency, error)
+	newWorker             func(paymentkafka.Settings) (kafkaDependency, error)
+	newRegistrationWorker func(
+		paymentkafka.RegistrationSettings,
+		*paymentkafka.RegistrationHandler,
+	) (eventWorker, error)
 	newAccountReads func(databasePool) (transport.AccountReads, error)
 	listen          func(string, string) (net.Listener, error)
 	newTelemetry    func(context.Context, string, config.Telemetry) (telemetryProvider, error)
@@ -109,8 +120,14 @@ func productionDependencies() dependencies {
 		},
 		checkDatabase:  postgres.CheckReadiness,
 		newObjectStore: newObjectStoreDependency,
-		newWorker: func(settings paymentkafka.Settings) (eventWorker, error) {
+		newWorker: func(settings paymentkafka.Settings) (kafkaDependency, error) {
 			return paymentkafka.NewWorker(settings)
+		},
+		newRegistrationWorker: func(
+			settings paymentkafka.RegistrationSettings,
+			handler *paymentkafka.RegistrationHandler,
+		) (eventWorker, error) {
+			return paymentkafka.NewRegistrationWorker(settings, handler)
 		},
 		newAccountReads: func(pool databasePool) (transport.AccountReads, error) {
 			store, err := postgres.NewStore(pool)
@@ -201,7 +218,11 @@ func newGatewayConnection(
 type runningService struct {
 	pool               databasePool
 	objectStore        managedDependency
+	kafka              kafkaDependency
 	worker             eventWorker
+	workerCancel       context.CancelFunc
+	workerResult       chan error
+	workerWG           sync.WaitGroup
 	state              *health.State
 	provider           telemetryProvider
 	grpcServer         grpcServer
@@ -265,7 +286,7 @@ func run(
 	if err := runtime.objectStore.Check(startupCtx); err != nil {
 		return fail(fmt.Errorf("run service: verify MinIO: %w", err))
 	}
-	if err := runtime.configureWorker(settings.Kafka, deps); err != nil {
+	if err := runtime.configureWorker(settings.Kafka, logger, provider, deps); err != nil {
 		return fail(fmt.Errorf("run service: configure Kafka: %w", err))
 	}
 	observer, err := telemetry.NewRequestObserver(logger, provider.MeterProvider())
@@ -334,15 +355,19 @@ func run(
 		}
 	}
 	if err == nil {
-		if checkErr := runtime.worker.Preflight(readyContext); checkErr != nil {
+		if checkErr := runtime.kafka.Preflight(readyContext); checkErr != nil {
 			err = fmt.Errorf("verify Kafka: %w", checkErr)
 		}
+	}
+	if err == nil {
+		runtime.startWorker(ctx)
+		err = runtime.checkWorker(readyContext)
 	}
 	cancelReady()
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	// Readiness includes PostgreSQL and MinIO; liveness stays independent of them.
+	// Readiness includes PostgreSQL, MinIO and an enabled registration worker.
 	state, err := health.NewState(settings.ProbeTimeout, func(probeCtx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
@@ -350,7 +375,10 @@ func run(
 		if err := checkDatabase(probeCtx); err != nil {
 			return err
 		}
-		return runtime.objectStore.Check(probeCtx)
+		if err := runtime.objectStore.Check(probeCtx); err != nil {
+			return err
+		}
+		return runtime.checkWorker(probeCtx)
 	})
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
@@ -389,6 +417,8 @@ func run(
 		return fail(unexpectedServeError("business HTTP", err))
 	case err := <-managementResult:
 		return fail(unexpectedServeError("management HTTP", err))
+	case err := <-runtime.workerResult:
+		return fail(unexpectedWorkerError(err))
 	default:
 	}
 	runtime.state.SetReady(true)
@@ -407,6 +437,10 @@ func run(
 		serveErr = unexpectedServeError("business HTTP", err)
 	case err := <-managementResult:
 		serveErr = unexpectedServeError("management HTTP", err)
+	case err := <-runtime.workerResult:
+		if ctx.Err() == nil {
+			serveErr = unexpectedWorkerError(err)
+		}
 	}
 	return errors.Join(
 		serveErr,
@@ -414,7 +448,12 @@ func run(
 	)
 }
 
-func (runtime *runningService) configureWorker(settings config.Kafka, deps dependencies) error {
+func (runtime *runningService) configureWorker(
+	settings config.Kafka,
+	logger *slog.Logger,
+	provider telemetryProvider,
+	deps dependencies,
+) error {
 	caCertificate, err := readBoundedFile(settings.CAFile, 1<<20)
 	if err != nil {
 		return errors.New("read Kafka CA file")
@@ -422,11 +461,74 @@ func (runtime *runningService) configureWorker(settings config.Kafka, deps depen
 	if len(bytes.TrimSpace(caCertificate)) == 0 {
 		return errors.New("read Kafka CA file: empty certificate")
 	}
-	runtime.worker, err = deps.newWorker(paymentkafka.Settings{
+	trusted := paymentkafka.Settings{
 		Brokers: settings.Brokers, Topic: settings.RegisteredTopic,
 		ClientID: "payment-service", CACert: caCertificate,
-	})
+	}
+	observer, err := telemetry.NewEventObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Consume,
+	)
+	if err != nil {
+		return err
+	}
+	if !settings.Consume {
+		runtime.kafka, err = deps.newWorker(trusted)
+		return err
+	}
+	store, err := postgres.NewStore(runtime.pool)
+	if err != nil {
+		return err
+	}
+	registrations, err := application.NewPolicyRegistrations(store, time.Now)
+	if err != nil {
+		return err
+	}
+	handler, err := paymentkafka.NewRegistrationHandler(registrations)
+	if err != nil {
+		return err
+	}
+	runtime.worker, err = deps.newRegistrationWorker(
+		paymentkafka.RegistrationSettings{
+			Settings: trusted, Group: settings.Group,
+			Observe: observer.Start, CommitFailure: observer.RecordCommitFailure,
+		},
+		handler,
+	)
+	if err == nil {
+		runtime.kafka = runtime.worker
+	}
 	return err
+}
+
+func (runtime *runningService) startWorker(parent context.Context) {
+	if runtime.worker == nil {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(parent)
+	runtime.workerCancel = cancel
+	runtime.workerResult = make(chan error, 1)
+	runtime.workerWG.Add(1)
+	go func() {
+		defer runtime.workerWG.Done()
+		runtime.workerResult <- runtime.worker.Run(workerCtx)
+	}()
+}
+
+func (runtime *runningService) checkWorker(ctx context.Context) error {
+	if runtime.worker == nil {
+		return nil
+	}
+	return runtime.worker.Check(ctx)
+}
+
+func unexpectedWorkerError(err error) error {
+	if err == nil {
+		err = errors.New("stopped unexpectedly")
+	}
+	return fmt.Errorf("registration worker stopped: %w", err)
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -473,6 +575,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	)
 	defer cancelGraceful()
 	var shutdownErrors []error
+	if runtime.workerCancel != nil {
+		runtime.workerCancel()
+	}
 
 	if runtime.tracker != nil {
 		runtime.tracker.beginDrain()
@@ -569,6 +674,26 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	}
 	if runtime.objectStore != nil {
 		runtime.objectStore.Close()
+	}
+	if runtime.workerCancel != nil {
+		workerStopped := make(chan struct{})
+		go func() { runtime.workerWG.Wait(); close(workerStopped) }()
+		select {
+		case <-workerStopped:
+		case <-graceful.Done():
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("stop registration worker: %w", graceful.Err()),
+			)
+		}
+	}
+	if runtime.worker != nil {
+		if err := runtime.worker.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown registration worker: %w", err),
+			)
+		}
 	}
 	if runtime.pool != nil {
 		runtime.pool.Close()

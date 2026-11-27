@@ -211,16 +211,16 @@ check:
 		COVERAGE_FILE="$$profile_dir/coverage.txt" \
 		INTEGRATION_COVERAGE_FILE="$$profile_dir/integration-coverage.txt"
 
-# Include the PostgreSQL smokes in the module gate so coverage measures their SQL paths.
+# Include the PostgreSQL and Kafka smokes in the module gate so coverage measures their paths.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
-test-integration: ## Run service composition and disposable PostgreSQL smokes (Docker required)
+test-integration: ## Run service composition and disposable PostgreSQL/Kafka smokes (Docker required)
 	@if [ -n "$(strip $(INTEGRATION_COVERAGE_FILE))" ]; then \
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads)$$' \
-		./internal/service ./internal/administration ./internal/postgres \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction|PaymentRegistrationWorker)$$' \
+		./internal/service ./internal/administration ./internal/postgres ./internal/testing \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:
@@ -319,6 +319,6 @@ help: ## Show the explicit setup and validation entry points without installing 
 		'  make bootstrap-tools  Install pinned local tools explicitly' \
 		'  make check            Validate the module without source mutation' \
 		'  make build            Compile the server and migrator' \
-		'  make test-integration Run service composition and disposable PostgreSQL migration and access smoke tests' \
+		'  make test-integration Run service composition and disposable PostgreSQL/Kafka worker smoke tests' \
 		'  make gen-sql          Regenerate sqlc queries; check-sql-drift verifies them' \
 		'  make run              Start the service with environment configuration'
