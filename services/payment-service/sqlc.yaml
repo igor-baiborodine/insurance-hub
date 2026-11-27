@@ -1,0 +1,11 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/administration/migrations/00001_payment.sql"
+    queries: "internal/postgres/sql/queries.sql"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/postgres/dbgen"
+        sql_package: "pgx/v5"
+        emit_empty_slices: true
