@@ -2,34 +2,64 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 )
 
 type minioClient interface {
+	GetObject(context.Context, string, string, minio.GetObjectOptions) (*minio.Object, error)
 	ListObjects(context.Context, string, minio.ListObjectsOptions) <-chan minio.ObjectInfo
+	PutObject(
+		context.Context,
+		string,
+		string,
+		io.Reader,
+		int64,
+		minio.PutObjectOptions,
+	) (minio.UploadInfo, error)
+	StatObject(
+		context.Context,
+		string,
+		string,
+		minio.StatObjectOptions,
+	) (minio.ObjectInfo, error)
+	RemoveObject(context.Context, string, string, minio.RemoveObjectOptions) error
 }
 
-// Reader reads from the fixed payments-import bucket.
+type versionDelete func(context.Context, string, string) error
+
+// Reader reads and reconciles statements in the fixed payments-import bucket.
 type Reader struct {
-	client    minioClient
-	transport *http.Transport
-	bucket    string
+	client                minioClient
+	transport             *http.Transport
+	bucket                string
+	maximumStatementBytes int
+	fetchTimeout          time.Duration
+	deleteAccepted        versionDelete
 }
 
-// NewReader constructs the verified read-only object-store adapter.
+// NewReader constructs the verified bounded object-store adapter.
 func NewReader(settings config.ObjectStore) (*Reader, error) {
-	if settings.Endpoint == nil || settings.Bucket == "" || settings.FetchTimeout <= 0 {
+	if settings.Endpoint == nil || settings.Bucket == "" || settings.FetchTimeout <= 0 ||
+		settings.MaximumStatementBytes <= 0 {
 		return nil, errors.New(
 			"create object reader: configuration and limits are required",
 		)
@@ -62,7 +92,17 @@ func NewReader(settings config.ObjectStore) (*Reader, error) {
 		transport.CloseIdleConnections()
 		return nil, errors.New("create object reader: initialize client")
 	}
-	return &Reader{client: client, transport: transport, bucket: settings.Bucket}, nil
+	reader := &Reader{
+		client: client, transport: transport, bucket: settings.Bucket,
+		maximumStatementBytes: settings.MaximumStatementBytes,
+		fetchTimeout:          settings.FetchTimeout,
+	}
+	reader.deleteAccepted = newVersionDelete(
+		settings.Bucket,
+		client,
+		settings.FetchTimeout,
+	)
+	return reader, nil
 }
 
 // Close releases retained idle connections without owning remote resources.
@@ -71,6 +111,9 @@ func (reader *Reader) Close() {
 		reader.transport.CloseIdleConnections()
 	}
 }
+
+// Check verifies the required read boundary for service readiness.
+func (reader *Reader) Check(ctx context.Context) error { return reader.CheckReadAccess(ctx) }
 
 // CheckReadAccess performs a bounded non-mutating list against the payments-import bucket.
 func (reader *Reader) CheckReadAccess(ctx context.Context) error {
@@ -95,5 +138,286 @@ func (reader *Reader) CheckReadAccess(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// DiscoverStatements lists eligible source identities through the supplied UTC business date.
+func (reader *Reader) DiscoverStatements(
+	ctx context.Context,
+	businessDate time.Time,
+) ([]string, error) {
+	if reader == nil || reader.client == nil {
+		return nil, application.ErrStatementUnavailable
+	}
+	deadline := time.Date(
+		businessDate.UTC().Year(),
+		businessDate.UTC().Month(),
+		businessDate.UTC().Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	listCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	defer cancel()
+	dates := make(map[string]time.Time)
+	for item := range reader.client.ListObjects(
+		listCtx,
+		reader.bucket,
+		minio.ListObjectsOptions{Recursive: true},
+	) {
+		if item.Err != nil {
+			if err := listCtx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, application.ErrStatementUnavailable
+		}
+		if strings.HasPrefix(item.Key, "_processed_") {
+			continue
+		}
+		sourceName := item.Key
+		date, valid := application.StatementSourceDate(sourceName)
+		if !valid || date.After(deadline) {
+			continue
+		}
+		dates[sourceName] = date
+	}
+	if err := listCtx.Err(); err != nil {
+		return nil, err
+	}
+	sources := make([]string, 0, len(dates))
+	for sourceName := range dates {
+		sources = append(sources, sourceName)
+	}
+	sort.Slice(sources, func(left, right int) bool {
+		leftDate := dates[sources[left]]
+		rightDate := dates[sources[right]]
+		if leftDate.Equal(rightDate) {
+			return sources[left] < sources[right]
+		}
+		return leftDate.Before(rightDate)
+	})
+	return sources, nil
+}
+
+// ReadStatement captures and hashes one bounded source object without retrying the payload read.
+func (reader *Reader) ReadStatement(
+	ctx context.Context,
+	key string,
+) (application.StatementSnapshot, error) {
+	if reader == nil || reader.client == nil || !application.ValidStatementSourceName(key) {
+		return application.StatementSnapshot{}, application.ErrStatementUnavailable
+	}
+	return reader.readObject(ctx, key, key)
+}
+
+// ReadProcessedStatement reads accepted bytes only for durable-receipt recovery.
+func (reader *Reader) ReadProcessedStatement(
+	ctx context.Context,
+	sourceName string,
+) (application.StatementSnapshot, error) {
+	if reader == nil || reader.client == nil ||
+		!application.ValidStatementSourceName(sourceName) {
+		return application.StatementSnapshot{}, application.ErrStatementUnavailable
+	}
+	return reader.readObject(ctx, processedName(sourceName), sourceName)
+}
+
+func (reader *Reader) readObject(
+	ctx context.Context,
+	key string,
+	sourceName string,
+) (application.StatementSnapshot, error) {
+	snapshot, _, err := reader.readObjectWithVersion(ctx, key)
+	if err != nil {
+		return application.StatementSnapshot{}, err
+	}
+	snapshot.SourceName = sourceName
+	return snapshot, nil
+}
+
+// ArchiveStatement creates or verifies accepted bytes, then conditionally removes their source.
+func (reader *Reader) ArchiveStatement(
+	ctx context.Context,
+	snapshot application.StatementSnapshot,
+) error {
+	if reader == nil || reader.client == nil || reader.deleteAccepted == nil ||
+		!validSnapshot(snapshot) {
+		return application.ErrStatementInvalid
+	}
+	if err := reader.ensureProcessed(ctx, snapshot); err != nil {
+		return err
+	}
+	return reader.removeSource(ctx, snapshot)
+}
+
+func (reader *Reader) ensureProcessed(
+	ctx context.Context,
+	snapshot application.StatementSnapshot,
+) error {
+	key := processedName(snapshot.SourceName)
+	processed, err := reader.readObject(ctx, key, snapshot.SourceName)
+	if err == nil {
+		return matchingDigest(processed, snapshot.SHA256)
+	}
+	if !errors.Is(err, application.ErrStatementNotFound) {
+		return err
+	}
+	options := minio.PutObjectOptions{ContentType: "text/csv", SendContentMd5: true}
+	options.SetMatchETagExcept("*")
+	putCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	_, putErr := reader.client.PutObject(
+		putCtx,
+		reader.bucket,
+		key,
+		bytes.NewReader(snapshot.Content),
+		int64(len(snapshot.Content)),
+		options,
+	)
+	cancel()
+	processed, readErr := reader.readObject(ctx, key, snapshot.SourceName)
+	if readErr == nil {
+		return matchingDigest(processed, snapshot.SHA256)
+	}
+	if putErr != nil {
+		return application.ErrStatementUnavailable
+	}
+	return readErr
+}
+
+func (reader *Reader) removeSource(
+	ctx context.Context,
+	snapshot application.StatementSnapshot,
+) error {
+	current, versionID, err := reader.readObjectWithVersion(ctx, snapshot.SourceName)
+	if errors.Is(err, application.ErrStatementNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := matchingDigest(current, snapshot.SHA256); err != nil {
+		return err
+	}
+	if versionID == "" || versionID == "null" {
+		return application.ErrStatementUnavailable
+	}
+	deleteErr := reader.deleteAccepted(ctx, snapshot.SourceName, versionID)
+	after, _, readErr := reader.readObjectWithVersion(ctx, snapshot.SourceName)
+	if errors.Is(readErr, application.ErrStatementNotFound) {
+		return nil
+	}
+	if readErr != nil {
+		return application.ErrStatementUnavailable
+	}
+	if after.SHA256 != snapshot.SHA256 {
+		return application.ErrStatementConflict
+	}
+	if deleteErr != nil {
+		return deleteErr
+	}
+	return application.ErrStatementUnavailable
+}
+
+func (reader *Reader) readObjectWithVersion(
+	ctx context.Context,
+	key string,
+) (application.StatementSnapshot, string, error) {
+	statCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	info, err := reader.client.StatObject(
+		statCtx,
+		reader.bucket,
+		key,
+		minio.StatObjectOptions{},
+	)
+	if err != nil {
+		readErr := objectReadError(statCtx, err)
+		cancel()
+		return application.StatementSnapshot{}, "", readErr
+	}
+	cancel()
+	if info.ETag == "" {
+		return application.StatementSnapshot{}, "", application.ErrStatementUnavailable
+	}
+	options := minio.GetObjectOptions{}
+	if err := options.SetMatchETag(info.ETag); err != nil {
+		return application.StatementSnapshot{}, "", application.ErrStatementUnavailable
+	}
+	getCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	defer cancel()
+	object, err := reader.client.GetObject(getCtx, reader.bucket, key, options)
+	if err != nil {
+		return application.StatementSnapshot{}, "", objectReadError(getCtx, err)
+	}
+	defer func() { _ = object.Close() }()
+	content, err := io.ReadAll(io.LimitReader(
+		object,
+		int64(reader.maximumStatementBytes)+1,
+	))
+	if err != nil {
+		return application.StatementSnapshot{}, "", objectReadError(getCtx, err)
+	}
+	if len(content) > reader.maximumStatementBytes {
+		return application.StatementSnapshot{}, "", application.ErrStatementLimit
+	}
+	digest := sha256.Sum256(content)
+	return application.StatementSnapshot{
+		SourceName: key,
+		SHA256:     fmt.Sprintf("%x", digest),
+		Content:    content,
+	}, info.VersionID, nil
+}
+
+func validSnapshot(snapshot application.StatementSnapshot) bool {
+	if !application.ValidStatementSourceName(snapshot.SourceName) ||
+		len(snapshot.SHA256) != 64 || len(snapshot.Content) == 0 {
+		return false
+	}
+	digest := sha256.Sum256(snapshot.Content)
+	return fmt.Sprintf("%x", digest) == snapshot.SHA256
+}
+
+func matchingDigest(snapshot application.StatementSnapshot, digest string) error {
+	if snapshot.SHA256 != digest {
+		return application.ErrStatementConflict
+	}
+	return nil
+}
+
+func processedName(sourceName string) string { return "_processed_" + sourceName }
+
+func objectReadError(ctx context.Context, err error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	response := minio.ToErrorResponse(err)
+	if response.Code == "NoSuchKey" || response.Code == "NoSuchObject" {
+		return application.ErrStatementNotFound
+	}
+	return application.ErrStatementUnavailable
+}
+
+func newVersionDelete(
+	bucket string,
+	client minioClient,
+	fetchTimeout time.Duration,
+) versionDelete {
+	return func(ctx context.Context, key string, versionID string) error {
+		deleteCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+		defer cancel()
+		err := client.RemoveObject(
+			deleteCtx,
+			bucket,
+			key,
+			minio.RemoveObjectOptions{VersionID: versionID},
+		)
+		if contextErr := deleteCtx.Err(); contextErr != nil {
+			return contextErr
+		}
+		if err != nil {
+			return application.ErrStatementUnavailable
+		}
+		return nil
 	}
 }

@@ -211,7 +211,7 @@ check:
 		COVERAGE_FILE="$$profile_dir/coverage.txt" \
 		INTEGRATION_COVERAGE_FILE="$$profile_dir/integration-coverage.txt"
 
-# Include the PostgreSQL and Kafka smokes in the module gate so coverage measures their paths.
+# Include the PostgreSQL, versioned MinIO, Kafka and statement-worker smokes in the module gate.
 coverage: private export GOFLAGS := $(strip $(GOFLAGS) -tags=integration)
 
 test-integration: ## Run service composition and disposable PostgreSQL/Kafka smokes (Docker required)
@@ -219,8 +219,8 @@ test-integration: ## Run service composition and disposable PostgreSQL/Kafka smo
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction|PaymentRegistrationWorker)$$' \
-		./internal/service ./internal/administration ./internal/postgres ./internal/testing \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction|PaymentStatementPosting|PaymentStatementArchiveRecovery|PaymentStatementArchiveVersions|PaymentStatementImportWorker|PaymentRegistrationWorker)$$' \
+		./internal/service ./internal/administration ./internal/postgres ./internal/objectstore ./internal/importer ./internal/testing \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:

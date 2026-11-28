@@ -29,6 +29,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/importer"
 	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/objectstore"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
@@ -82,6 +83,12 @@ type managedDependency interface {
 	Close()
 }
 
+type statementObjectStore interface {
+	managedDependency
+	application.StatementObjects
+	importer.SourceCatalog
+}
+
 type eventWorker interface {
 	Preflight(context.Context) error
 	Check(context.Context) error
@@ -96,11 +103,17 @@ type kafkaDependency interface {
 type dependencies struct {
 	openPool              func(context.Context, config.Database) (databasePool, error)
 	checkDatabase         func(context.Context, postgres.QueryRower, time.Duration) error
-	newObjectStore        func(config.ObjectStore) (managedDependency, error)
+	newObjectStore        func(config.ObjectStore) (statementObjectStore, error)
 	newWorker             func(paymentkafka.Settings) (kafkaDependency, error)
 	newRegistrationWorker func(
 		paymentkafka.RegistrationSettings,
 		*paymentkafka.RegistrationHandler,
+	) (eventWorker, error)
+	newStatementWorker func(
+		importer.Settings,
+		importer.SourceCatalog,
+		importer.PostedSourceReader,
+		importer.StatementImporter,
 	) (eventWorker, error)
 	newAccountReads func(databasePool) (transport.AccountReads, error)
 	listen          func(string, string) (net.Listener, error)
@@ -118,8 +131,10 @@ func productionDependencies() dependencies {
 		openPool: func(ctx context.Context, settings config.Database) (databasePool, error) {
 			return postgres.OpenPool(ctx, settings)
 		},
-		checkDatabase:  postgres.CheckReadiness,
-		newObjectStore: newObjectStoreDependency,
+		checkDatabase: postgres.CheckReadiness,
+		newObjectStore: func(settings config.ObjectStore) (statementObjectStore, error) {
+			return objectstore.NewReader(settings)
+		},
 		newWorker: func(settings paymentkafka.Settings) (kafkaDependency, error) {
 			return paymentkafka.NewWorker(settings)
 		},
@@ -128,6 +143,14 @@ func productionDependencies() dependencies {
 			handler *paymentkafka.RegistrationHandler,
 		) (eventWorker, error) {
 			return paymentkafka.NewRegistrationWorker(settings, handler)
+		},
+		newStatementWorker: func(
+			settings importer.Settings,
+			catalog importer.SourceCatalog,
+			posted importer.PostedSourceReader,
+			imports importer.StatementImporter,
+		) (eventWorker, error) {
+			return importer.NewWorker(settings, catalog, posted, imports)
 		},
 		newAccountReads: func(pool databasePool) (transport.AccountReads, error) {
 			store, err := postgres.NewStore(pool)
@@ -173,22 +196,6 @@ func readBoundedFile(path string, maximum int64) ([]byte, error) {
 	return data, nil
 }
 
-type objectStoreDependency struct{ reader *objectstore.Reader }
-
-func (dependency *objectStoreDependency) Check(ctx context.Context) error {
-	return dependency.reader.CheckReadAccess(ctx)
-}
-
-func (dependency *objectStoreDependency) Close() { dependency.reader.Close() }
-
-func newObjectStoreDependency(settings config.ObjectStore) (managedDependency, error) {
-	reader, err := objectstore.NewReader(settings)
-	if err != nil {
-		return nil, err
-	}
-	return &objectStoreDependency{reader: reader}, nil
-}
-
 func newGatewayConnection(
 	target string,
 	provider telemetryProvider,
@@ -216,23 +223,26 @@ func newGatewayConnection(
 }
 
 type runningService struct {
-	pool               databasePool
-	objectStore        managedDependency
-	kafka              kafkaDependency
-	worker             eventWorker
-	workerCancel       context.CancelFunc
-	workerResult       chan error
-	workerWG           sync.WaitGroup
-	state              *health.State
-	provider           telemetryProvider
-	grpcServer         grpcServer
-	grpcListener       net.Listener
-	connection         gatewayConnection
-	businessServer     httpServer
-	businessListener   net.Listener
-	managementServer   httpServer
-	managementListener net.Listener
-	tracker            *handlerTracker
+	pool                  databasePool
+	objectStore           statementObjectStore
+	kafka                 kafkaDependency
+	worker                eventWorker
+	workerCancel          context.CancelFunc
+	workerResult          chan error
+	workerWG              sync.WaitGroup
+	statementWorker       eventWorker
+	statementWorkerCancel context.CancelFunc
+	statementWorkerResult chan error
+	state                 *health.State
+	provider              telemetryProvider
+	grpcServer            grpcServer
+	grpcListener          net.Listener
+	connection            gatewayConnection
+	businessServer        httpServer
+	businessListener      net.Listener
+	managementServer      httpServer
+	managementListener    net.Listener
+	tracker               *handlerTracker
 }
 
 func run(
@@ -285,6 +295,14 @@ func run(
 	}
 	if err := runtime.objectStore.Check(startupCtx); err != nil {
 		return fail(fmt.Errorf("run service: verify MinIO: %w", err))
+	}
+	if err := runtime.configureStatementWorker(
+		settings.StatementImports,
+		logger,
+		provider,
+		deps,
+	); err != nil {
+		return fail(fmt.Errorf("run service: configure statement importer: %w", err))
 	}
 	if err := runtime.configureWorker(settings.Kafka, logger, provider, deps); err != nil {
 		return fail(fmt.Errorf("run service: configure Kafka: %w", err))
@@ -359,6 +377,11 @@ func run(
 			err = fmt.Errorf("verify Kafka: %w", checkErr)
 		}
 	}
+	if err == nil && runtime.statementWorker != nil {
+		if checkErr := runtime.statementWorker.Preflight(readyContext); checkErr != nil {
+			err = fmt.Errorf("verify statement importer: %w", checkErr)
+		}
+	}
 	if err == nil {
 		runtime.startWorker(ctx)
 		err = runtime.checkWorker(readyContext)
@@ -367,7 +390,7 @@ func run(
 	if err != nil {
 		return fail(fmt.Errorf("run service: %w", err))
 	}
-	// Readiness includes PostgreSQL, MinIO and an enabled registration worker.
+	// Readiness includes PostgreSQL, MinIO and each enabled background worker.
 	state, err := health.NewState(settings.ProbeTimeout, func(probeCtx context.Context) error {
 		if runtime.connection.GetState() != connectivity.Ready {
 			return errors.New("gateway connection is not ready")
@@ -419,6 +442,8 @@ func run(
 		return fail(unexpectedServeError("management HTTP", err))
 	case err := <-runtime.workerResult:
 		return fail(unexpectedWorkerError(err))
+	case err := <-runtime.statementWorkerResult:
+		return fail(unexpectedStatementWorkerError(err))
 	default:
 	}
 	runtime.state.SetReady(true)
@@ -441,11 +466,55 @@ func run(
 		if ctx.Err() == nil {
 			serveErr = unexpectedWorkerError(err)
 		}
+	case err := <-runtime.statementWorkerResult:
+		if ctx.Err() == nil {
+			serveErr = unexpectedStatementWorkerError(err)
+		}
 	}
 	return errors.Join(
 		serveErr,
 		runtime.shutdown(settings.ShutdownTimeout, settings.ExporterTimeout),
 	)
+}
+
+func (runtime *runningService) configureStatementWorker(
+	settings config.StatementImports,
+	logger *slog.Logger,
+	provider telemetryProvider,
+	deps dependencies,
+) error {
+	observer, err := telemetry.NewStatementObserver(
+		logger,
+		provider.MeterProvider(),
+		provider.TracerProvider(),
+		settings.Enabled,
+	)
+	if err != nil || !settings.Enabled {
+		return err
+	}
+	store, err := postgres.NewStore(runtime.pool)
+	if err != nil {
+		return err
+	}
+	postings, err := application.NewStatementPostings(store, time.Now)
+	if err != nil {
+		return err
+	}
+	imports, err := application.NewStatementImports(runtime.objectStore, postings, store)
+	if err != nil {
+		return err
+	}
+	runtime.statementWorker, err = deps.newStatementWorker(
+		importer.Settings{
+			Interval: settings.Interval,
+			Now:      time.Now,
+			Observe:  observer.Start,
+		},
+		runtime.objectStore,
+		store,
+		imports,
+	)
+	return err
 }
 
 func (runtime *runningService) configureWorker(
@@ -504,24 +573,38 @@ func (runtime *runningService) configureWorker(
 }
 
 func (runtime *runningService) startWorker(parent context.Context) {
-	if runtime.worker == nil {
-		return
+	if runtime.worker != nil {
+		workerCtx, cancel := context.WithCancel(parent)
+		runtime.workerCancel = cancel
+		runtime.workerResult = make(chan error, 1)
+		runtime.workerWG.Add(1)
+		go func() {
+			defer runtime.workerWG.Done()
+			runtime.workerResult <- runtime.worker.Run(workerCtx)
+		}()
 	}
-	workerCtx, cancel := context.WithCancel(parent)
-	runtime.workerCancel = cancel
-	runtime.workerResult = make(chan error, 1)
-	runtime.workerWG.Add(1)
-	go func() {
-		defer runtime.workerWG.Done()
-		runtime.workerResult <- runtime.worker.Run(workerCtx)
-	}()
+	if runtime.statementWorker != nil {
+		workerCtx, cancel := context.WithCancel(parent)
+		runtime.statementWorkerCancel = cancel
+		runtime.statementWorkerResult = make(chan error, 1)
+		runtime.workerWG.Add(1)
+		go func() {
+			defer runtime.workerWG.Done()
+			runtime.statementWorkerResult <- runtime.statementWorker.Run(workerCtx)
+		}()
+	}
 }
 
 func (runtime *runningService) checkWorker(ctx context.Context) error {
-	if runtime.worker == nil {
-		return nil
+	if runtime.worker != nil {
+		if err := runtime.worker.Check(ctx); err != nil {
+			return err
+		}
 	}
-	return runtime.worker.Check(ctx)
+	if runtime.statementWorker != nil {
+		return runtime.statementWorker.Check(ctx)
+	}
+	return nil
 }
 
 func unexpectedWorkerError(err error) error {
@@ -529,6 +612,13 @@ func unexpectedWorkerError(err error) error {
 		err = errors.New("stopped unexpectedly")
 	}
 	return fmt.Errorf("registration worker stopped: %w", err)
+}
+
+func unexpectedStatementWorkerError(err error) error {
+	if err == nil {
+		err = errors.New("stopped unexpectedly")
+	}
+	return fmt.Errorf("statement importer stopped: %w", err)
 }
 
 func waitForConnection(ctx context.Context, connection gatewayConnection) error {
@@ -577,6 +667,9 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 	var shutdownErrors []error
 	if runtime.workerCancel != nil {
 		runtime.workerCancel()
+	}
+	if runtime.statementWorkerCancel != nil {
+		runtime.statementWorkerCancel()
 	}
 
 	if runtime.tracker != nil {
@@ -672,10 +765,7 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 			shutdownErrors = append(shutdownErrors, err)
 		}
 	}
-	if runtime.objectStore != nil {
-		runtime.objectStore.Close()
-	}
-	if runtime.workerCancel != nil {
+	if runtime.workerCancel != nil || runtime.statementWorkerCancel != nil {
 		workerStopped := make(chan struct{})
 		go func() { runtime.workerWG.Wait(); close(workerStopped) }()
 		select {
@@ -694,6 +784,17 @@ func (runtime *runningService) shutdown(timeout, exporterTimeout time.Duration) 
 				fmt.Errorf("shutdown registration worker: %w", err),
 			)
 		}
+	}
+	if runtime.statementWorker != nil {
+		if err := runtime.statementWorker.Shutdown(graceful); err != nil {
+			shutdownErrors = append(
+				shutdownErrors,
+				fmt.Errorf("shutdown statement importer: %w", err),
+			)
+		}
+	}
+	if runtime.objectStore != nil {
+		runtime.objectStore.Close()
 	}
 	if runtime.pool != nil {
 		runtime.pool.Close()

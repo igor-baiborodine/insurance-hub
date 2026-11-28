@@ -7,6 +7,7 @@
   - [Flux-owned QA](#flux-owned-qa)
   - [Private verification and recovery](#private-verification-and-recovery)
     - [Registration worker activation and held records](#registration-worker-activation-and-held-records)
+    - [Statement importer qualification](#statement-importer-qualification)
   - [Dependency access](#dependency-access)
     - [PostgreSQL login](#postgresql-login)
     - [MinIO reader](#minio-reader)
@@ -105,7 +106,7 @@ startup check, and either outcome stalls the shared `qa-svc` owner.
 | --- | --- | --- |
 | Login `go_payment_writer` | `qa-postgres-payment` in `qa-data` | `LOGIN`, `CONNECT` on `payment`; no ownership, membership or `CREATE` (see [PostgreSQL login](#postgresql-login)) |
 | Secret `qa-postgres-payment-writer-creds` | `qa-svc` | `database-url`, `ca.crt` from `qa-postgres-payment-ca` |
-| MinIO user and policy `payment-reader` | `qa-minio-payment` tenant | Read-only on `payments-import` (see [MinIO reader](#minio-reader)) |
+| MinIO user and policy `payment-reader` | `qa-minio-payment` tenant | Get, put and delete objects plus list and location on `payments-import` only (see [MinIO reader](#minio-reader)) |
 | Secret `qa-minio-payment-reader-creds` | `qa-svc` | `endpoint`, `access-key`, `secret-key`, `ca.crt` from the tenant namespace `kube-root-ca.crt` |
 | Secret `qa-payment-kafka-ca` | `qa-svc` | `ca.crt` copied from `qa-kafka-cluster-ca-cert` in `qa-data` |
 
@@ -206,6 +207,25 @@ condition through a reviewed change, leave the committed position unchanged, and
 same record is retried. Escalate an uncertain commit for broker/database comparison before any
 operator action because the database write may already be durable.
 
+### Statement importer qualification
+
+Current local-dev and QA manifests intentionally leave `STATEMENT_IMPORTS_ENABLED=false`. They bind
+the candidate interval explicitly: local-dev uses `STATEMENT_IMPORT_INTERVAL=3m` and QA uses `8h`.
+Enable the statement schedule only through a reviewed workload change.
+
+The Payment integration target qualifies the composed scheduler only against disposable
+PostgreSQL and a disposable MinIO tenant whose isolated bucket is named `payments-import`. It
+controls the UTC clock, overlaps a tick, crosses midnight, resumes earlier sources and posted
+receipts, and drains the worker without reaching configured deployment buckets or scheduled files:
+
+```bash
+make -C services/payment-service test-integration
+```
+
+Use only the bounded `bank statement import completed` outcomes `idle`, `archived`, `review`,
+`posted_awaiting_archive` and `dependency_failure` for diagnosis. Logs, metrics and traces omit
+object keys, statement rows, account identifiers, amounts and underlying dependency messages.
+
 For source, image, Flux and transport problems, start with
 `make go-svc-deploy-status SVC_NAME=payment` and compare the Flux source and applied revisions,
 the release digest and the running Pod image ID with the recorded candidate. When QA Flux, DNS or
@@ -260,8 +280,10 @@ password or widen its privileges.
 
 ### MinIO reader
 
-`payment-reader` may list and locate `payments-import` and read its objects. Configure a private
-`mc` alias for the tenant administrator from the tenant's `<tenant namespace>-storage-config`
+`payment-reader` may list and locate `payments-import`, get and put its objects, and delete exact
+object versions. The bucket must have versioning enabled so a source replacement cannot be removed
+by an in-flight archive. Configure a private `mc` alias for the tenant administrator from the
+tenant's `<tenant namespace>-storage-config`
 Secret, entering the credentials at the prompt, through a loopback port-forward to Service
 `minio`. In QA, trust the tenant namespace `kube-root-ca.crt` and keep hostname verification.
 Keep `endpoint` on the in-cluster Service port for the workload Secret. The administrative alias
@@ -279,13 +301,10 @@ mkdir -p "$work/mc/certs/CAs" && : > "$work/minio-ca.crt"
   -o jsonpath='{.data.ca\.crt}' > "$work/minio-ca.crt" && cp "$work/minio-ca.crt" "$work/mc/certs/CAs/"
 mc() { command mc --config-dir "$work/mc" --resolve "$host:19000=127.0.0.1" "$@"; }
 mc alias set payment-admin "$admin_endpoint"
-cat > "$work/payment-reader.json" <<'EOF'
-{"Version": "2012-10-17", "Statement": [
-  {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": ["arn:aws:s3:::payments-import/*"]},
-  {"Effect": "Allow", "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
-   "Resource": ["arn:aws:s3:::payments-import"]}]}
-EOF
-mc admin policy create payment-admin payment-reader "$work/payment-reader.json"
+mc version enable payment-admin/payments-import
+mc version info payment-admin/payments-import
+mc admin policy create payment-admin payment-reader \
+  k8s/apps/svc/payment/minio/s3-policy-payments-import.json
 openssl rand -hex 20 | tr -d '\n' > "$work/secret-key"
 test "$(wc -c < "$work/secret-key")" -eq 40
 printf '%s' payment-reader > "$work/access-key"
@@ -329,6 +348,14 @@ SELECT has_database_privilege('go_payment_writer', 'payment', 'CONNECT'),
        has_schema_privilege('go_payment_writer', 'public', 'CREATE');
 SQL
 mc admin user info payment-admin payment-reader
+mc admin policy info payment-admin payment-reader --policy-file "$work/payment-reader-effective.json"
+jq -S '(.Statement[].Action) |= sort | (.Statement[].Resource) |= sort |
+  .Statement |= sort_by(.Resource | join(","))' \
+  k8s/apps/svc/payment/minio/s3-policy-payments-import.json > "$work/payment-reader-expected.json"
+jq -S '(.Statement[].Action) |= sort | (.Statement[].Resource) |= sort |
+  .Statement |= sort_by(.Resource | join(","))' \
+  "$work/payment-reader-effective.json" > "$work/payment-reader-observed.json"
+cmp "$work/payment-reader-expected.json" "$work/payment-reader-observed.json"
 kubectl --context "$CTX" -n "$SVC_NS" get secret "$ENV-postgres-payment-writer-creds" \
   "$ENV-minio-payment-reader-creds" "$ENV-payment-kafka-ca" \
   -o go-template='{{range .items}}{{.metadata.name}}:{{range $key, $_ := .data}} {{$key}}{{end}}{{"\n"}}{{end}}'
@@ -336,7 +363,13 @@ kill %1; rm -rf -- "$work"
 ```
 
 Expect `t|f|f|f|f|f`, `0` memberships, owner `payment`, `0` owned objects and `t|f|f`. The MinIO
-user must be enabled with only policy `payment-reader`. The Secrets must carry exactly
+user must be enabled with only policy `payment-reader`, and the normalized effective policy must
+match the checked-in five-action policy byte for byte. Bucket versioning must report `Enabled`.
+Effective qualification must then use the workload Secret—not the administrative alias—to
+exercise GetBucketLocation, ListBucket, PutObject, GetObject and DeleteObjectVersion on one
+uniquely prefixed synthetic object. Capture the version ID returned by PutObject and delete that
+exact version. Verify the object is absent afterward and that ListBucket is denied on a known
+outside bucket; remove every owned synthetic resource before recording success. The Secrets must carry exactly
 `database-url,ca.crt`, `endpoint,access-key,secret-key,ca.crt` and `ca.crt`; read the key names
 only, never print the values. The workload's own startup checks then prove the connection, bucket
 list and topic metadata from inside the Pod.

@@ -641,13 +641,18 @@ func TestLoad_DependencySettings(t *testing.T) {
 	}
 	if got.ObjectStore.Endpoint.String() != "https://minio.payment.svc:9000" ||
 		got.ObjectStore.Bucket != "payments-import" ||
-		got.ObjectStore.FetchTimeout != 3*time.Second {
+		got.ObjectStore.FetchTimeout != 3*time.Second ||
+		got.ObjectStore.MaximumStatementBytes != 1024*1024 {
 		t.Errorf(
-			"object store = (%s, %q, %v)",
+			"object store = (%s, %q, %v, %d)",
 			got.ObjectStore.Endpoint,
 			got.ObjectStore.Bucket,
 			got.ObjectStore.FetchTimeout,
+			got.ObjectStore.MaximumStatementBytes,
 		)
+	}
+	if got.StatementImports.Enabled || got.StatementImports.Interval != 8*time.Hour {
+		t.Errorf("statement imports = %+v", got.StatementImports)
 	}
 	wantBrokers := []string{"kafka-bootstrap.data.svc:9093", "kafka-1.data.svc:9093"}
 	if fmt.Sprint(got.Kafka.Brokers) != fmt.Sprint(wantBrokers) ||
@@ -665,6 +670,24 @@ func TestLoad_DependencySettings(t *testing.T) {
 		) {
 			t.Errorf("formatting with %s exposes a credential", format)
 		}
+	}
+}
+
+func TestLoad_StatementImportSchedule(t *testing.T) {
+	// given
+	lookup := mapLookup(map[string]string{
+		statementImportsSetting:  "true",
+		statementIntervalSetting: "3m",
+	})
+
+	// when
+	got, err := load(lookup)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.StatementImports.Enabled || got.StatementImports.Interval != 3*time.Minute {
+		t.Fatalf("statement imports = %+v", got.StatementImports)
 	}
 }
 
@@ -795,6 +818,21 @@ func TestLoad_RejectsInvalidDependencySettingsWithoutExposingValues(t *testing.T
 			"foreign bucket",
 			map[string]string{objectBucketSetting: "policies"},
 			objectBucketSetting, "must match the fixed payments-import bucket",
+		},
+		{
+			"statement size above maximum",
+			map[string]string{objectStatementMaxBytes: "8388609"},
+			objectStatementMaxBytes, "must be an integer from 1 through 8388608",
+		},
+		{
+			"invalid statement worker mode",
+			map[string]string{statementImportsSetting: "sometimes"},
+			statementImportsSetting, "must be a boolean",
+		},
+		{
+			"zero statement interval",
+			map[string]string{statementIntervalSetting: "0s"},
+			statementIntervalSetting, "must be a positive duration",
 		},
 		{
 			"missing brokers",

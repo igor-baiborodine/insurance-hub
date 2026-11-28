@@ -47,6 +47,7 @@ KAFKA_PORT = 9093
 BUSINESS_CLIENT_LABEL = "insurance-hub.io/payment-business-client"
 DATABASE_CONFIG = {"DB_MAX_CONNS": "4", "DB_CONNECT_TIMEOUT": "3s", "DB_QUERY_TIMEOUT": "1s"}
 MINIO_CONFIG = {"MINIO_BUCKET": "payments-import", "MINIO_FETCH_TIMEOUT": "3s"}
+STATEMENT_CONFIG = {"STATEMENT_IMPORTS_ENABLED": "false"}
 WRITER_CA_DIRECTORY = "/etc/payment-service/postgres"
 MINIO_CA_DIRECTORY = "/etc/payment-service/minio"
 KAFKA_CA_DIRECTORY = "/etc/payment-service/kafka"
@@ -392,6 +393,8 @@ def validate_render(environment: str, text: str) -> dict[str, dict]:
     }
     expected_data.update(DATABASE_CONFIG)
     expected_data.update(MINIO_CONFIG)
+    expected_data.update(STATEMENT_CONFIG)
+    expected_data["STATEMENT_IMPORT_INTERVAL"] = "3m" if environment == "local-dev" else "8h"
     expected_data.update(
         {
             "KAFKA_BROKERS": (
