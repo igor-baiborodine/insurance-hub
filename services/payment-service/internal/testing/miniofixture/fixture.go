@@ -76,9 +76,26 @@ func New(t *testing.T, ctx context.Context) *Fixture {
 		t.Fatal("create disposable MinIO client")
 	}
 	makeBucket(t, ctx, client)
+	enableVersioning(t, ctx, client)
 	return &Fixture{
 		Client: client, Endpoint: fmt.Sprintf("http://%s", endpoint),
 		AccessKey: accessKey, SecretKey: secretKey,
+	}
+}
+
+func enableVersioning(t *testing.T, ctx context.Context, client *minio.Client) {
+	t.Helper()
+	versionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := client.EnableVersioning(versionCtx, bucketName); err != nil {
+		t.Fatal("enable disposable payments-import versioning:", err)
+	}
+	versioning, err := client.GetBucketVersioning(versionCtx, bucketName)
+	if err != nil {
+		t.Fatal("read disposable payments-import versioning:", err)
+	}
+	if !versioning.Enabled() {
+		t.Fatal("disposable payments-import versioning is not enabled")
 	}
 }
 

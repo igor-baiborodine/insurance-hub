@@ -220,7 +220,7 @@ func TestReader_ReadStatement_RejectsOversizedSnapshot(t *testing.T) {
 	}
 }
 
-func TestReader_ArchiveStatement_UsesConditionalCreationAndDeletion(t *testing.T) {
+func TestReader_ArchiveStatement_UsesConditionalCreationAndVersionDeletion(t *testing.T) {
 	accepted := []byte("accepted statement bytes")
 	changed := []byte("changed statement bytes")
 	const source = "bankStatements_2018_8_2.csv"
@@ -240,9 +240,9 @@ func TestReader_ArchiveStatement_UsesConditionalCreationAndDeletion(t *testing.T
 			t.Fatal("matching source was not moved to the processed key")
 		}
 		if fake.putIfNoneMatch != "*" ||
-			fake.deleteIfMatch != `"`+objectETag(accepted)+`"` {
+			fake.deleteVersionID != objectVersion(accepted) {
 			t.Fatalf("preconditions = (put %q, delete %q)",
-				fake.putIfNoneMatch, fake.deleteIfMatch)
+				fake.putIfNoneMatch, fake.deleteVersionID)
 		}
 	})
 
@@ -261,6 +261,27 @@ func TestReader_ArchiveStatement_UsesConditionalCreationAndDeletion(t *testing.T
 		if !bytes.Equal(fake.object(source), changed) ||
 			!bytes.Equal(fake.object(processedName(source)), accepted) {
 			t.Fatal("source replacement or accepted processed bytes were lost")
+		}
+	})
+
+	t.Run("missing source version fails without deletion", func(t *testing.T) {
+		fake := newArchiveMinIO(source, accepted)
+		fake.omitVersionID = true
+		server := httptest.NewServer(fake)
+		t.Cleanup(server.Close)
+		reader := newTestReader(t, settingsFor(t, server.URL, nil))
+
+		err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+
+		if !errors.Is(err, application.ErrStatementUnavailable) {
+			t.Fatalf("error = %v, want statement unavailable", err)
+		}
+		if !bytes.Equal(fake.object(source), accepted) ||
+			!bytes.Equal(fake.object(processedName(source)), accepted) {
+			t.Fatal("unversioned source or accepted processed bytes changed")
+		}
+		if fake.deleteVersionID != "" {
+			t.Fatalf("delete version = %q, want no delete", fake.deleteVersionID)
 		}
 	})
 
@@ -378,13 +399,14 @@ type fakeMinIO struct {
 }
 
 type archiveMinIO struct {
-	mu             sync.Mutex
-	objects        map[string][]byte
-	delay          time.Duration
-	beforePut      func(string)
-	beforeDelete   func()
-	putIfNoneMatch string
-	deleteIfMatch  string
+	mu              sync.Mutex
+	objects         map[string][]byte
+	delay           time.Duration
+	beforePut       func(string)
+	beforeDelete    func()
+	putIfNoneMatch  string
+	deleteVersionID string
+	omitVersionID   bool
 }
 
 func newArchiveMinIO(source string, content []byte) *archiveMinIO {
@@ -427,6 +449,9 @@ func (fake *archiveMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		}
 		writer.Header().Set("Content-Length", fmt.Sprint(len(content)))
 		writer.Header().Set("ETag", `"`+objectETag(content)+`"`)
+		if !fake.omitVersionID {
+			writer.Header().Set("X-Amz-Version-Id", objectVersion(content))
+		}
 		writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
 		if request.Method == http.MethodGet {
 			_, _ = writer.Write(content)
@@ -458,7 +483,7 @@ func (fake *archiveMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		writer.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
 		fake.mu.Lock()
-		fake.deleteIfMatch = request.Header.Get("If-Match")
+		fake.deleteVersionID = request.URL.Query().Get("versionId")
 		beforeDelete := fake.beforeDelete
 		fake.beforeDelete = nil
 		fake.mu.Unlock()
@@ -466,17 +491,11 @@ func (fake *archiveMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Re
 			beforeDelete()
 		}
 		content, exists := fake.objectValue(key)
-		if exists && request.Header.Get("If-Match") != `"`+objectETag(content)+`"` {
-			writeObjectError(
-				writer,
-				http.StatusPreconditionFailed,
-				"PreconditionFailed",
-			)
-			return
+		if exists && request.URL.Query().Get("versionId") == objectVersion(content) {
+			fake.mu.Lock()
+			delete(fake.objects, key)
+			fake.mu.Unlock()
 		}
-		fake.mu.Lock()
-		delete(fake.objects, key)
-		fake.mu.Unlock()
 		writer.WriteHeader(http.StatusNoContent)
 	default:
 		writeObjectError(writer, http.StatusMethodNotAllowed, "MethodNotAllowed")
@@ -519,6 +538,8 @@ func objectETag(content []byte) string {
 	digest := sha256.Sum256(content)
 	return fmt.Sprintf("%x", digest)
 }
+
+func objectVersion(content []byte) string { return "version-" + objectETag(content) }
 
 func writeObjectError(writer http.ResponseWriter, status int, code string) {
 	writer.Header().Set("Content-Type", "application/xml")

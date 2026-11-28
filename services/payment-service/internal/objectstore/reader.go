@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/minio/minio-go/v7/pkg/signer"
 
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/application"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
@@ -28,7 +26,6 @@ import (
 
 type minioClient interface {
 	GetObject(context.Context, string, string, minio.GetObjectOptions) (*minio.Object, error)
-	GetBucketLocation(context.Context, string) (string, error)
 	ListObjects(context.Context, string, minio.ListObjectsOptions) <-chan minio.ObjectInfo
 	PutObject(
 		context.Context,
@@ -44,9 +41,10 @@ type minioClient interface {
 		string,
 		minio.StatObjectOptions,
 	) (minio.ObjectInfo, error)
+	RemoveObject(context.Context, string, string, minio.RemoveObjectOptions) error
 }
 
-type conditionalDelete func(context.Context, string, string) error
+type versionDelete func(context.Context, string, string) error
 
 // Reader reads and reconciles statements in the fixed payments-import bucket.
 type Reader struct {
@@ -55,7 +53,7 @@ type Reader struct {
 	bucket                string
 	maximumStatementBytes int
 	fetchTimeout          time.Duration
-	deleteAccepted        conditionalDelete
+	deleteAccepted        versionDelete
 }
 
 // NewReader constructs the verified bounded object-store adapter.
@@ -99,13 +97,9 @@ func NewReader(settings config.ObjectStore) (*Reader, error) {
 		maximumStatementBytes: settings.MaximumStatementBytes,
 		fetchTimeout:          settings.FetchTimeout,
 	}
-	reader.deleteAccepted = newConditionalDelete(
-		settings.Endpoint,
+	reader.deleteAccepted = newVersionDelete(
 		settings.Bucket,
-		settings.AccessKey.Value(),
-		settings.SecretKey.Value(),
 		client,
-		&http.Client{Transport: transport},
 		settings.FetchTimeout,
 	)
 	return reader, nil
@@ -235,7 +229,7 @@ func (reader *Reader) readObject(
 	key string,
 	sourceName string,
 ) (application.StatementSnapshot, error) {
-	snapshot, _, err := reader.readObjectWithETag(ctx, key)
+	snapshot, _, err := reader.readObjectWithVersion(ctx, key)
 	if err != nil {
 		return application.StatementSnapshot{}, err
 	}
@@ -296,7 +290,7 @@ func (reader *Reader) removeSource(
 	ctx context.Context,
 	snapshot application.StatementSnapshot,
 ) error {
-	current, etag, err := reader.readObjectWithETag(ctx, snapshot.SourceName)
+	current, versionID, err := reader.readObjectWithVersion(ctx, snapshot.SourceName)
 	if errors.Is(err, application.ErrStatementNotFound) {
 		return nil
 	}
@@ -306,8 +300,11 @@ func (reader *Reader) removeSource(
 	if err := matchingDigest(current, snapshot.SHA256); err != nil {
 		return err
 	}
-	deleteErr := reader.deleteAccepted(ctx, snapshot.SourceName, etag)
-	after, _, readErr := reader.readObjectWithETag(ctx, snapshot.SourceName)
+	if versionID == "" || versionID == "null" {
+		return application.ErrStatementUnavailable
+	}
+	deleteErr := reader.deleteAccepted(ctx, snapshot.SourceName, versionID)
+	after, _, readErr := reader.readObjectWithVersion(ctx, snapshot.SourceName)
 	if errors.Is(readErr, application.ErrStatementNotFound) {
 		return nil
 	}
@@ -323,7 +320,7 @@ func (reader *Reader) removeSource(
 	return application.ErrStatementUnavailable
 }
 
-func (reader *Reader) readObjectWithETag(
+func (reader *Reader) readObjectWithVersion(
 	ctx context.Context,
 	key string,
 ) (application.StatementSnapshot, string, error) {
@@ -369,7 +366,7 @@ func (reader *Reader) readObjectWithETag(
 		SourceName: key,
 		SHA256:     fmt.Sprintf("%x", digest),
 		Content:    content,
-	}, info.ETag, nil
+	}, info.VersionID, nil
 }
 
 func validSnapshot(snapshot application.StatementSnapshot) bool {
@@ -401,57 +398,26 @@ func objectReadError(ctx context.Context, err error) error {
 	return application.ErrStatementUnavailable
 }
 
-func newConditionalDelete(
-	endpoint *url.URL,
+func newVersionDelete(
 	bucket string,
-	accessKey string,
-	secretKey string,
 	client minioClient,
-	httpClient *http.Client,
 	fetchTimeout time.Duration,
-) conditionalDelete {
-	return func(ctx context.Context, key string, etag string) error {
-		locationCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
-		location, err := client.GetBucketLocation(locationCtx, bucket)
-		cancel()
-		if err != nil {
-			return application.ErrStatementUnavailable
-		}
-		if location == "" {
-			location = "us-east-1"
-		}
-		target := *endpoint
-		target.Path = strings.TrimSuffix(target.Path, "/") + "/" + bucket + "/" + key
-		target.RawPath = ""
+) versionDelete {
+	return func(ctx context.Context, key string, versionID string) error {
 		deleteCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
 		defer cancel()
-		request, err := http.NewRequestWithContext(
+		err := client.RemoveObject(
 			deleteCtx,
-			http.MethodDelete,
-			target.String(),
-			nil,
+			bucket,
+			key,
+			minio.RemoveObjectOptions{VersionID: versionID},
 		)
+		if contextErr := deleteCtx.Err(); contextErr != nil {
+			return contextErr
+		}
 		if err != nil {
 			return application.ErrStatementUnavailable
 		}
-		request.Header.Set("If-Match", `"`+etag+`"`)
-		request.Header.Set(
-			"X-Amz-Content-Sha256",
-			"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		)
-		signed := signer.SignV4(*request, accessKey, secretKey, "", location)
-		response, err := httpClient.Do(signed)
-		if err != nil {
-			return application.ErrStatementUnavailable
-		}
-		defer func() { _ = response.Body.Close() }()
-		switch response.StatusCode {
-		case http.StatusNoContent, http.StatusNotFound:
-			return nil
-		case http.StatusPreconditionFailed:
-			return application.ErrStatementConflict
-		default:
-			return application.ErrStatementUnavailable
-		}
+		return nil
 	}
 }

@@ -280,8 +280,10 @@ password or widen its privileges.
 
 ### MinIO reader
 
-`payment-reader` may list and locate `payments-import` and get, put and delete its objects. Configure a private
-`mc` alias for the tenant administrator from the tenant's `<tenant namespace>-storage-config`
+`payment-reader` may list and locate `payments-import`, get and put its objects, and delete exact
+object versions. The bucket must have versioning enabled so a source replacement cannot be removed
+by an in-flight archive. Configure a private `mc` alias for the tenant administrator from the
+tenant's `<tenant namespace>-storage-config`
 Secret, entering the credentials at the prompt, through a loopback port-forward to Service
 `minio`. In QA, trust the tenant namespace `kube-root-ca.crt` and keep hostname verification.
 Keep `endpoint` on the in-cluster Service port for the workload Secret. The administrative alias
@@ -299,6 +301,8 @@ mkdir -p "$work/mc/certs/CAs" && : > "$work/minio-ca.crt"
   -o jsonpath='{.data.ca\.crt}' > "$work/minio-ca.crt" && cp "$work/minio-ca.crt" "$work/mc/certs/CAs/"
 mc() { command mc --config-dir "$work/mc" --resolve "$host:19000=127.0.0.1" "$@"; }
 mc alias set payment-admin "$admin_endpoint"
+mc version enable payment-admin/payments-import
+mc version info payment-admin/payments-import
 mc admin policy create payment-admin payment-reader \
   k8s/apps/svc/payment/minio/s3-policy-payments-import.json
 openssl rand -hex 20 | tr -d '\n' > "$work/secret-key"
@@ -360,11 +364,12 @@ kill %1; rm -rf -- "$work"
 
 Expect `t|f|f|f|f|f`, `0` memberships, owner `payment`, `0` owned objects and `t|f|f`. The MinIO
 user must be enabled with only policy `payment-reader`, and the normalized effective policy must
-match the checked-in five-action policy byte for byte. Effective qualification must then use the
-workload Secret—not the administrative alias—to exercise GetBucketLocation, ListBucket,
-PutObject, GetObject and DeleteObject on one uniquely prefixed synthetic object. Verify the object
-is absent afterward and that ListBucket is denied on a known outside bucket; remove every owned
-synthetic resource before recording success. The Secrets must carry exactly
+match the checked-in five-action policy byte for byte. Bucket versioning must report `Enabled`.
+Effective qualification must then use the workload Secret—not the administrative alias—to
+exercise GetBucketLocation, ListBucket, PutObject, GetObject and DeleteObjectVersion on one
+uniquely prefixed synthetic object. Capture the version ID returned by PutObject and delete that
+exact version. Verify the object is absent afterward and that ListBucket is denied on a known
+outside bucket; remove every owned synthetic resource before recording success. The Secrets must carry exactly
 `database-url,ca.crt`, `endpoint,access-key,secret-key,ca.crt` and `ca.crt`; read the key names
 only, never print the values. The workload's own startup checks then prove the connection, bucket
 list and topic metadata from inside the Pod.
