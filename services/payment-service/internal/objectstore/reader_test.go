@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -11,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -185,6 +187,76 @@ func TestReader_ReadStatement_RejectsOversizedSnapshot(t *testing.T) {
 	}
 }
 
+func TestReader_ArchiveStatement_UsesConditionalCreationAndDeletion(t *testing.T) {
+	accepted := []byte("accepted statement bytes")
+	changed := []byte("changed statement bytes")
+	const source = "bankStatements_2018_8_2.csv"
+
+	t.Run("matching source is archived", func(t *testing.T) {
+		fake := newArchiveMinIO(source, accepted)
+		server := httptest.NewServer(fake)
+		t.Cleanup(server.Close)
+		reader := newTestReader(t, settingsFor(t, server.URL, nil))
+
+		err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fake.exists(source) ||
+			!bytes.Equal(fake.object(processedName(source)), accepted) {
+			t.Fatal("matching source was not moved to the processed key")
+		}
+		if fake.putIfNoneMatch != "*" ||
+			fake.deleteIfMatch != `"`+objectETag(accepted)+`"` {
+			t.Fatalf("preconditions = (put %q, delete %q)",
+				fake.putIfNoneMatch, fake.deleteIfMatch)
+		}
+	})
+
+	t.Run("replacement immediately before delete survives", func(t *testing.T) {
+		fake := newArchiveMinIO(source, accepted)
+		fake.beforeDelete = func() { fake.setObject(source, changed) }
+		server := httptest.NewServer(fake)
+		t.Cleanup(server.Close)
+		reader := newTestReader(t, settingsFor(t, server.URL, nil))
+
+		err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+
+		if !errors.Is(err, application.ErrStatementConflict) {
+			t.Fatalf("error = %v, want statement conflict", err)
+		}
+		if !bytes.Equal(fake.object(source), changed) ||
+			!bytes.Equal(fake.object(processedName(source)), accepted) {
+			t.Fatal("source replacement or accepted processed bytes were lost")
+		}
+	})
+
+	t.Run("conflict immediately before processed creation survives", func(t *testing.T) {
+		fake := newArchiveMinIO(source, accepted)
+		fake.beforePut = func(key string) {
+			if key == processedName(source) {
+				fake.setObject(key, changed)
+			}
+		}
+		server := httptest.NewServer(fake)
+		t.Cleanup(server.Close)
+		reader := newTestReader(t, settingsFor(t, server.URL, nil))
+
+		err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+
+		if !errors.Is(err, application.ErrStatementConflict) {
+			t.Fatalf("error = %v, want statement conflict", err)
+		}
+		if !bytes.Equal(fake.object(source), accepted) ||
+			!bytes.Equal(fake.object(processedName(source)), changed) {
+			t.Fatal("source or conflicting processed bytes were overwritten")
+		}
+		if fake.putIfNoneMatch != "*" {
+			t.Fatalf("processed creation If-None-Match = %q", fake.putIfNoneMatch)
+		}
+	})
+}
+
 func TestNewReader_RejectsMissingTrust(t *testing.T) {
 	// given
 	settings := settingsFor(t, "https://127.0.0.1:9000", nil)
@@ -212,17 +284,159 @@ type fakeMinIO struct {
 	content  []byte
 }
 
+type archiveMinIO struct {
+	mu             sync.Mutex
+	objects        map[string][]byte
+	beforePut      func(string)
+	beforeDelete   func()
+	putIfNoneMatch string
+	deleteIfMatch  string
+}
+
+func newArchiveMinIO(source string, content []byte) *archiveMinIO {
+	return &archiveMinIO{objects: map[string][]byte{source: append([]byte(nil), content...)}}
+}
+
+func (fake *archiveMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Query().Has("location") {
+		writer.Header().Set("Content-Type", "application/xml")
+		_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+			`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
+			`us-east-1</LocationConstraint>`))
+		return
+	}
+	key := strings.TrimPrefix(request.URL.Path, "/payments-import/")
+	switch request.Method {
+	case http.MethodHead, http.MethodGet:
+		content, exists := fake.objectValue(key)
+		if !exists {
+			writeObjectError(writer, http.StatusNotFound, "NoSuchKey")
+			return
+		}
+		if match := request.Header.Get("If-Match"); match != "" &&
+			match != `"`+objectETag(content)+`"` {
+			writeObjectError(
+				writer,
+				http.StatusPreconditionFailed,
+				"PreconditionFailed",
+			)
+			return
+		}
+		writer.Header().Set("Content-Length", fmt.Sprint(len(content)))
+		writer.Header().Set("ETag", `"`+objectETag(content)+`"`)
+		writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+		if request.Method == http.MethodGet {
+			_, _ = writer.Write(content)
+		}
+	case http.MethodPut:
+		fake.mu.Lock()
+		fake.putIfNoneMatch = request.Header.Get("If-None-Match")
+		beforePut := fake.beforePut
+		fake.beforePut = nil
+		fake.mu.Unlock()
+		if beforePut != nil {
+			beforePut(key)
+		}
+		if request.Header.Get("If-None-Match") == "*" && fake.exists(key) {
+			writeObjectError(
+				writer,
+				http.StatusPreconditionFailed,
+				"PreconditionFailed",
+			)
+			return
+		}
+		content, err := io.ReadAll(request.Body)
+		if err != nil {
+			writeObjectError(writer, http.StatusInternalServerError, "InternalError")
+			return
+		}
+		fake.setObject(key, content)
+		writer.Header().Set("ETag", `"`+objectETag(content)+`"`)
+		writer.WriteHeader(http.StatusOK)
+	case http.MethodDelete:
+		fake.mu.Lock()
+		fake.deleteIfMatch = request.Header.Get("If-Match")
+		beforeDelete := fake.beforeDelete
+		fake.beforeDelete = nil
+		fake.mu.Unlock()
+		if beforeDelete != nil {
+			beforeDelete()
+		}
+		content, exists := fake.objectValue(key)
+		if exists && request.Header.Get("If-Match") != `"`+objectETag(content)+`"` {
+			writeObjectError(
+				writer,
+				http.StatusPreconditionFailed,
+				"PreconditionFailed",
+			)
+			return
+		}
+		fake.mu.Lock()
+		delete(fake.objects, key)
+		fake.mu.Unlock()
+		writer.WriteHeader(http.StatusNoContent)
+	default:
+		writeObjectError(writer, http.StatusMethodNotAllowed, "MethodNotAllowed")
+	}
+}
+
+func (fake *archiveMinIO) object(key string) []byte {
+	content, _ := fake.objectValue(key)
+	return content
+}
+
+func (fake *archiveMinIO) objectValue(key string) ([]byte, bool) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	content, exists := fake.objects[key]
+	return append([]byte(nil), content...), exists
+}
+
+func (fake *archiveMinIO) exists(key string) bool {
+	_, exists := fake.objectValue(key)
+	return exists
+}
+
+func (fake *archiveMinIO) setObject(key string, content []byte) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	fake.objects[key] = append([]byte(nil), content...)
+}
+
+func statementSnapshot(source string, content []byte) application.StatementSnapshot {
+	digest := sha256.Sum256(content)
+	return application.StatementSnapshot{
+		SourceName: source,
+		SHA256:     fmt.Sprintf("%x", digest),
+		Content:    append([]byte(nil), content...),
+	}
+}
+
+func objectETag(content []byte) string {
+	digest := sha256.Sum256(content)
+	return fmt.Sprintf("%x", digest)
+}
+
+func writeObjectError(writer http.ResponseWriter, status int, code string) {
+	writer.Header().Set("Content-Type", "application/xml")
+	writer.WriteHeader(status)
+	_, _ = writer.Write([]byte(`<Error><Code>` + code + `</Code></Error>`))
+}
+
 func (fake *fakeMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	fake.mu.Lock()
 	fake.recorded = append(fake.recorded, recordedRequest{
 		method: request.Method, path: request.URL.Path, query: request.URL.Query(),
 	})
 	fake.mu.Unlock()
-	if request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, ".csv") {
+	if (request.Method == http.MethodHead || request.Method == http.MethodGet) &&
+		strings.HasSuffix(request.URL.Path, ".csv") {
 		writer.Header().Set("Content-Length", fmt.Sprint(len(fake.content)))
 		writer.Header().Set("ETag", `"synthetic"`)
 		writer.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
-		_, _ = writer.Write(fake.content)
+		if request.Method == http.MethodGet {
+			_, _ = writer.Write(fake.content)
+		}
 		return
 	}
 	writer.Header().Set("Content-Type", "application/xml")

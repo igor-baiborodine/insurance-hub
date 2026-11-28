@@ -5,8 +5,13 @@ import (
 	"encoding/csv"
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 	"time"
+)
+
+var statementSourceName = regexp.MustCompile(
+	`\AbankStatements_[1-9][0-9]{3}_(?:[1-9]|1[0-2])_(?:[1-9]|[12][0-9]|3[01])\.csv\z`,
 )
 
 var (
@@ -36,6 +41,11 @@ type StatementCredit struct {
 type BankStatement struct {
 	Snapshot StatementSnapshot
 	Credits  []StatementCredit
+}
+
+// ValidStatementSourceName reports the accepted unpadded UTC daily object-key shape.
+func ValidStatementSourceName(sourceName string) bool {
+	return len(sourceName) <= 255 && statementSourceName.MatchString(sourceName)
 }
 
 // ParseBankStatement validates a complete headered RFC 4180 statement before returning credits.

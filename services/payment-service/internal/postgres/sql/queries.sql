@@ -41,6 +41,11 @@ FROM public.statement_receipt
 WHERE source_name = sqlc.arg(source_name)
 ORDER BY id;
 
+-- name: GetStatementReceipt :one
+SELECT id, state
+FROM public.statement_receipt
+WHERE source_name = sqlc.arg(source_name) AND sha256 = sqlc.arg(sha256);
+
 -- name: FindPolicyAccountID :one
 SELECT id
 FROM public.policy_account
@@ -49,6 +54,13 @@ WHERE policy_account_number = sqlc.arg(account_number);
 -- name: InsertStatementReceipt :one
 INSERT INTO public.statement_receipt (source_name, sha256, state)
 VALUES (sqlc.arg(source_name), sqlc.arg(sha256), sqlc.arg(state))
+RETURNING id, state;
+
+-- name: ArchiveStatementReceipt :one
+UPDATE public.statement_receipt
+SET state = 'archived', updated_at = CURRENT_TIMESTAMP
+WHERE id = sqlc.arg(id) AND source_name = sqlc.arg(source_name)
+    AND sha256 = sqlc.arg(sha256) AND state = 'posted'
 RETURNING id, state;
 
 -- name: InsertStatementCredit :exec

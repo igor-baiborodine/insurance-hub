@@ -219,8 +219,8 @@ test-integration: ## Run service composition and disposable PostgreSQL/Kafka smo
 		mkdir -p "$(dir $(INTEGRATION_COVERAGE_FILE))"; \
 	fi
 	GOWORK=off $(GO) test -mod=readonly -count=1 -race -tags=integration \
-		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction|PaymentStatementPosting|PaymentRegistrationWorker)$$' \
-		./internal/service ./internal/administration ./internal/postgres ./internal/testing \
+		-run '^TestRun_(ProductionComposition.*|PaymentMigrationFreshTarget|PaymentWriterAccess|PaymentAccountReads|PaymentRegistrationTransaction|PaymentStatementPosting|PaymentStatementArchiveRecovery|PaymentRegistrationWorker)$$' \
+		./internal/service ./internal/administration ./internal/postgres ./internal/objectstore ./internal/testing \
 		$(if $(strip $(INTEGRATION_COVERAGE_FILE)),-covermode=atomic -coverprofile="$(INTEGRATION_COVERAGE_FILE)")
 
 shared-fast-build:

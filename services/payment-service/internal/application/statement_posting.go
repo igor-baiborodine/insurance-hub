@@ -62,7 +62,7 @@ func (postings *StatementPostings) Post(
 }
 
 func validStatementIdentity(snapshot StatementSnapshot) bool {
-	if snapshot.SourceName == "" || len(snapshot.SourceName) > 255 ||
+	if !ValidStatementSourceName(snapshot.SourceName) ||
 		len(snapshot.SHA256) != 64 {
 		return false
 	}

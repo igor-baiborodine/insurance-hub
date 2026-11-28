@@ -75,7 +75,11 @@ func TestStatementPostings_Post_RejectsInvalidIdentityAndPreservesStoreFailure(t
 	}
 	for _, statement := range []BankStatement{
 		{},
-		{Snapshot: StatementSnapshot{SourceName: "statement.csv", SHA256: "UPPER" +
+		{Snapshot: StatementSnapshot{
+			SourceName: "../bankStatements_2018_8_2.csv",
+			SHA256:     strings.Repeat("a", 64),
+		}},
+		{Snapshot: StatementSnapshot{SourceName: "bankStatements_2018_8_2.csv", SHA256: "UPPER" +
 			strings.Repeat("a", 59)}},
 	} {
 		// when

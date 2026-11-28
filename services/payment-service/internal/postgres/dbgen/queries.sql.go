@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveStatementReceipt = `-- name: ArchiveStatementReceipt :one
+UPDATE public.statement_receipt
+SET state = 'archived', updated_at = CURRENT_TIMESTAMP
+WHERE id = $1 AND source_name = $2
+    AND sha256 = $3 AND state = 'posted'
+RETURNING id, state
+`
+
+type ArchiveStatementReceiptParams struct {
+	ID         int64
+	SourceName string
+	Sha256     string
+}
+
+type ArchiveStatementReceiptRow struct {
+	ID    int64
+	State string
+}
+
+func (q *Queries) ArchiveStatementReceipt(ctx context.Context, arg ArchiveStatementReceiptParams) (ArchiveStatementReceiptRow, error) {
+	row := q.db.QueryRow(ctx, archiveStatementReceipt, arg.ID, arg.SourceName, arg.Sha256)
+	var i ArchiveStatementReceiptRow
+	err := row.Scan(&i.ID, &i.State)
+	return i, err
+}
+
 const findPolicyAccountID = `-- name: FindPolicyAccountID :one
 SELECT id
 FROM public.policy_account
@@ -62,6 +88,29 @@ func (q *Queries) GetAccountBalance(ctx context.Context, arg GetAccountBalancePa
 		&i.Updated,
 		&i.Balance,
 	)
+	return i, err
+}
+
+const getStatementReceipt = `-- name: GetStatementReceipt :one
+SELECT id, state
+FROM public.statement_receipt
+WHERE source_name = $1 AND sha256 = $2
+`
+
+type GetStatementReceiptParams struct {
+	SourceName string
+	Sha256     string
+}
+
+type GetStatementReceiptRow struct {
+	ID    int64
+	State string
+}
+
+func (q *Queries) GetStatementReceipt(ctx context.Context, arg GetStatementReceiptParams) (GetStatementReceiptRow, error) {
+	row := q.db.QueryRow(ctx, getStatementReceipt, arg.SourceName, arg.Sha256)
+	var i GetStatementReceiptRow
+	err := row.Scan(&i.ID, &i.State)
 	return i, err
 }
 

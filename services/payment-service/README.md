@@ -357,9 +357,9 @@ and use the repository's shared non-runtime Go Make tooling.
 | Gateway, request observation and limits | `internal/gateway`, `internal/grpc`, `internal/telemetry/request.go` | Generated account gateway, strict HTTP shapes, fixed account operations, bounded transport signals and configurable HTTP/gRPC limits. |
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL-, MinIO- and worker-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT`, the bounded `SELECT 1` readiness check and Payment-owned atomic statement receipt/credit writes. |
-| Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, a dial bound, a one-key list read check on `payments-import`, one bounded statement snapshot read and idle-connection release on shutdown. |
+| Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, bounded statement snapshots, create-only processed objects, digest verification, conditional source deletion and idle-connection release on shutdown. |
 | Kafka | Dashboard `internal/kafka` and composition | The same TLS trust and bounded CA file. Metadata-only mode joins no group. Explicit consuming mode validates stable committed positions for group `payment-service`, handles one registration at a time and commits only after durable success. |
-| Business architecture | Product application-owned catalog ports and injected adapters | Account reads, policy registration and bank-statement posting are application-owned use cases over PostgreSQL ports; transport and storage remain replaceable adapters. |
+| Business architecture | Product application-owned catalog ports and injected adapters | Account reads, policy registration and bank-statement posting/archive recovery are application-owned use cases over PostgreSQL and object ports; transport and storage remain replaceable adapters. |
 
 
 Review this adaptation map whenever Product changes an operational foundation. Adopt compatible
@@ -372,8 +372,8 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `cmd/server` | Load validated settings, create identity logger, install safe enabled diagnostics, own signals/exit. |
 | `internal/service` | Construct the one provider, dependency clients, three listeners, owned gateway connection and servers; own dependency-aware readiness, partial-start rollback and ordered drain. |
 | `cmd/migrate`, `internal/administration` | Operator-run `migrate`/`status` against one protected target enrollment: target identity checks, an advisory lock, the versioned schema and its history in one transaction, and exact schema inspection. |
-| `internal/application` | Account-list, current-UTC-business-date balance, idempotent policy-registration and whole-file bank-statement validation/posting use cases plus their storage ports and classified failures. |
-| `internal/postgres`, `internal/objectstore` | sqlc-backed account reads, atomic registration/debit and statement receipt/credit writes on the verified PostgreSQL writer pool, the readiness query, the separate verified migrator connection, and bounded `payments-import` checks and statement snapshots. |
+| `internal/application` | Account-list, current-UTC-business-date balance, idempotent policy-registration and whole-file bank-statement validation, posting and archive-recovery use cases plus their storage ports and classified failures. |
+| `internal/postgres`, `internal/objectstore` | sqlc-backed account reads, atomic registration/debit and statement receipt/credit state transitions on the verified PostgreSQL writer pool, plus bounded `payments-import` snapshots and digest-guarded processed-copy/source reconciliation. |
 | `internal/kafka` | TLS registration-topic metadata client and opt-in group worker with stable-progress preflight, strict event decoding and commit-after-storage ordering. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Payment registration, account projection, request validation, deadlines, size limits, safe status mapping and final-status observation. |
@@ -431,6 +431,8 @@ readiness and drains accepted HTTP work before connection and gRPC teardown, the
 management and MinIO idle connections, stops the worker without a final commit, closes the
 PostgreSQL pool and finally telemetry within the shared deadline.
 
-The C07 statement path currently validates one bounded snapshot and commits its review or posted
-outcome through the application-owned PostgreSQL port. It remains unstarted in the serving process
-until the isolated scheduler and lifecycle composition are added in the planned worker step.
+The C07 statement path validates one bounded snapshot, commits its review or posted outcome, then
+creates or verifies the matching processed object, removes only matching source bytes and advances
+the receipt to archived. Matching retries can resume from the source or processed copy without new
+credits. The path remains unstarted in the serving process until the isolated scheduler and
+lifecycle composition are added in the planned worker step.

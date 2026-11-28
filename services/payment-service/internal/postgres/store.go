@@ -269,6 +269,97 @@ func (store *Store) StoreStatement(
 	return result, resultErr
 }
 
+// ResumeStatement returns only a matching durable posting or completed archive.
+func (store *Store) ResumeStatement(
+	ctx context.Context,
+	snapshot application.StatementSnapshot,
+) (result application.StatementReceipt, resultErr error) {
+	resultErr = store.readOnly(ctx, func(queries *dbgen.Queries) error {
+		row, err := queries.GetStatementReceipt(
+			ctx,
+			dbgen.GetStatementReceiptParams{
+				SourceName: snapshot.SourceName,
+				Sha256:     snapshot.SHA256,
+			},
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrStatementConflict
+		}
+		if err != nil {
+			return fmt.Errorf("resume bank statement receipt: %w", err)
+		}
+		result, err = statementReceipt(row.ID, row.State)
+		if err != nil {
+			return err
+		}
+		if result.State == application.StatementReview {
+			return application.ErrStatementConflict
+		}
+		return nil
+	})
+	if resultErr != nil {
+		return application.StatementReceipt{}, resultErr
+	}
+	return result, nil
+}
+
+// ArchiveStatement advances the matching posted receipt after object reconciliation.
+func (store *Store) ArchiveStatement(
+	ctx context.Context,
+	receipt application.StatementReceipt,
+	snapshot application.StatementSnapshot,
+) (result application.StatementReceipt, resultErr error) {
+	resultErr = store.write(ctx, func(queries *dbgen.Queries) error {
+		if err := queries.LockStatementSource(ctx, snapshot.SourceName); err != nil {
+			return fmt.Errorf("lock bank statement source: %w", err)
+		}
+		row, err := queries.GetStatementReceipt(
+			ctx,
+			dbgen.GetStatementReceiptParams{
+				SourceName: snapshot.SourceName,
+				Sha256:     snapshot.SHA256,
+			},
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrStatementConflict
+		}
+		if err != nil {
+			return fmt.Errorf("read bank statement receipt: %w", err)
+		}
+		current, err := statementReceipt(row.ID, row.State)
+		if err != nil {
+			return err
+		}
+		if current.ID != receipt.ID || current.State == application.StatementReview {
+			return application.ErrStatementConflict
+		}
+		if current.State == application.StatementArchived {
+			result = current
+			return nil
+		}
+		archived, err := queries.ArchiveStatementReceipt(
+			ctx,
+			dbgen.ArchiveStatementReceiptParams{
+				ID:         current.ID,
+				SourceName: snapshot.SourceName,
+				Sha256:     snapshot.SHA256,
+			},
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrStatementConflict
+		}
+		if err != nil {
+			return fmt.Errorf("archive bank statement receipt: %w", err)
+		}
+		result, err = statementReceipt(archived.ID, archived.State)
+		return err
+	})
+	if resultErr != nil {
+		return application.StatementReceipt{}, resultErr
+	}
+	return result, nil
+}
+
 func insertStatementReceipt(
 	ctx context.Context,
 	queries *dbgen.Queries,
