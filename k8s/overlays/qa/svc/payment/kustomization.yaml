@@ -28,6 +28,7 @@ configMapGenerator:
       - MINIO_CA_FILE=/etc/payment-service/minio/ca.crt
       - MINIO_BUCKET=payments-import
       - MINIO_FETCH_TIMEOUT=3s
+      - STATEMENT_IMPORT_INTERVAL=8h
       - KAFKA_BROKERS=qa-kafka-kafka-bootstrap.qa-data.svc:9093
       - KAFKA_REGISTERED_TOPIC=policy-registered
       - KAFKA_CA_FILE=/etc/payment-service/kafka/ca.crt

@@ -46,6 +46,12 @@ SELECT id, state
 FROM public.statement_receipt
 WHERE source_name = sqlc.arg(source_name) AND sha256 = sqlc.arg(sha256);
 
+-- name: ListPostedStatementSources :many
+SELECT source_name
+FROM public.statement_receipt
+WHERE state = 'posted'
+ORDER BY id;
+
 -- name: FindPolicyAccountID :one
 SELECT id
 FROM public.policy_account

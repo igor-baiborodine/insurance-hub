@@ -18,27 +18,29 @@ const canonicalVersionReason = "must use git- followed by 12 lowercase hexadecim
 	"characters with at least one nonzero character outside development"
 
 const (
-	databaseURLSetting      = "PAYMENT_DATABASE_URL"
-	databaseMaxConnsSetting = "DB_MAX_CONNS"
-	databaseConnectSetting  = "DB_CONNECT_TIMEOUT"
-	databaseQuerySetting    = "DB_QUERY_TIMEOUT"
-	startupTimeoutSetting   = "STARTUP_TIMEOUT"
-	objectEndpointSetting   = "MINIO_ENDPOINT"
-	objectAccessKeySetting  = "MINIO_ACCESS_KEY"
-	objectSecretKeySetting  = "MINIO_SECRET_KEY"
-	objectCAFileSetting     = "MINIO_CA_FILE"
-	objectBucketSetting     = "MINIO_BUCKET"
-	objectFetchTimeout      = "MINIO_FETCH_TIMEOUT"
-	objectStatementMaxBytes = "MINIO_MAX_STATEMENT_BYTES"
-	kafkaBrokersSetting     = "KAFKA_BROKERS"
-	eventWorkersSetting     = "EVENT_WORKERS_ENABLED"
-	kafkaGroupSetting       = "KAFKA_GROUP"
-	kafkaRegisteredSetting  = "KAFKA_REGISTERED_TOPIC"
-	kafkaCAFileSetting      = "KAFKA_CA_FILE"
-	defaultBucket           = "payments-import"
-	defaultRegisteredTopic  = "policy-registered"
-	defaultKafkaGroup       = "payment-service"
-	defaultStatementBytes   = 1024 * 1024
+	databaseURLSetting       = "PAYMENT_DATABASE_URL"
+	databaseMaxConnsSetting  = "DB_MAX_CONNS"
+	databaseConnectSetting   = "DB_CONNECT_TIMEOUT"
+	databaseQuerySetting     = "DB_QUERY_TIMEOUT"
+	startupTimeoutSetting    = "STARTUP_TIMEOUT"
+	objectEndpointSetting    = "MINIO_ENDPOINT"
+	objectAccessKeySetting   = "MINIO_ACCESS_KEY"
+	objectSecretKeySetting   = "MINIO_SECRET_KEY"
+	objectCAFileSetting      = "MINIO_CA_FILE"
+	objectBucketSetting      = "MINIO_BUCKET"
+	objectFetchTimeout       = "MINIO_FETCH_TIMEOUT"
+	objectStatementMaxBytes  = "MINIO_MAX_STATEMENT_BYTES"
+	statementImportsSetting  = "STATEMENT_IMPORTS_ENABLED"
+	statementIntervalSetting = "STATEMENT_IMPORT_INTERVAL"
+	kafkaBrokersSetting      = "KAFKA_BROKERS"
+	eventWorkersSetting      = "EVENT_WORKERS_ENABLED"
+	kafkaGroupSetting        = "KAFKA_GROUP"
+	kafkaRegisteredSetting   = "KAFKA_REGISTERED_TOPIC"
+	kafkaCAFileSetting       = "KAFKA_CA_FILE"
+	defaultBucket            = "payments-import"
+	defaultRegisteredTopic   = "policy-registered"
+	defaultKafkaGroup        = "payment-service"
+	defaultStatementBytes    = 1024 * 1024
 )
 
 // Database holds the Payment runtime connection and pool limits.
@@ -78,6 +80,12 @@ type ObjectStore struct {
 	MaximumStatementBytes int
 }
 
+// StatementImports controls the isolated daily statement scheduler.
+type StatementImports struct {
+	Enabled  bool
+	Interval time.Duration
+}
+
 // Kafka holds the broker discovery and trust for the registration topic.
 type Kafka struct {
 	Consume         bool
@@ -89,10 +97,11 @@ type Kafka struct {
 
 // Config contains settings parsed and validated once during process startup.
 type Config struct {
-	Database       Database
-	ObjectStore    ObjectStore
-	Kafka          Kafka
-	StartupTimeout time.Duration
+	Database         Database
+	ObjectStore      ObjectStore
+	StatementImports StatementImports
+	Kafka            Kafka
+	StartupTimeout   time.Duration
 	kitconfig.Runtime
 	kitconfig.GRPC
 	kitconfig.HTTPServer
@@ -335,6 +344,10 @@ func load(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	statementImports, err := loadStatementImports(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	kafka, err := loadKafka(lookup)
 	if err != nil {
 		return Config{}, err
@@ -343,6 +356,7 @@ func load(lookup lookupEnv) (Config, error) {
 	return Config{
 		Database:           database,
 		ObjectStore:        objectStore,
+		StatementImports:   statementImports,
 		Kafka:              kafka,
 		StartupTimeout:     startupTimeout,
 		Runtime:            runtime,
@@ -356,6 +370,26 @@ func load(lookup lookupEnv) (Config, error) {
 		HTTPMaxBodyBytes:   maxBodyBytes,
 		Telemetry:          telemetry,
 	}, nil
+}
+
+func loadStatementImports(lookup lookupEnv) (StatementImports, error) {
+	enabledValue, err := kitconfig.ValueOrDefault(lookup, statementImportsSetting, "false")
+	if err != nil {
+		return StatementImports{}, err
+	}
+	enabled, err := kitconfig.ParseBool(statementImportsSetting, enabledValue)
+	if err != nil {
+		return StatementImports{}, err
+	}
+	interval, err := kitconfig.LoadPositiveDuration(
+		lookup,
+		statementIntervalSetting,
+		(8 * time.Hour).String(),
+	)
+	if err != nil {
+		return StatementImports{}, err
+	}
+	return StatementImports{Enabled: enabled, Interval: interval}, nil
 }
 
 func loadDatabase(lookup lookupEnv) (Database, error) {

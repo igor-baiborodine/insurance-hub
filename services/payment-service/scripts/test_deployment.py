@@ -368,6 +368,19 @@ def test_render_scopes_the_payment_minio_reader(environment: str, defect: str) -
         payment.validate_render(environment, yaml.safe_dump_all(items.values()))
 
 
+@pytest.mark.parametrize("environment,interval", [("local-dev", "3m"), ("qa", "8h")])
+def test_render_keeps_statement_schedule_isolated_and_inactive(
+    environment: str, interval: str
+) -> None:
+    # given / when
+    items = payment.validate_render(environment, payment.render(environment))
+
+    # then
+    data = items["ConfigMap"]["data"]
+    assert data["STATEMENT_IMPORTS_ENABLED"] == "false"
+    assert data["STATEMENT_IMPORT_INTERVAL"] == interval
+
+
 @pytest.mark.parametrize("environment", ["local-dev", "qa"])
 def test_service_specific_namespace_is_rejected(
     monkeypatch: pytest.MonkeyPatch, environment: str

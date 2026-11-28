@@ -303,6 +303,22 @@ func (store *Store) ResumeStatement(
 	return result, nil
 }
 
+// PostedStatementSources lists durable postings that still require archive reconciliation.
+func (store *Store) PostedStatementSources(ctx context.Context) (
+	result []string,
+	resultErr error,
+) {
+	resultErr = store.readOnly(ctx, func(queries *dbgen.Queries) error {
+		items, err := queries.ListPostedStatementSources(ctx)
+		if err != nil {
+			return fmt.Errorf("list posted bank statement receipts: %w", err)
+		}
+		result = append(result, items...)
+		return nil
+	})
+	return result, resultErr
+}
+
 // ArchiveStatement advances the matching posted receipt after object reconciliation.
 func (store *Store) ArchiveStatement(
 	ctx context.Context,

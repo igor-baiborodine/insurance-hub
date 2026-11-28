@@ -40,6 +40,7 @@ import (
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/config"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/gateway"
 	transport "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/grpc"
+	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/importer"
 	paymentkafka "github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/kafka"
 	"github.com/igor-baiborodine/insurance-hub/services/payment-service/internal/postgres"
 )
@@ -203,7 +204,7 @@ func TestRun_ProductionCompositionJoinsDependenciesToReadinessButNotLiveness(t *
 		}
 		return nil
 	}
-	deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+	deps.newObjectStore = func(config.ObjectStore) (statementObjectStore, error) {
 		return objectStore, nil
 	}
 	var workerSettings paymentkafka.Settings
@@ -329,6 +330,85 @@ func TestRun_ConsumingModeStartsAndStopsRegistrationWorkerBeforePool(t *testing.
 	}
 }
 
+func TestRun_StatementModeStartsAndStopsImporterBeforeSharedClients(t *testing.T) {
+	// given
+	settings := testConfig(t)
+	settings.StatementImports.Enabled = true
+	settings.StatementImports.Interval = 3 * time.Minute
+	pool := &fakePool{}
+	objectsReady := &atomic.Bool{}
+	objectsReady.Store(true)
+	objects := &fakeManagedDependency{ready: objectsReady}
+	worker := &fakeEventWorker{shutdownCheck: func() error {
+		if pool.closed.Load() || objects.closed.Load() {
+			return errors.New("shared client closed before statement importer")
+		}
+		return nil
+	}}
+	deps := testDependencies()
+	deps.openPool = func(context.Context, config.Database) (databasePool, error) {
+		return pool, nil
+	}
+	deps.newObjectStore = func(config.ObjectStore) (statementObjectStore, error) {
+		return objects, nil
+	}
+	var workerSettings importer.Settings
+	deps.newStatementWorker = func(
+		settings importer.Settings,
+		catalog importer.SourceCatalog,
+		posted importer.PostedSourceReader,
+		imports importer.StatementImporter,
+	) (eventWorker, error) {
+		workerSettings = settings
+		if catalog == nil || posted == nil || imports == nil {
+			t.Fatal("statement importer omitted a composed dependency")
+		}
+		return worker, nil
+	}
+	addresses := make(chan string, 3)
+	deps.listen = func(network, address string) (net.Listener, error) {
+		listener, err := net.Listen(network, address)
+		if err == nil {
+			addresses <- listener.Addr().String()
+		}
+		return listener, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- run(ctx, settings, discardLogger(), deps) }()
+	_, _ = receiveString(t, addresses), receiveString(t, addresses)
+	healthAddress := receiveString(t, addresses)
+	waitForHTTPStatus(
+		t,
+		&http.Client{Timeout: time.Second},
+		"http://"+healthAddress+"/readyz",
+		http.StatusOK,
+	)
+
+	// when
+	cancel()
+	err := receiveError(t, result, "statement service did not stop")
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workerSettings.Interval != 3*time.Minute || workerSettings.Now == nil ||
+		workerSettings.Observe == nil {
+		t.Fatalf("statement worker settings = %+v", workerSettings)
+	}
+	if !worker.preflighted.Load() || worker.running.Load() || !worker.shutdown.Load() {
+		t.Fatalf(
+			"statement lifecycle = preflight:%t running:%t shutdown:%t",
+			worker.preflighted.Load(),
+			worker.running.Load(),
+			worker.shutdown.Load(),
+		)
+	}
+	if !pool.closed.Load() || !objects.closed.Load() {
+		t.Fatal("shared clients remained open after statement importer shutdown")
+	}
+}
+
 func TestRun_ProductionCompositionRefusesUnverifiedDependenciesAndReleasesEarlierOnes(
 	t *testing.T,
 ) {
@@ -391,7 +471,7 @@ func TestRun_ProductionCompositionRefusesUnverifiedDependenciesAndReleasesEarlie
 			deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
 				return test.checkErr
 			}
-			deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+			deps.newObjectStore = func(config.ObjectStore) (statementObjectStore, error) {
 				if test.objectStoreErr != nil {
 					return nil, test.objectStoreErr
 				}
@@ -1060,6 +1140,7 @@ func testConfig(t *testing.T) config.Config {
 			Bucket:       "payments-import",
 			FetchTimeout: time.Second,
 		},
+		StatementImports: config.StatementImports{Interval: 8 * time.Hour},
 		Kafka: config.Kafka{
 			Brokers: []string{
 				"kafka.example:9093",
@@ -1080,7 +1161,7 @@ func testDependencies() dependencies {
 	deps.checkDatabase = func(context.Context, postgres.QueryRower, time.Duration) error {
 		return nil
 	}
-	deps.newObjectStore = func(config.ObjectStore) (managedDependency, error) {
+	deps.newObjectStore = func(config.ObjectStore) (statementObjectStore, error) {
 		ready := &atomic.Bool{}
 		ready.Store(true)
 		return &fakeManagedDependency{ready: ready}, nil
@@ -1167,6 +1248,34 @@ func (dependency *fakeManagedDependency) Check(context.Context) error {
 }
 
 func (dependency *fakeManagedDependency) Close() { dependency.closed.Store(true) }
+
+func (*fakeManagedDependency) ReadStatement(
+	context.Context,
+	string,
+) (application.StatementSnapshot, error) {
+	return application.StatementSnapshot{}, application.ErrStatementNotFound
+}
+
+func (*fakeManagedDependency) ReadProcessedStatement(
+	context.Context,
+	string,
+) (application.StatementSnapshot, error) {
+	return application.StatementSnapshot{}, application.ErrStatementNotFound
+}
+
+func (*fakeManagedDependency) ArchiveStatement(
+	context.Context,
+	application.StatementSnapshot,
+) error {
+	return nil
+}
+
+func (*fakeManagedDependency) DiscoverStatements(
+	context.Context,
+	time.Time,
+) ([]string, error) {
+	return nil, nil
+}
 
 type fakeEventWorker struct {
 	preflighted   atomic.Bool

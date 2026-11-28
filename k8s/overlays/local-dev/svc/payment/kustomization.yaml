@@ -24,6 +24,7 @@ configMapGenerator:
       - DB_QUERY_TIMEOUT=1s
       - MINIO_BUCKET=payments-import
       - MINIO_FETCH_TIMEOUT=3s
+      - STATEMENT_IMPORT_INTERVAL=3m
       - KAFKA_BROKERS=local-dev-kafka-kafka-bootstrap:9093
       - KAFKA_REGISTERED_TOPIC=policy-registered
       - KAFKA_CA_FILE=/etc/payment-service/kafka/ca.crt

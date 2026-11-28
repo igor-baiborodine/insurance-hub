@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -45,7 +47,44 @@ type BankStatement struct {
 
 // ValidStatementSourceName reports the accepted unpadded UTC daily object-key shape.
 func ValidStatementSourceName(sourceName string) bool {
-	return len(sourceName) <= 255 && statementSourceName.MatchString(sourceName)
+	_, valid := StatementSourceDate(sourceName)
+	return valid
+}
+
+// StatementSourceName returns the unpadded UTC daily key for a business date.
+func StatementSourceName(businessDate time.Time) string {
+	date := businessDate.UTC()
+	return fmt.Sprintf(
+		"bankStatements_%d_%d_%d.csv",
+		date.Year(),
+		date.Month(),
+		date.Day(),
+	)
+}
+
+// StatementSourceDate parses and validates an unpadded daily statement key.
+func StatementSourceDate(sourceName string) (time.Time, bool) {
+	if len(sourceName) > 255 || !statementSourceName.MatchString(sourceName) {
+		return time.Time{}, false
+	}
+	parts := strings.Split(strings.TrimSuffix(
+		strings.TrimPrefix(sourceName, "bankStatements_"),
+		".csv",
+	), "_")
+	if len(parts) != 3 {
+		return time.Time{}, false
+	}
+	year, yearErr := strconv.Atoi(parts[0])
+	month, monthErr := strconv.Atoi(parts[1])
+	day, dayErr := strconv.Atoi(parts[2])
+	if yearErr != nil || monthErr != nil || dayErr != nil {
+		return time.Time{}, false
+	}
+	date := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	if date.Year() != year || date.Month() != time.Month(month) || date.Day() != day {
+		return time.Time{}, false
+	}
+	return date, true
 }
 
 // ParseBankStatement validates a complete headered RFC 4180 statement before returning credits.

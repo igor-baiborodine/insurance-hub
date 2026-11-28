@@ -75,11 +75,32 @@ func New(t *testing.T, ctx context.Context) *Fixture {
 	if err != nil {
 		t.Fatal("create disposable MinIO client")
 	}
-	if err := client.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{}); err != nil {
-		t.Fatal("create disposable payments-import bucket:", err)
-	}
+	makeBucket(t, ctx, client)
 	return &Fixture{
 		Client: client, Endpoint: fmt.Sprintf("http://%s", endpoint),
 		AccessKey: accessKey, SecretKey: secretKey,
+	}
+}
+
+func makeBucket(t *testing.T, ctx context.Context, client *minio.Client) {
+	t.Helper()
+	readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err := client.MakeBucket(readyCtx, bucketName, minio.MakeBucketOptions{})
+		if err == nil {
+			return
+		}
+		response := minio.ToErrorResponse(err)
+		if response.Code != "XMinioServerNotInitialized" && response.StatusCode != 503 {
+			t.Fatal("create disposable payments-import bucket:", err)
+		}
+		select {
+		case <-readyCtx.Done():
+			t.Fatal("create disposable payments-import bucket:", readyCtx.Err())
+		case <-ticker.C:
+		}
 	}
 }

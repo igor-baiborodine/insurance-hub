@@ -268,6 +268,33 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 	return items, nil
 }
 
+const listPostedStatementSources = `-- name: ListPostedStatementSources :many
+SELECT source_name
+FROM public.statement_receipt
+WHERE state = 'posted'
+ORDER BY id
+`
+
+func (q *Queries) ListPostedStatementSources(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPostedStatementSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var source_name string
+		if err := rows.Scan(&source_name); err != nil {
+			return nil, err
+		}
+		items = append(items, source_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStatementReceipts = `-- name: ListStatementReceipts :many
 SELECT id, sha256, state
 FROM public.statement_receipt

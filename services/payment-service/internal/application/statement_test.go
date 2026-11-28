@@ -41,6 +41,36 @@ func TestParseBankStatement_PreservesLegacyCreditAndEqualRows(t *testing.T) {
 	}
 }
 
+func TestStatementSourceName_RoundTripsValidUTCDate(t *testing.T) {
+	// given
+	businessDate := time.Date(
+		2018,
+		time.August,
+		2,
+		23,
+		30,
+		0,
+		0,
+		time.FixedZone("west", -4*60*60),
+	)
+
+	// when
+	name := StatementSourceName(businessDate)
+	parsed, valid := StatementSourceDate(name)
+
+	// then
+	if name != "bankStatements_2018_8_3.csv" || !valid ||
+		!parsed.Equal(time.Date(2018, time.August, 3, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("statement source = (%q, %v, %t)", name, parsed, valid)
+	}
+}
+
+func TestStatementSourceDate_RejectsInvalidCalendarDate(t *testing.T) {
+	if _, valid := StatementSourceDate("bankStatements_2026_2_29.csv"); valid {
+		t.Fatal("invalid calendar date accepted")
+	}
+}
+
 func TestParseBankStatement_RejectsWholeInvalidFileWithoutExposingRows(t *testing.T) {
 	// given
 	header := "TransactionId,TransactionType,AccountingDate,AccountNumber,Amount\r\n"

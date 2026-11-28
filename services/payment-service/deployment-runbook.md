@@ -7,6 +7,7 @@
   - [Flux-owned QA](#flux-owned-qa)
   - [Private verification and recovery](#private-verification-and-recovery)
     - [Registration worker activation and held records](#registration-worker-activation-and-held-records)
+    - [Statement importer qualification](#statement-importer-qualification)
   - [Dependency access](#dependency-access)
     - [PostgreSQL login](#postgresql-login)
     - [MinIO reader](#minio-reader)
@@ -205,6 +206,26 @@ do not delete, edit, skip or manually commit the held offset. Resolve the source
 condition through a reviewed change, leave the committed position unchanged, and restart so the
 same record is retried. Escalate an uncertain commit for broker/database comparison before any
 operator action because the database write may already be durable.
+
+### Statement importer qualification
+
+Current local-dev and QA manifests intentionally leave `STATEMENT_IMPORTS_ENABLED=false` while
+Java owns the serving bank-statement schedule. They still bind the candidate interval explicitly:
+local-dev uses `STATEMENT_IMPORT_INTERVAL=3m` and QA uses `8h`. Do not enable the Go schedule before
+the separately reviewed C09 workload transfer.
+
+The Payment integration target qualifies the composed scheduler only against disposable
+PostgreSQL and a disposable MinIO tenant whose isolated bucket is named `payments-import`. It
+controls the UTC clock, overlaps a tick, crosses midnight, resumes earlier sources and posted
+receipts, and drains the worker without reaching local-dev, QA or Java-owned files:
+
+```bash
+make -C services/payment-service test-integration
+```
+
+Use only the bounded `bank statement import completed` outcomes `idle`, `archived`, `review`,
+`posted_awaiting_archive` and `dependency_failure` for diagnosis. Logs, metrics and traces omit
+object keys, statement rows, account identifiers, amounts and underlying dependency messages.
 
 For source, image, Flux and transport problems, start with
 `make go-svc-deploy-status SVC_NAME=payment` and compare the Flux source and applied revisions,

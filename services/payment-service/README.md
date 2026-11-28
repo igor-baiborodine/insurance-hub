@@ -107,7 +107,7 @@ require `bootstrap-tools` to have been run explicitly.
 | `make lint`                 | golangci-lint over `./...`, including tests and vet-equivalent analysis; generated, vendor, third-party, fixture, and tool paths are excluded by configuration.                                                                                                            | Verified tools; readonly modules.                                                                                                                                                  |
 | `make test`                 | Every package under `./...`, including `cmd/server`, generated consumers, configuration, transport, health, logging, service lifecycle, and telemetry.                                                                                                                     | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make test-race`            | The same complete package/test scope as `test`, with race instrumentation.                                                                                                                                                                                                 | Go 1.27.4, readonly modules, and a C compiler.                                                                                                                                     |
-| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus account list/detail, registration transaction/replay and worker recovery, schema migration, status and writer-access checks against owned disposable TLS PostgreSQL and Kafka containers. The worker smoke uses group `payment-service-qualification`; it never uses a configured deployment environment or the serving group. `check-go-pr` writes the profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, OpenSSL, readonly modules, a C compiler and the cached pinned PostgreSQL/Kafka images or registry access. |
+| `make test-integration`     | Race-enabled production-composition tests on loopback listeners, plus account list/detail, registration transaction/replay, Kafka worker recovery and scheduled statement recovery, schema migration, status and writer-access checks against owned disposable TLS PostgreSQL, MinIO and Kafka containers. The Kafka smoke uses group `payment-service-qualification`; the statement smoke uses synthetic accounts and an isolated `payments-import` bucket. Neither uses a configured deployment environment, Java-owned files or the serving group. `check-go-pr` writes the profile to `integration-coverage.txt`; `check` writes both coverage profiles to a disposable directory. | Go 1.27.4, Docker, OpenSSL, readonly modules, a C compiler and the cached pinned PostgreSQL/MinIO/Kafka images or registry access. |
 | `make build`                | Every package under `./...` and the `server` and `migrate` executables, with build output in a removed temporary directory.                                                                                                                                                                | Go 1.27.4; readonly modules.                                                                                                                                                       |
 | `make vulncheck`            | Reachability-aware analysis of every package under `./...`.                                                                                                                                                                                                                | Verified govulncheck; access to `vuln.go.dev` unless cached.                                                                                                                       |
 | `make check`                | In order: tool/configuration verification, Go and Protobuf format checks, Go and Protobuf lint, race tests with the 75% coverage gate, real-listener integration coverage, build, dependency reproduction, generation drift/reproducibility, compatibility, and vulnerability analysis. It does not repeat the equivalent non-race suite. | All prerequisites and network access inherited from its checks. It never installs tools, formats, tidies, regenerates real output, updates baselines, starts services, or deploys. |
@@ -206,6 +206,8 @@ do not repeat its supplied value.
 | `MINIO_CA_FILE` | required for HTTPS | CA bundle used with hostname verification; insecure TLS is unavailable. |
 | `MINIO_FETCH_TIMEOUT` | `3s` | Positive duration bounding each object-store connection attempt. |
 | `MINIO_MAX_STATEMENT_BYTES` | `1048576` | Integer from 1 through 8388608; bounds one statement snapshot before parsing and hashing. |
+| `STATEMENT_IMPORTS_ENABLED` | `false` | Boolean. The checked-in local-dev and QA workloads keep the Go schedule inactive until C09 transfers ownership from Java. |
+| `STATEMENT_IMPORT_INTERVAL` | `8h` | Positive duration. Local-dev binds `3m`; QA binds `8h`. The worker runs one immediate tick, then serializes interval ticks. |
 | `KAFKA_BROKERS` | required | Comma-separated TLS `host:port` bootstrap addresses. |
 | `EVENT_WORKERS_ENABLED` | `false` | Boolean. The default performs metadata-only Kafka checks and joins no group. `true` explicitly enables registration consumption. |
 | `KAFKA_GROUP` | `payment-service` when event workers are enabled; otherwise unset | Consuming mode accepts only the serving group `payment-service`. Supplying this setting while workers are disabled is rejected. |
@@ -358,6 +360,7 @@ and use the repository's shared non-runtime Go Make tooling.
 | Health and lifecycle | `servicekit/health`, `internal/service/service.go` | Channel-, PostgreSQL-, MinIO- and worker-aware readiness, three listener ownership, HTTP-first drain and bounded ordered cleanup. |
 | PostgreSQL | Policy `internal/postgres/pool.go` and composition | The same pgx writer pool: verified TLS, pinned writer login, `search_path=pg_catalog`, startup ping within `DB_CONNECT_TIMEOUT`, the bounded `SELECT 1` readiness check and Payment-owned atomic statement receipt/credit writes. |
 | Object storage | Document `internal/objectstore/reader.go` and composition | The same path-style MinIO client with system roots plus the configured CA, bounded statement snapshots, create-only processed objects, digest verification, conditional source deletion and idle-connection release on shutdown. |
+| Statement scheduling | Dashboard worker lifecycle and composition | One process-owned, non-overlapping worker resumes posted receipts before date-ordered UTC discovery. Local-dev and QA keep it disabled while disposable qualification uses synthetic accounts and the isolated `payments-import` bucket. |
 | Kafka | Dashboard `internal/kafka` and composition | The same TLS trust and bounded CA file. Metadata-only mode joins no group. Explicit consuming mode validates stable committed positions for group `payment-service`, handles one registration at a time and commits only after durable success. |
 | Business architecture | Product application-owned catalog ports and injected adapters | Account reads, policy registration and bank-statement posting/archive recovery are application-owned use cases over PostgreSQL and object ports; transport and storage remain replaceable adapters. |
 
@@ -375,10 +378,11 @@ fixes with behavior tests and update intentional differences explicitly through 
 | `internal/application` | Account-list, current-UTC-business-date balance, idempotent policy-registration and whole-file bank-statement validation, posting and archive-recovery use cases plus their storage ports and classified failures. |
 | `internal/postgres`, `internal/objectstore` | sqlc-backed account reads, atomic registration/debit and statement receipt/credit state transitions on the verified PostgreSQL writer pool, plus bounded `payments-import` snapshots and digest-guarded processed-copy/source reconciliation. |
 | `internal/kafka` | TLS registration-topic metadata client and opt-in group worker with stable-progress preflight, strict event decoding and commit-after-storage ordering. |
+| `internal/importer` | One non-overlapping UTC scheduler that resumes durable postings from processed objects, discovers eligible source keys through the current business date, and emits bounded tick outcomes. |
 | `internal/gateway` | Strict HTTP contract, generated client registration, safe status mapping, metadata policy and HTTP telemetry. |
 | `internal/grpc` | Generated Payment registration, account projection, request validation, deadlines, size limits, safe status mapping and final-status observation. |
 | `internal/config` | Compose shared setting groups, load the environment and apply service identity and cross-setting policy. |
-| `internal/logger`, `internal/telemetry` | Completion-log and bounded account/event signal contracts; shared provider construction with local policy and metric views. Registration signals expose only event type, bounded outcome, duration and worker state through `insurance_hub.payment.events`, `insurance_hub.payment.event.duration`, `insurance_hub.payment.event.commit.failures`, `insurance_hub.payment.event.worker.enabled` and `insurance_hub.payment.event.worker.in_flight_age`. |
+| `internal/logger`, `internal/telemetry` | Completion-log and bounded account/event/statement signal contracts; shared provider construction with local policy and metric views. Statement diagnostics expose only `idle`, `archived`, `review`, `posted_awaiting_archive` or `dependency_failure`, duration and worker state; they omit keys, rows, accounts and amounts. |
 | `servicekit/config`, `servicekit/identity`, `servicekit/logger`, `servicekit/health`, `servicekit/telemetry` | Published shared settings, identity fields, parsing, safe logs, probes and SDK resource ownership. |
 | `api/payment/v1`, `gen/payment/v1`, `gen/openapiv2/payment/v1` | Editable protobuf/HTTP contract and generated Go, gateway and Swagger output; compatibility baseline remains separate. |
 
@@ -401,11 +405,17 @@ flowchart TD
     composition --> postgres["internal/postgres"]
     composition --> objectstore["internal/objectstore"]
     composition --> kafka["internal/kafka"]
+    composition --> importer["internal/importer"]
     postgres --> config
     objectstore --> config
     grpc --> telemetry
     grpc --> application["internal/application"]
     application --> postgres
+    application --> objectstore
+    importer --> application
+    importer --> postgres
+    importer --> objectstore
+    importer --> telemetry
     grpc --> generated["gen/payment/v1"]
     gateway --> generated
     telemetry --> config
@@ -417,10 +427,11 @@ flowchart TD
 ```
 
 At startup, composition opens and checks PostgreSQL and MinIO, reads the Kafka CA and configures
-either the metadata client or the explicitly enabled registration worker, binds all listeners,
-starts gRPC, derives the same-process client target from the bound address and waits for that
-channel, PostgreSQL, MinIO and Kafka to be ready. Consuming mode starts only after its committed
-positions pass preflight.
+either the metadata client or the explicitly enabled registration worker. It also constructs the
+statement scheduler only when explicitly enabled, binds all listeners, starts gRPC, derives the
+same-process client target from the bound address and waits for that channel, PostgreSQL, MinIO,
+Kafka and enabled workers to be ready. Consuming mode starts only after its committed positions
+pass preflight; statement scheduling stays inactive in checked-in local-dev and QA workloads.
 Each acquired client is registered for cleanup before the next is constructed, so a partial
 startup releases what it already opened. An HTTP account read obtains a bounded HTTP server span,
 uses the generated client across the instrumented connection, obtains client and server spans,

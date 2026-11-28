@@ -135,6 +135,39 @@ func TestReader_CheckReadAccess_StalledServerFailsAtCallerDeadline(t *testing.T)
 	}
 }
 
+func TestReader_DiscoverStatements_ReturnsEligibleDailySourcesInDateOrder(t *testing.T) {
+	// given
+	fake := &fakeMinIO{keys: []string{
+		"bankStatements_2018_8_3.csv",
+		"_processed_bankStatements_2018_8_1.csv",
+		"bankStatements_2018_8_2.csv",
+		"_processed_bankStatements_2018_8_2.csv",
+		"bankStatements_2018_8_4.csv",
+		"unrelated.csv",
+	}}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	reader := newTestReader(t, settingsFor(t, server.URL, nil))
+
+	// when
+	sources, err := reader.DiscoverStatements(
+		t.Context(),
+		time.Date(2018, time.August, 3, 23, 59, 0, 0, time.FixedZone("west", -4*60*60)),
+	)
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"bankStatements_2018_8_2.csv",
+		"bankStatements_2018_8_3.csv",
+		"bankStatements_2018_8_4.csv",
+	}
+	if fmt.Sprint(sources) != fmt.Sprint(want) {
+		t.Fatalf("sources = %v, want %v", sources, want)
+	}
+}
+
 func TestReader_ReadStatement_CapturesOneBoundedSnapshotAndDigest(t *testing.T) {
 	// given
 	content := []byte("header\r\naccepted,bytes\r\n")
@@ -282,6 +315,7 @@ type fakeMinIO struct {
 	mu       sync.Mutex
 	recorded []recordedRequest
 	content  []byte
+	keys     []string
 }
 
 type archiveMinIO struct {
@@ -444,6 +478,20 @@ func (fake *fakeMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 		_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +
 			`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
 			`</LocationConstraint>`))
+		return
+	}
+	if request.URL.Query().Get("list-type") == "2" {
+		var contents strings.Builder
+		for _, key := range fake.keys {
+			contents.WriteString("<Contents><Key>")
+			contents.WriteString(key)
+			contents.WriteString("</Key><Size>1</Size></Contents>")
+		}
+		_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+			`<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
+			`<Name>payments-import</Name><KeyCount>` + fmt.Sprint(len(fake.keys)) +
+			`</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated>` +
+			contents.String() + `</ListBucketResult>`))
 		return
 	}
 	_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +

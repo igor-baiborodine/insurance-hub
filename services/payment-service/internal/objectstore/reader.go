@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -116,6 +117,9 @@ func (reader *Reader) Close() {
 	}
 }
 
+// Check verifies the required read boundary for service readiness.
+func (reader *Reader) Check(ctx context.Context) error { return reader.CheckReadAccess(ctx) }
+
 // CheckReadAccess performs a bounded non-mutating list against the payments-import bucket.
 func (reader *Reader) CheckReadAccess(ctx context.Context) error {
 	if reader == nil || reader.client == nil {
@@ -140,6 +144,66 @@ func (reader *Reader) CheckReadAccess(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// DiscoverStatements lists eligible source identities through the supplied UTC business date.
+func (reader *Reader) DiscoverStatements(
+	ctx context.Context,
+	businessDate time.Time,
+) ([]string, error) {
+	if reader == nil || reader.client == nil {
+		return nil, application.ErrStatementUnavailable
+	}
+	deadline := time.Date(
+		businessDate.UTC().Year(),
+		businessDate.UTC().Month(),
+		businessDate.UTC().Day(),
+		0,
+		0,
+		0,
+		0,
+		time.UTC,
+	)
+	listCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	defer cancel()
+	dates := make(map[string]time.Time)
+	for item := range reader.client.ListObjects(
+		listCtx,
+		reader.bucket,
+		minio.ListObjectsOptions{Recursive: true},
+	) {
+		if item.Err != nil {
+			if err := listCtx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, application.ErrStatementUnavailable
+		}
+		if strings.HasPrefix(item.Key, "_processed_") {
+			continue
+		}
+		sourceName := item.Key
+		date, valid := application.StatementSourceDate(sourceName)
+		if !valid || date.After(deadline) {
+			continue
+		}
+		dates[sourceName] = date
+	}
+	if err := listCtx.Err(); err != nil {
+		return nil, err
+	}
+	sources := make([]string, 0, len(dates))
+	for sourceName := range dates {
+		sources = append(sources, sourceName)
+	}
+	sort.Slice(sources, func(left, right int) bool {
+		leftDate := dates[sources[left]]
+		rightDate := dates[sources[right]]
+		if leftDate.Equal(rightDate) {
+			return sources[left] < sources[right]
+		}
+		return leftDate.Before(rightDate)
+	})
+	return sources, nil
 }
 
 // ReadStatement captures and hashes one bounded source object without retrying the payload read.
