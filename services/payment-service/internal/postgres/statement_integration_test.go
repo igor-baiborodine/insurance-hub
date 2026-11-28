@@ -5,6 +5,7 @@ package postgres_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -143,6 +144,56 @@ func TestRun_PaymentStatementPosting(t *testing.T) {
 			t.Fatalf("retry after commit failure = (%+v, %v)", receipt, retryErr)
 		}
 		assertReceiptFacts(t, ctx, fixture, statement, "posted", 1, "10.21")
+	})
+
+	t.Run("matching durable posting resumes and archives once", func(t *testing.T) {
+		// given
+		statement := parsedStatement(t, "bankStatements_2018_8_6.csv",
+			"6,A,2018-08-01,"+knownAccount+",10.21\r\n")
+		posted, err := postings.Post(ctx, statement)
+		if err != nil || posted.State != application.StatementPosted {
+			t.Fatalf("post recovery statement = (%+v, %v)", posted, err)
+		}
+
+		// when
+		resumed, err := store.ResumeStatement(ctx, statement.Snapshot)
+		if err != nil || resumed != posted {
+			t.Fatalf("resume recovery statement = (%+v, %v), want %+v", resumed, err, posted)
+		}
+		archived, err := store.ArchiveStatement(ctx, resumed, statement.Snapshot)
+
+		// then
+		if err != nil || archived.ID != posted.ID ||
+			archived.State != application.StatementArchived {
+			t.Fatalf("archive recovery statement = (%+v, %v)", archived, err)
+		}
+		resumed, err = store.ResumeStatement(ctx, statement.Snapshot)
+		if err != nil || resumed != archived {
+			t.Fatalf("resume archived statement = (%+v, %v), want %+v", resumed, err, archived)
+		}
+		archivedAgain, err := store.ArchiveStatement(ctx, archived, statement.Snapshot)
+		if err != nil || archivedAgain != archived {
+			t.Fatalf("archive replay = (%+v, %v), want %+v", archivedAgain, err, archived)
+		}
+		assertReceiptFacts(t, ctx, fixture, statement, "archived", 1, "10.21")
+
+		missing := statement.Snapshot
+		missing.SHA256 = fmt.Sprintf("%064x", 1)
+		if _, err := store.ResumeStatement(ctx, missing); !errors.Is(
+			err,
+			application.ErrStatementConflict,
+		) {
+			t.Fatalf("resume missing digest error = %v", err)
+		}
+		wrongReceipt := archived
+		wrongReceipt.ID++
+		if _, err := store.ArchiveStatement(
+			ctx,
+			wrongReceipt,
+			statement.Snapshot,
+		); !errors.Is(err, application.ErrStatementConflict) {
+			t.Fatalf("archive mismatched receipt error = %v", err)
+		}
 	})
 }
 
