@@ -106,6 +106,7 @@ func NewReader(settings config.ObjectStore) (*Reader, error) {
 		settings.SecretKey.Value(),
 		client,
 		&http.Client{Transport: transport},
+		settings.FetchTimeout,
 	)
 	return reader, nil
 }
@@ -234,9 +235,7 @@ func (reader *Reader) readObject(
 	key string,
 	sourceName string,
 ) (application.StatementSnapshot, error) {
-	fetchCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
-	defer cancel()
-	snapshot, _, err := reader.readObjectWithETag(fetchCtx, key)
+	snapshot, _, err := reader.readObjectWithETag(ctx, key)
 	if err != nil {
 		return application.StatementSnapshot{}, err
 	}
@@ -253,12 +252,10 @@ func (reader *Reader) ArchiveStatement(
 		!validSnapshot(snapshot) {
 		return application.ErrStatementInvalid
 	}
-	archiveCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
-	defer cancel()
-	if err := reader.ensureProcessed(archiveCtx, snapshot); err != nil {
+	if err := reader.ensureProcessed(ctx, snapshot); err != nil {
 		return err
 	}
-	return reader.removeSource(archiveCtx, snapshot)
+	return reader.removeSource(ctx, snapshot)
 }
 
 func (reader *Reader) ensureProcessed(
@@ -275,14 +272,16 @@ func (reader *Reader) ensureProcessed(
 	}
 	options := minio.PutObjectOptions{ContentType: "text/csv", SendContentMd5: true}
 	options.SetMatchETagExcept("*")
+	putCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
 	_, putErr := reader.client.PutObject(
-		ctx,
+		putCtx,
 		reader.bucket,
 		key,
 		bytes.NewReader(snapshot.Content),
 		int64(len(snapshot.Content)),
 		options,
 	)
+	cancel()
 	processed, readErr := reader.readObject(ctx, key, snapshot.SourceName)
 	if readErr == nil {
 		return matchingDigest(processed, snapshot.SHA256)
@@ -328,10 +327,19 @@ func (reader *Reader) readObjectWithETag(
 	ctx context.Context,
 	key string,
 ) (application.StatementSnapshot, string, error) {
-	info, err := reader.client.StatObject(ctx, reader.bucket, key, minio.StatObjectOptions{})
+	statCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	info, err := reader.client.StatObject(
+		statCtx,
+		reader.bucket,
+		key,
+		minio.StatObjectOptions{},
+	)
 	if err != nil {
-		return application.StatementSnapshot{}, "", objectReadError(ctx, err)
+		readErr := objectReadError(statCtx, err)
+		cancel()
+		return application.StatementSnapshot{}, "", readErr
 	}
+	cancel()
 	if info.ETag == "" {
 		return application.StatementSnapshot{}, "", application.ErrStatementUnavailable
 	}
@@ -339,9 +347,11 @@ func (reader *Reader) readObjectWithETag(
 	if err := options.SetMatchETag(info.ETag); err != nil {
 		return application.StatementSnapshot{}, "", application.ErrStatementUnavailable
 	}
-	object, err := reader.client.GetObject(ctx, reader.bucket, key, options)
+	getCtx, cancel := context.WithTimeout(ctx, reader.fetchTimeout)
+	defer cancel()
+	object, err := reader.client.GetObject(getCtx, reader.bucket, key, options)
 	if err != nil {
-		return application.StatementSnapshot{}, "", objectReadError(ctx, err)
+		return application.StatementSnapshot{}, "", objectReadError(getCtx, err)
 	}
 	defer func() { _ = object.Close() }()
 	content, err := io.ReadAll(io.LimitReader(
@@ -349,7 +359,7 @@ func (reader *Reader) readObjectWithETag(
 		int64(reader.maximumStatementBytes)+1,
 	))
 	if err != nil {
-		return application.StatementSnapshot{}, "", objectReadError(ctx, err)
+		return application.StatementSnapshot{}, "", objectReadError(getCtx, err)
 	}
 	if len(content) > reader.maximumStatementBytes {
 		return application.StatementSnapshot{}, "", application.ErrStatementLimit
@@ -398,9 +408,12 @@ func newConditionalDelete(
 	secretKey string,
 	client minioClient,
 	httpClient *http.Client,
+	fetchTimeout time.Duration,
 ) conditionalDelete {
 	return func(ctx context.Context, key string, etag string) error {
-		location, err := client.GetBucketLocation(ctx, bucket)
+		locationCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+		location, err := client.GetBucketLocation(locationCtx, bucket)
+		cancel()
 		if err != nil {
 			return application.ErrStatementUnavailable
 		}
@@ -410,8 +423,10 @@ func newConditionalDelete(
 		target := *endpoint
 		target.Path = strings.TrimSuffix(target.Path, "/") + "/" + bucket + "/" + key
 		target.RawPath = ""
+		deleteCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+		defer cancel()
 		request, err := http.NewRequestWithContext(
-			ctx,
+			deleteCtx,
 			http.MethodDelete,
 			target.String(),
 			nil,

@@ -290,6 +290,65 @@ func TestReader_ArchiveStatement_UsesConditionalCreationAndDeletion(t *testing.T
 	})
 }
 
+func TestReader_ArchiveStatement_BoundsEachOperationIndependently(t *testing.T) {
+	// given
+	accepted := []byte("accepted statement bytes")
+	const source = "bankStatements_2018_8_2.csv"
+	fake := newArchiveMinIO(source, accepted)
+	fake.delay = 120 * time.Millisecond
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	settings := settingsFor(t, server.URL, nil)
+	settings.FetchTimeout = 300 * time.Millisecond
+	reader := newTestReader(t, settings)
+	started := time.Now()
+
+	// when
+	err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+	// then
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed <= settings.FetchTimeout {
+		t.Fatalf(
+			"archive completed in %v, want multiple independently bounded calls",
+			elapsed,
+		)
+	}
+	if fake.exists(source) ||
+		!bytes.Equal(fake.object(processedName(source)), accepted) {
+		t.Fatal("matching source was not archived after individually bounded calls")
+	}
+}
+
+func TestReader_ArchiveStatement_StopsStalledOperation(t *testing.T) {
+	// given
+	accepted := []byte("accepted statement bytes")
+	const source = "bankStatements_2018_8_2.csv"
+	fake := newArchiveMinIO(source, accepted)
+	fake.delay = 500 * time.Millisecond
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	settings := settingsFor(t, server.URL, nil)
+	settings.FetchTimeout = 50 * time.Millisecond
+	reader := newTestReader(t, settings)
+	started := time.Now()
+
+	// when
+	err := reader.ArchiveStatement(t.Context(), statementSnapshot(source, accepted))
+
+	// then
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("archive error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled archive took %v, want a bounded failure", elapsed)
+	}
+	if !fake.exists(source) || fake.exists(processedName(source)) {
+		t.Fatal("stalled operation changed archive objects")
+	}
+}
+
 func TestNewReader_RejectsMissingTrust(t *testing.T) {
 	// given
 	settings := settingsFor(t, "https://127.0.0.1:9000", nil)
@@ -321,6 +380,7 @@ type fakeMinIO struct {
 type archiveMinIO struct {
 	mu             sync.Mutex
 	objects        map[string][]byte
+	delay          time.Duration
 	beforePut      func(string)
 	beforeDelete   func()
 	putIfNoneMatch string
@@ -332,6 +392,15 @@ func newArchiveMinIO(source string, content []byte) *archiveMinIO {
 }
 
 func (fake *archiveMinIO) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if fake.delay > 0 {
+		timer := time.NewTimer(fake.delay)
+		defer timer.Stop()
+		select {
+		case <-request.Context().Done():
+			return
+		case <-timer.C:
+		}
+	}
 	if request.URL.Query().Has("location") {
 		writer.Header().Set("Content-Type", "application/xml")
 		_, _ = writer.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>` +
