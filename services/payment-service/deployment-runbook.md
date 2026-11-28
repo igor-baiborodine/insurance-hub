@@ -209,15 +209,14 @@ operator action because the database write may already be durable.
 
 ### Statement importer qualification
 
-Current local-dev and QA manifests intentionally leave `STATEMENT_IMPORTS_ENABLED=false` while
-Java owns the serving bank-statement schedule. They still bind the candidate interval explicitly:
-local-dev uses `STATEMENT_IMPORT_INTERVAL=3m` and QA uses `8h`. Do not enable the Go schedule before
-the separately reviewed C09 workload transfer.
+Current local-dev and QA manifests intentionally leave `STATEMENT_IMPORTS_ENABLED=false`. They bind
+the candidate interval explicitly: local-dev uses `STATEMENT_IMPORT_INTERVAL=3m` and QA uses `8h`.
+Enable the statement schedule only through a reviewed workload change.
 
 The Payment integration target qualifies the composed scheduler only against disposable
 PostgreSQL and a disposable MinIO tenant whose isolated bucket is named `payments-import`. It
 controls the UTC clock, overlaps a tick, crosses midnight, resumes earlier sources and posted
-receipts, and drains the worker without reaching local-dev, QA or Java-owned files:
+receipts, and drains the worker without reaching configured deployment buckets or scheduled files:
 
 ```bash
 make -C services/payment-service test-integration

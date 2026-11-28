@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-func TestParseBankStatement_PreservesLegacyCreditAndEqualRows(t *testing.T) {
+func TestParseBankStatement_PreservesKnownCreditAndEqualRows(t *testing.T) {
 	// given
 	content := "TransactionId,TransactionType,AccountingDate,AccountNumber,Amount\r\n" +
-		"\"legacy,known\",A,2018-08-01,231232132131,10.21\r\n" +
+		"\"known,credit\",A,2018-08-01,231232132131,10.21\r\n" +
 		"2,A,2018-08-01,231232132131,10.21\r\n"
 	snapshot := StatementSnapshot{
 		SourceName: "bankStatements_2018_8_2.csv",
