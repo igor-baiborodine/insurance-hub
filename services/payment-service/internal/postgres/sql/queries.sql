@@ -30,6 +30,38 @@ VALUES (
     sqlc.arg(effective_date), sqlc.arg(amount)::text::numeric
 );
 
+-- name: LockStatementSource :exec
+SELECT pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(sqlc.arg(source_name)::text, 487)
+);
+
+-- name: ListStatementReceipts :many
+SELECT id, sha256, state
+FROM public.statement_receipt
+WHERE source_name = sqlc.arg(source_name)
+ORDER BY id;
+
+-- name: FindPolicyAccountID :one
+SELECT id
+FROM public.policy_account
+WHERE policy_account_number = sqlc.arg(account_number);
+
+-- name: InsertStatementReceipt :one
+INSERT INTO public.statement_receipt (source_name, sha256, state)
+VALUES (sqlc.arg(source_name), sqlc.arg(sha256), sqlc.arg(state))
+RETURNING id, state;
+
+-- name: InsertStatementCredit :exec
+INSERT INTO public.accounting_entry (
+    policy_account_id, kind, creation_date, effective_date, amount,
+    statement_receipt_id
+)
+VALUES (
+    sqlc.arg(policy_account_id), 'in_payment', sqlc.arg(creation_date),
+    sqlc.arg(effective_date), sqlc.arg(amount)::text::numeric,
+    sqlc.arg(statement_receipt_id)
+);
+
 -- name: GetAccountBalance :one
 SELECT a.policy_account_number, a.policy_number, a.created, a.updated,
     COALESCE(SUM(CASE e.kind

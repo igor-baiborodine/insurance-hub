@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const findPolicyAccountID = `-- name: FindPolicyAccountID :one
+SELECT id
+FROM public.policy_account
+WHERE policy_account_number = $1
+`
+
+func (q *Queries) FindPolicyAccountID(ctx context.Context, accountNumber string) (int64, error) {
+	row := q.db.QueryRow(ctx, findPolicyAccountID, accountNumber)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getAccountBalance = `-- name: GetAccountBalance :one
 SELECT a.policy_account_number, a.policy_number, a.created, a.updated,
     COALESCE(SUM(CASE e.kind
@@ -114,6 +127,61 @@ func (q *Queries) InsertPolicyAccount(ctx context.Context, arg InsertPolicyAccou
 	return id, err
 }
 
+const insertStatementCredit = `-- name: InsertStatementCredit :exec
+INSERT INTO public.accounting_entry (
+    policy_account_id, kind, creation_date, effective_date, amount,
+    statement_receipt_id
+)
+VALUES (
+    $1, 'in_payment', $2,
+    $3, $4::text::numeric,
+    $5
+)
+`
+
+type InsertStatementCreditParams struct {
+	PolicyAccountID    int64
+	CreationDate       pgtype.Date
+	EffectiveDate      pgtype.Date
+	Amount             string
+	StatementReceiptID pgtype.Int8
+}
+
+func (q *Queries) InsertStatementCredit(ctx context.Context, arg InsertStatementCreditParams) error {
+	_, err := q.db.Exec(ctx, insertStatementCredit,
+		arg.PolicyAccountID,
+		arg.CreationDate,
+		arg.EffectiveDate,
+		arg.Amount,
+		arg.StatementReceiptID,
+	)
+	return err
+}
+
+const insertStatementReceipt = `-- name: InsertStatementReceipt :one
+INSERT INTO public.statement_receipt (source_name, sha256, state)
+VALUES ($1, $2, $3)
+RETURNING id, state
+`
+
+type InsertStatementReceiptParams struct {
+	SourceName string
+	Sha256     string
+	State      string
+}
+
+type InsertStatementReceiptRow struct {
+	ID    int64
+	State string
+}
+
+func (q *Queries) InsertStatementReceipt(ctx context.Context, arg InsertStatementReceiptParams) (InsertStatementReceiptRow, error) {
+	row := q.db.QueryRow(ctx, insertStatementReceipt, arg.SourceName, arg.Sha256, arg.State)
+	var i InsertStatementReceiptRow
+	err := row.Scan(&i.ID, &i.State)
+	return i, err
+}
+
 const listAccounts = `-- name: ListAccounts :many
 SELECT policy_account_number, policy_number, created, updated
 FROM public.policy_account
@@ -149,6 +217,50 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listStatementReceipts = `-- name: ListStatementReceipts :many
+SELECT id, sha256, state
+FROM public.statement_receipt
+WHERE source_name = $1
+ORDER BY id
+`
+
+type ListStatementReceiptsRow struct {
+	ID     int64
+	Sha256 string
+	State  string
+}
+
+func (q *Queries) ListStatementReceipts(ctx context.Context, sourceName string) ([]ListStatementReceiptsRow, error) {
+	rows, err := q.db.Query(ctx, listStatementReceipts, sourceName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatementReceiptsRow{}
+	for rows.Next() {
+		var i ListStatementReceiptsRow
+		if err := rows.Scan(&i.ID, &i.Sha256, &i.State); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockStatementSource = `-- name: LockStatementSource :exec
+SELECT pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended($1::text, 487)
+)
+`
+
+func (q *Queries) LockStatementSource(ctx context.Context, sourceName string) error {
+	_, err := q.db.Exec(ctx, lockStatementSource, sourceName)
+	return err
 }
 
 const registrationMatches = `-- name: RegistrationMatches :one

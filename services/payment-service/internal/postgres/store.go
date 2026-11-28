@@ -170,6 +170,139 @@ func (store *Store) StoreRegistration(
 	})
 }
 
+// StoreStatement records one review outcome or atomically posts every accepted credit.
+func (store *Store) StoreStatement(
+	ctx context.Context,
+	statement application.BankStatement,
+	creationDate time.Time,
+) (result application.StatementReceipt, resultErr error) {
+	resultErr = store.write(ctx, func(queries *dbgen.Queries) error {
+		if err := queries.LockStatementSource(
+			ctx,
+			statement.Snapshot.SourceName,
+		); err != nil {
+			return fmt.Errorf("lock bank statement source: %w", err)
+		}
+		receipts, err := queries.ListStatementReceipts(ctx, statement.Snapshot.SourceName)
+		if err != nil {
+			return fmt.Errorf("read bank statement receipts: %w", err)
+		}
+		for _, receipt := range receipts {
+			if receipt.Sha256 == statement.Snapshot.SHA256 {
+				result, err = statementReceipt(receipt.ID, receipt.State)
+				return err
+			}
+		}
+		if len(receipts) > 0 {
+			result, err = insertStatementReceipt(
+				ctx,
+				queries,
+				statement,
+				application.StatementReview,
+			)
+			return err
+		}
+
+		accountIDs := make(map[string]int64, len(statement.Credits))
+		unknownAccount := false
+		for _, credit := range statement.Credits {
+			if _, resolved := accountIDs[credit.AccountNumber]; resolved {
+				continue
+			}
+			accountID, findErr := queries.FindPolicyAccountID(ctx, credit.AccountNumber)
+			if errors.Is(findErr, pgx.ErrNoRows) {
+				unknownAccount = true
+				continue
+			}
+			if findErr != nil {
+				return fmt.Errorf("resolve bank statement account: %w", findErr)
+			}
+			accountIDs[credit.AccountNumber] = accountID
+		}
+		if unknownAccount {
+			result, err = insertStatementReceipt(
+				ctx,
+				queries,
+				statement,
+				application.StatementReview,
+			)
+			return err
+		}
+
+		result, err = insertStatementReceipt(
+			ctx,
+			queries,
+			statement,
+			application.StatementPosted,
+		)
+		if err != nil {
+			return err
+		}
+		for _, credit := range statement.Credits {
+			if err := queries.InsertStatementCredit(
+				ctx,
+				dbgen.InsertStatementCreditParams{
+					PolicyAccountID: accountIDs[credit.AccountNumber],
+					CreationDate: pgtype.Date{
+						Time:  creationDate,
+						Valid: true,
+					},
+					EffectiveDate: pgtype.Date{
+						Time:  credit.EffectiveDate,
+						Valid: true,
+					},
+					Amount: credit.Amount,
+					StatementReceiptID: pgtype.Int8{
+						Int64: result.ID,
+						Valid: true,
+					},
+				},
+			); err != nil {
+				return fmt.Errorf("insert bank statement credit: %w", err)
+			}
+		}
+		return nil
+	})
+	if resultErr != nil {
+		return application.StatementReceipt{}, resultErr
+	}
+	return result, resultErr
+}
+
+func insertStatementReceipt(
+	ctx context.Context,
+	queries *dbgen.Queries,
+	statement application.BankStatement,
+	state application.StatementState,
+) (application.StatementReceipt, error) {
+	row, err := queries.InsertStatementReceipt(ctx, dbgen.InsertStatementReceiptParams{
+		SourceName: statement.Snapshot.SourceName,
+		Sha256:     statement.Snapshot.SHA256,
+		State:      string(state),
+	})
+	if err != nil {
+		return application.StatementReceipt{}, fmt.Errorf(
+			"insert bank statement receipt: %w",
+			err,
+		)
+	}
+	return statementReceipt(row.ID, row.State)
+}
+
+func statementReceipt(id int64, state string) (application.StatementReceipt, error) {
+	receipt := application.StatementReceipt{ID: id, State: application.StatementState(state)}
+	switch receipt.State {
+	case application.StatementReview,
+		application.StatementPosted,
+		application.StatementArchived:
+		return receipt, nil
+	default:
+		return application.StatementReceipt{}, errors.New(
+			"bank statement receipt state is invalid",
+		)
+	}
+}
+
 func (store *Store) readOnly(
 	ctx context.Context,
 	work func(*dbgen.Queries) error,
@@ -212,7 +345,7 @@ func (store *Store) write(
 		AccessMode: pgx.ReadWrite,
 	})
 	if err != nil {
-		return beginError(ctx, "begin Payment registration transaction", err)
+		return beginError(ctx, "begin Payment write transaction", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(
@@ -223,7 +356,7 @@ func (store *Store) write(
 		if err := tx.Rollback(cleanup); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 			resultErr = errors.Join(
 				resultErr,
-				fmt.Errorf("roll back Payment registration transaction: %w", err),
+				fmt.Errorf("roll back Payment write transaction: %w", err),
 			)
 		}
 	}()
@@ -231,7 +364,7 @@ func (store *Store) write(
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit Payment registration transaction: %w", err)
+		return fmt.Errorf("commit Payment write transaction: %w", err)
 	}
 	return nil
 }
