@@ -158,7 +158,12 @@ func TestRun_PaymentStatementPosting(t *testing.T) {
 		// when
 		resumed, err := store.ResumeStatement(ctx, statement.Snapshot)
 		if err != nil || resumed != posted {
-			t.Fatalf("resume recovery statement = (%+v, %v), want %+v", resumed, err, posted)
+			t.Fatalf(
+				"resume recovery statement = (%+v, %v), want %+v",
+				resumed,
+				err,
+				posted,
+			)
 		}
 		archived, err := store.ArchiveStatement(ctx, resumed, statement.Snapshot)
 
@@ -169,11 +174,21 @@ func TestRun_PaymentStatementPosting(t *testing.T) {
 		}
 		resumed, err = store.ResumeStatement(ctx, statement.Snapshot)
 		if err != nil || resumed != archived {
-			t.Fatalf("resume archived statement = (%+v, %v), want %+v", resumed, err, archived)
+			t.Fatalf(
+				"resume archived statement = (%+v, %v), want %+v",
+				resumed,
+				err,
+				archived,
+			)
 		}
 		archivedAgain, err := store.ArchiveStatement(ctx, archived, statement.Snapshot)
 		if err != nil || archivedAgain != archived {
-			t.Fatalf("archive replay = (%+v, %v), want %+v", archivedAgain, err, archived)
+			t.Fatalf(
+				"archive replay = (%+v, %v), want %+v",
+				archivedAgain,
+				err,
+				archived,
+			)
 		}
 		assertReceiptFacts(t, ctx, fixture, statement, "archived", 1, "10.21")
 
